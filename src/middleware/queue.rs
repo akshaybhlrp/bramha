@@ -9,6 +9,7 @@ pub struct InferenceTask {
     pub prompt: String,
     pub max_new_tokens: usize,
     pub temperature: f64,
+    pub device: Option<String>,
     pub workflow_id: Option<String>,
     pub branch_id: Option<String>,
     pub response_tx: oneshot::Sender<Result<InferenceResult, String>>,
@@ -32,28 +33,30 @@ impl InferenceQueue {
             max_depth,
         };
         (queue, rx)
-    }
+     }
 
-    /// Submits a task to the queue and awaits the result asynchronously from the worker
-    pub async fn submit(
-        &self,
-        model_name: String,
-        prompt: String,
-        max_new_tokens: usize,
-        temperature: f64,
-        workflow_id: Option<String>,
-        branch_id: Option<String>,
-    ) -> Result<InferenceResult, String> {
-        let (tx, rx) = oneshot::channel();
-        let task = InferenceTask {
-            model_name,
-            prompt,
-            max_new_tokens,
-            temperature,
-            workflow_id,
-            branch_id,
-            response_tx: tx,
-        };
+     /// Submits a task to the queue and awaits the result asynchronously from the worker
+     pub async fn submit(
+         &self,
+         model_name: String,
+         prompt: String,
+         max_new_tokens: usize,
+         temperature: f64,
+         device: Option<String>,
+         workflow_id: Option<String>,
+         branch_id: Option<String>,
+     ) -> Result<InferenceResult, String> {
+         let (tx, rx) = oneshot::channel();
+         let task = InferenceTask {
+             model_name,
+             prompt,
+             max_new_tokens,
+             temperature,
+             device,
+             workflow_id,
+             branch_id,
+             response_tx: tx,
+         };
 
         // Increment depth atomic
         self.queue_depth.fetch_add(1, Ordering::SeqCst);

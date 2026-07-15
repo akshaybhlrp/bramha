@@ -15,12 +15,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static CPU_ONLY: AtomicBool = AtomicBool::new(false);
 
+tokio::task_local! {
+    pub static CPU_ONLY_TASK: bool;
+}
+
 pub fn set_cpu_only(val: bool) {
     CPU_ONLY.store(val, Ordering::SeqCst);
 }
 
 pub fn is_cpu_only() -> bool {
-    CPU_ONLY.load(Ordering::SeqCst) || std::env::var("BRAMHA_CPU").is_ok()
+    CPU_ONLY_TASK.try_with(|val| *val).unwrap_or_else(|_| {
+        CPU_ONLY.load(Ordering::SeqCst) || std::env::var("BRAMHA_CPU").is_ok()
+    })
 }
 pub mod power;
 pub mod spanda_backend;

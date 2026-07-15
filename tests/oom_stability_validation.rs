@@ -107,7 +107,7 @@ mod tests {
                 // Submitting tasks directly to inference queue should succeed or fail cleanly with 429
                 let _ = db_clone
                     .inference_queue
-                    .submit("tinyllama".to_string(), prompt, 10, 0.0, None, None)
+                    .submit("tinyllama".to_string(), prompt, 10, 0.0, None, None, None)
                     .await;
             }));
         }

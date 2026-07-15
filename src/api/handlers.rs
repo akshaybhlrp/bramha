@@ -962,6 +962,7 @@ pub async fn llm_rag(
                         0.0,
                         None,
                         None,
+                        None,
                     )
                     .await
                 {
@@ -989,6 +990,7 @@ pub async fn llm_rag(
             augmented_prompt.clone(),
             payload.max_new_tokens,
             0.0,
+            None,
             None,
             None,
         )
@@ -1463,6 +1465,38 @@ pub async fn ingest_model(
         }
     }
 
+    // Canonicalize path and reject symlinks / workspace escape (S9b #15, #27)
+    let canonical = match path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("Invalid path: {}", e),
+            ));
+        }
+    };
+
+    let workspace = std::env::current_dir().unwrap_or_default();
+    if !canonical.starts_with(&workspace) {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            "Ingestion path must be within the project workspace".to_string(),
+        ));
+    }
+
+    let mut current = std::path::PathBuf::new();
+    for component in canonical.components() {
+        current.push(component);
+        if let Ok(meta) = std::fs::symlink_metadata(&current) {
+            if meta.file_type().is_symlink() {
+                return Err((
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "Symlinks are forbidden in ingestion paths".to_string(),
+                ));
+            }
+        }
+    }
+
     let task_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -1879,24 +1913,7 @@ pub async fn generate_text(
         ));
     }
 
-    let device = payload.device.clone().unwrap_or_else(|| "auto".to_string());
-    if device == "cpu" {
-        crate::inference::set_cpu_only(true);
-        unsafe {
-            std::env::set_var("SPANDA_OVERRIDE", "dense");
-        }
-    } else if device == "sparse" {
-        crate::inference::set_cpu_only(false);
-        unsafe {
-            std::env::set_var("SPANDA_OVERRIDE", "sparse");
-        }
-    } else {
-        crate::inference::set_cpu_only(false);
-        unsafe {
-            std::env::set_var("SPANDA_OVERRIDE", "dense");
-        }
-    }
-
+    let device = payload.device.clone();
     let start_time = std::time::Instant::now();
     let result = state
         .inference_queue
@@ -1905,6 +1922,7 @@ pub async fn generate_text(
             payload.prompt.clone(),
             max_tokens,
             temp,
+            device,
             payload.workflow_id.clone(),
             payload.branch_id.clone(),
         )
@@ -2088,6 +2106,7 @@ pub async fn benchmark_quantization(
             0.0,
             None,
             None,
+            None,
         )
         .await;
     let elapsed_f32 = start_f32.elapsed().as_secs_f64();
@@ -2176,24 +2195,7 @@ pub async fn generate_text_stream(
         ));
     }
 
-    let device = payload.device.clone().unwrap_or_else(|| "auto".to_string());
-    if device == "cpu" {
-        crate::inference::set_cpu_only(true);
-        unsafe {
-            std::env::set_var("SPANDA_OVERRIDE", "dense");
-        }
-    } else if device == "sparse" {
-        crate::inference::set_cpu_only(false);
-        unsafe {
-            std::env::set_var("SPANDA_OVERRIDE", "sparse");
-        }
-    } else {
-        crate::inference::set_cpu_only(false);
-        unsafe {
-            std::env::set_var("SPANDA_OVERRIDE", "dense");
-        }
-    }
-
+    let device = payload.device.clone();
     // 1. Submit heavy generation safely to queue
     let result = state
         .inference_queue
@@ -2202,6 +2204,7 @@ pub async fn generate_text_stream(
             payload.prompt.clone(),
             max_tokens,
             temp,
+            device,
             payload.workflow_id.clone(),
             payload.branch_id.clone(),
         )

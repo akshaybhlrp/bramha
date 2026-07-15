@@ -232,17 +232,39 @@ impl Database {
             if let Some(mut receiver) = rx {
                 println!("🧠 Bramha Background Inference Worker spawned successfully!");
                 while let Some(task) = receiver.recv().await {
-                    let result = crate::inference::engine::InferenceEngine::new(None)
-                        .generate(
-                            db_clone.clone(),
-                            &task.model_name,
-                            &task.prompt,
-                            task.max_new_tokens,
-                            task.temperature,
-                            task.workflow_id.clone(),
-                            task.branch_id.clone(),
-                        )
-                        .await;
+                    let cpu_only = if let Some(ref dev) = task.device {
+                        dev.to_lowercase() == "cpu"
+                    } else {
+                        let state_guard = db_clone.state.read().await;
+                        if let Some(meta) = state_guard.model_registry.get(&task.model_name) {
+                            meta.active_device.to_lowercase() == "cpu"
+                        } else {
+                            false
+                        }
+                    };
+
+                    let db_clone_inner = db_clone.clone();
+                    let task_model = task.model_name.clone();
+                    let task_prompt = task.prompt.clone();
+                    let task_max_tokens = task.max_new_tokens;
+                    let task_temp = task.temperature;
+                    let task_workflow = task.workflow_id.clone();
+                    let task_branch = task.branch_id.clone();
+
+                    let result_fut = crate::inference::CPU_ONLY_TASK.scope(cpu_only, async move {
+                        crate::inference::engine::InferenceEngine::new(None)
+                            .generate(
+                                db_clone_inner,
+                                &task_model,
+                                &task_prompt,
+                                task_max_tokens,
+                                task_temp,
+                                task_workflow,
+                                task_branch,
+                            )
+                            .await
+                    });
+                    let result = result_fut.await;
                     let _ = task.response_tx.send(result);
                 }
             }

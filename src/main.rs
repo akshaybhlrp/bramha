@@ -188,10 +188,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let shutdown_db = shared_db.clone();
     let shutdown_future = async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install CTRL+C signal handler");
-        println!("\n🛑 Shutting down server gracefully...");
+        let ctrl_c = tokio::signal::ctrl_c();
+        #[cfg(unix)]
+        let terminate = async {
+            use tokio::signal::unix::{signal, SignalKind};
+            if let Ok(mut stream) = signal(SignalKind::terminate()) {
+                stream.recv().await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {
+                println!("\n🛑 Received CTRL+C signal, shutting down...");
+            }
+            _ = terminate => {
+                println!("\n🛑 Received SIGTERM signal, shutting down...");
+            }
+        }
+        println!("🛑 Shutting down server gracefully...");
+
+        let start_drain = std::time::Instant::now();
+        println!("⏳ Draining inference queue...");
+        while shutdown_db.inference_queue.queue_depth() > 0 {
+            if start_drain.elapsed().as_secs() >= 30 {
+                println!("⚠️ Timeout reached draining inference queue. Forcing shutdown.");
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
         if let Err(e) = shutdown_db.save().await {
             eprintln!("⚠️ Failed to save database on shutdown: {}", e);
         } else {

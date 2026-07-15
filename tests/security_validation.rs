@@ -164,3 +164,38 @@ async fn test_generate_text_bounds() {
 
     let _ = std::fs::remove_file(db_path);
 }
+
+#[tokio::test]
+async fn test_ingest_model_symlink_rejection() {
+    let db_path = "storage/test_security_symlink.db";
+    let _ = std::fs::remove_file(db_path);
+
+    let db = Database::new(Some(db_path.to_string()), 1536);
+    let shared_db = Arc::new(db);
+    let app = create_router(shared_db);
+
+    let target_dir = "storage/symlink_target";
+    let symlink_path = "storage/symlink_link";
+    let _ = std::fs::create_dir_all(target_dir);
+    let _ = std::fs::remove_file(symlink_path);
+
+    #[cfg(unix)]
+    {
+        if std::os::unix::fs::symlink(target_dir, symlink_path).is_ok() {
+            let payload = json!({ "path": symlink_path });
+            let req = Request::builder()
+                .uri("/api/tensor/models/test_model")
+                .method("POST")
+                .header("Authorization", "Bearer write_key")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap();
+
+            let res = app.oneshot(req).await.unwrap();
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        }
+        let _ = std::fs::remove_file(symlink_path);
+    }
+    let _ = std::fs::remove_dir_all(target_dir);
+    let _ = std::fs::remove_file(db_path);
+}

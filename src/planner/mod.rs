@@ -1,5 +1,5 @@
-pub mod scheduler;
-pub mod policy;
+pub mod cluster;
 pub mod cost_model;
 pub mod optimizer;
-pub mod cluster;
+pub mod policy;
+pub mod scheduler;

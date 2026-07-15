@@ -2022,3 +2022,1153 @@ Bramha should eventually become all of the following at once:
 
 This is the target state:
 **one Rust-native system for local intelligence, from CPU-only laptops to heterogeneous clusters.**
+
+---
+
+## 29. Comprehensive Security, Architecture & Execution Plan (v3.2)
+
+> **Repository:** https://github.com/akshaybhlrp/bramha  
+> **Baseline:** 28,700 lines of production code, 137 lines of tests (0.47% coverage).  
+> **Date:** 2026-07-15  
+> **Status:** Production-hardened audit with executable artifacts.  
+> **Changelog v3.1 → v3.2:** Fixed 3 misattributed items after line-by-line repo verification.
+
+---
+
+### 29.1 Executive Summary
+
+This document is the definitive, consolidated hardening and architecture guide for the Bramha inference engine. It synthesizes:
+
+- An original P0–P14 security audit.
+- Critical refinements on threading, WAL design, and memory management.
+- Operational corrections (metrics, rate limiting, backpressure).
+- Honest pushbacks on anti-patterns (timer-based fdatasync, slotmap for tensors, 120s queue timeouts).
+- **Line-by-line repo verification** that corrected 3 misattributed items from v3.1.
+- Executable code artifacts (CI config, Rust modules, dependency audit).
+
+**The thesis:** Bramha is an ambitious sparse-paging inference engine that cannot safely reach v0.1 without first fixing 9 actively exploitable security holes, restructuring its error handling, and building a test safety net. Performance optimizations (arena allocators, backend migrations) are deferred until correctness is proven.
+
+---
+
+### 29.2 The Brutal Truth
+
+> **137 lines of tests for 28,700 lines of code (0.47% coverage).**
+
+This is not a test gap. This is a "we do not know if any of this works" gap. Every P0 fix is a refactor. Every refactor without tests is a regression waiting to happen.
+
+**Mandatory invariant:**
+
+> Every P0 fix must be accompanied by a failing test first (TDD). Do not touch `cpu_engine.rs` (3,512 lines) until an end-to-end `generate_text` integration test exists.
+
+---
+
+### 29.3 P0 — Actively Exploitable Today (9 Items)
+
+> **Verified by line-by-line repo audit (cloned, greppable).**
+
+| # | Issue | Severity | Fix | Test Required |
+|---|-------|----------|-----|---------------|
+| 1 | **Global env var race in device selection** | Critical | Move `device` into `InferenceTask`; delete `std::env::set_var()` and `set_cpu_only()` entirely | Unit test: concurrent tasks request different devices, no stale reads |
+| 2 | **Auth missing on 22/30 routes** | Critical | Apply `RequireReadOnly` as router-wide default; routes opt up to Write/Admin. Mount `/health`, `/ready`, `/metrics` **before** auth layer | Integration test: unauthenticated request to protected route → 401 |
+| 3 | **Default API keys are literal public strings** | Critical | Generate random keys on first boot; SHA-256 hash-check against literal; `panic!` if defaults detected | Integration test: boot with default keys → panic |
+| 4 | **CORS fully open** | High | Explicit origin allowlist; apply `CorsLayer` below `AuthLayer` to prevent OPTIONS preflight bypass | Integration test: cross-origin request to protected route → blocked |
+| 15 | **Path traversal in `ingest_model`** | Critical | `HashSet<PathBuf>` allowlist of registered directories; `canonicalize()` `payload.path`; reject if escapes registry | Integration test: `../../../etc/passwd` in payload → 400 |
+| 16 | **No input bounds on `generate_text`** | High | Reject if `input_ids.len() + max_new_tokens > context_window` **before** queueing | Integration test: prompt + max_tokens > window → 400 |
+| 17 | **`llm_load_model` unauthenticated** | Critical | Promote to `RequireAdmin` | Integration test: unauthenticated load → 401 |
+| 18 | **SIGTERM not handled; queue not drained on exit** | High | `main.rs` already handles SIGINT (`ctrl_c`). Add `tokio::signal::unix::signal(SignalKind::terminate())` handler. Explicitly drain inference queue (30s) before DB save + exit | Integration test: SIGTERM during generation → queue drains, WAL flushed |
+| 27 | **Symlink escapes in path allowlist** | Critical | After `canonicalize()`, verify every original component is not a symlink via `symlink_metadata()` | Integration test: symlink inside registry → 400 |
+
+> **Deleted from v3.1:** ~~#28 "Pickle RCE"~~ — Repo only uses `safetensors::SafeTensors::deserialize`. No pickle loader exists. Generic boilerplate, not applicable.
+
+> **Corrected from v3.1:** ~~#15 targeted `llm_load_model`~~ — Actual bug is in `ingest_model` where `payload.path` (user string) is fed to `find_safetensors_files(dir)` without `canonicalize`/allowlist.
+
+> **Corrected from v3.1:** ~~#18 "No SIGTERM graceful shutdown"~~ — `main.rs` already has `tokio::signal::ctrl_c()` + `with_graceful_shutdown` + DB save. Gap is SIGTERM (Docker/k8s) and explicit queue drain.
+
+---
+
+### 29.4 P1 — Structural & Design Corrections (10 Items)
+
+| # | Issue | Fix | Why It Matters |
+|---|-------|-----|----------------|
+| 5 | `Box<dyn Error>` / `String` errors block planner fallback | `thiserror` enum `BramhaError` with `IntoResponse` | The planner cannot match on strings to decide degraded fallback paths |
+| 6 | CPU-bound work on `tokio::spawn` | Audit 16 `tokio::spawn` sites; move tensor math to `spawn_blocking` or `rayon` | Tokio is for I/O. Tensor math on the async runtime blocks the event loop |
+| 7 | Panics in spawned tasks vanish silently | `catch_unwind` + write `"Failed: {reason}"` status | Ingestion hangs at `"Processing: ..."` forever otherwise |
+| 8 | `std::sync::Mutex` poisoning | `parking_lot::Mutex` (already a dep). Do NOT timeout `rx.recv()`. Timeout the *generation task* (60s interactive / 300s batch) | If a thread panics holding std mutex, every future lock panics. Queue-level timeout is a DoS vector |
+| 9 | KV cache allocation | Contiguous memory pool (`Vec<u8>` or `wgpu::Buffer`) with metadata slab. No heap scatter | GPU transfer needs contiguous memory. Scattered allocations = N small copies instead of 1 DMA |
+| 13 | Docs/code drift | Flat `src/` vs workspace README (`bramha-engine/bramha-server/bramha-cli`). Refactor code or rewrite docs | Breaks `cargo test --workspace` and `rust-analyzer` |
+| 14 | Backend choice (`burn` trap) | Prototype `candle-core` (HuggingFace) for CPU. Prepare `wgpu` + `gemm` for GPU sparse paging. **Delete `burn`, `ndarray`, `nalgebra`, `rustfft`** | `burn` is a training framework. No FlashAttention, no fused kernels, no paged KV. Dead weight |
+| 21 | Model eviction mid-generation | Reference-counted pages. Eviction only on `refcount == 0` | Without this, evicting a page during a generation causes a segfault |
+| 29 | No API key rotation | `ArcSwap<HashMap>` for lock-free updates. `POST /admin/keys/rotate` | Keys leak. Rotation without restart is mandatory in production |
+| 35 | "Generation never blocks" invariant | Document: eviction skips `refcount > 0`. This is a **safety invariant**, not a performance optimization | Without this documented and enforced, the sparse paging story is vaporware |
+
+---
+
+### 29.5 P2 — Operational Hardening (9 Items)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 19 | Zero observability | Prometheus metrics: `bramha_queue_depth`, `bramha_vram_bytes_used`, `bramha_kv_cache_hit_rate`, `bramha_token_latency_seconds` (histogram), `bramha_generation_errors_total` (labeled by variant). `tracing::Span` per request with `request_id`. JSON structured logs via `tracing-subscriber` |
+| 20 | No rate limiting | Per-key token bucket (`governor` crate) as Axum layer. Reject 429. Do not enqueue |
+| 22 | Session leaks / no TTL | 30-min idle TTL. Background `tokio` task scans `last_activity`, drops expired sessions, frees KV pages, appends `SessionClosed` tombstone to WAL |
+| 23 | Config validation at boot | Validate `device = "gpu"` by probing `wgpu` adapters. Panic before binding HTTP port if GPU requested but unavailable. Fail fast |
+| 30 | Queue depth backpressure | If `queue_depth > max_concurrent_requests * 2`, return 503 immediately. Protects against memory exhaustion |
+| 31 | GPU cold-start latency | After `llm_load_model`, run dummy 1-token forward pass before marking "ready". `/ready` health probe returns 200 only after warmup |
+| 32 | OOM kills during generation | Pre-allocate max KV cache size at model load. Verify `current_kv_usage + requested_tokens <= max_kv_size` before queueing. Reject with `OutOfVram`. No dynamic growth |
+| 33 | `/metrics` exposed to internet | Mount on separate port (e.g., `:9090`) or IP allowlist (`127.0.0.1` / `METRICS_ALLOWLIST`). Never on public HTTP port |
+| WAL | Timer-based `fdatasync` (anti-pattern) | Per-session segments (`wal/sessions/{session_id}.log`). CRC32C checksums. `O_APPEND`. `fdatasync` only on: (1) graceful shutdown, (2) explicit checkpoint, (3) every 64 MB written. On restart, replay until checksum failure, truncate at last valid entry. This is SQLite's WAL model |
+
+---
+
+### 29.6 P3 — Before v0.1 (7 Items)
+
+| # | Action | Why |
+|---|--------|-----|
+| 11 | Integration tests asserting on `BramhaError` variants | Forces error handling to be a state machine, not ad-hoc strings |
+| 12 | Split `cpu_engine.rs` (3,512 lines) and `handlers.rs` (2,071 lines) | Files too large to review confidently. Split along threading/error boundaries |
+| 24 | `cargo audit` + `cargo deny` in CI | Catch RUSTSEC advisories and license violations automatically |
+| 25 | Fuzz `generate_text` with `cargo-fuzz` / `proptest` | Empty prompts, Unicode bombs, max-length, negative `max_new_tokens` |
+| 26 | Document sparse paging invariant | One-pager: "At 90% VRAM, evict coldest KV page to RAM. At 80% RAM, evict coldest weights to disk. Generation never blocks — returns `StorageBackpressure`" |
+| 34 | Load test with `k6` / `wrk2` | 100 concurrent clients, 5 minutes. Monitor memory leaks, queue stalls, WAL corruption |
+| 36 | Failure Mode Matrix | Document: `(Error Variant) × (System State) → (Action)` |
+
+---
+
+### 29.7 Sprint Execution Plan
+
+| Sprint | Scope | Merge Gate | Risk |
+|--------|-------|------------|------|
+| **Sprint 0** | `clippy`/`fmt` hygiene. Integration tests for P0 endpoints (300–500 lines). | CI green. Coverage > 2%. | Low — adds code, doesn't change logic |
+| **9a** | Auth defaults (#2, #3, #17), CORS (#4), Input bounds (#16) | Sprint 0 tests validate 401/403/400 | Medium — touches ~30 routes |
+| **9b** | Path traversal (#15, #27) in `ingest_model`, SIGTERM refinement (#18), Env var race (#1) | Sprint 0 tests validate rejections | High — security-critical |
+| **10a** | `thiserror`, threading firewall, panic catching, task timeouts | Zero `Box<dyn Error>` in HTTP handlers | Medium — breaking change to error types |
+| **10b** | **Prototype branch:** Benchmark `candle-core` vs raw `wgpu` on Qwen2-0.5B | Decision doc committed | Low — no production code changes |
+| **10c** | KV contiguous pool, Refcounts (#21, #35), Key rotation (#29) | Memory profiler confirms contiguous pages | High — touches core memory management |
+| **11** | Metrics/Tracing, Rate limits, TTL, WAL Spec, Backpressure, Warmup, OOM guard | `k6` load test passes 5 min @ 100 concurrent | Medium — new dependencies |
+| **Post-11** | File splits, `cargo audit` in CI, Fuzzing, Failure Matrix (#36), Sparse paging doc | **v0.1 RC** | Low — polish and documentation |
+
+**Critical rule:** Do not start Sprint 9 until Sprint 0 is merged. Do not touch `cpu_engine.rs` until Sprint 10a tests pass.
+
+---
+
+### 29.8 Architecture Specs
+
+#### 29.8.1 WAL Design
+
+**Goals:** Crash safety, zero contention, SSD-friendly.
+
+**File Layout:**
+```
+data/wal/
+  meta/
+    global_seq              # Atomic u64 counter
+  sessions/
+    {session_id}.log        # One file per active session
+  checkpoints/
+    {timestamp}.chk         # Consolidated checkpoint
+```
+
+**Entry Format (Append-Only, O_APPEND):**
+```
+[4 bytes: CRC32C of data (little-endian)]
+[4 bytes: len of data (little-endian)]
+[N bytes: postcard/bincode serialized WalEntry]
+[8 bytes: Unix timestamp millis]
+```
+
+**Validation on Replay:**
+- Read sequentially. Verify CRC32C.
+- If CRC fails OR len exceeds bounds: **truncate at last valid entry**. Do not skip.
+- Rehydrate in-memory session state from valid entries.
+
+**Sync Policy:**
+1. Append without `fdatasync`.
+2. Auto-sync on: session close, explicit `POST /admin/checkpoint`, or 64 MB written.
+3. Graceful shutdown: flush all sessions, create checkpoint.
+
+**Concurrency:**
+- Each session has its own `Arc<tokio::sync::Mutex<File>>`.
+- Generation loop writes via non-blocking `try_send` to a channel.
+- Channel full → `BramhaError::StorageBackpressure` (never block generation).
+
+**Recovery Algorithm (Boot):**
+1. Scan `wal/sessions/*.log`.
+2. For each file: replay entries, verify CRC, truncate at failure.
+3. `fdatasync` recovered files.
+4. Delete checkpoints older than 7 days.
+
+---
+
+#### 29.8.2 InferenceTask & Threading Model
+
+**Problem:** `std::env::set_var()` and a global `CPU_ONLY` flag create a race between concurrent requests.
+
+**Solution:** Per-task device config, resolved at queue consumption time.
+
+```rust
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeviceConfig {
+    Gpu { device_id: usize },
+    Cpu,
+    Auto,
+}
+
+pub struct InferenceTask {
+    pub request_id: Uuid,
+    pub model_id: String,
+    pub input_ids: Vec<u32>,
+    pub max_new_tokens: usize,
+    pub device: DeviceConfig,        // Per-task, replaces env var
+    pub session_id: Option<String>,
+    pub response_tx: oneshot::Sender<Result<GenerateOutput, BramhaError>>,
+}
+
+impl InferenceTask {
+    pub fn resolve_device(&self, system_has_gpu: bool) -> DeviceConfig {
+        match self.device {
+            DeviceConfig::Auto if system_has_gpu => DeviceConfig::Gpu { device_id: 0 },
+            DeviceConfig::Auto => DeviceConfig::Cpu,
+            explicit => explicit,
+        }
+    }
+
+    pub fn validate_bounds(&self, context_window: usize) -> Result<(), BramhaError> {
+        let total = self.input_ids.len().saturating_add(self.max_new_tokens);
+        if total > context_window {
+            return Err(BramhaError::InputTooLong { requested: total, limit: context_window });
+        }
+        Ok(())
+    }
+}
+```
+
+**Threading Firewall:**
+- **Tokio:** HTTP handlers, queue management, WAL channel, metrics.
+- **Rayon / spawn_blocking:** Tensor math, safetensors loading, quantization.
+- **Never mix:** A `tokio::spawn` task must not perform CPU-bound matmul. A `rayon` task must not perform async I/O.
+
+**Queue Consumer Loop:**
+```rust
+// Do NOT timeout rx.recv() — block forever waiting for work.
+while let Some(task) = rx.recv().await {
+    // Wrap the generation in a task-level timeout, not the queue.
+    let result = tokio::time::timeout(
+        Duration::from_secs(60), // interactive
+        tokio::task::spawn_blocking(move || engine.generate(task))
+    ).await;
+
+    match result {
+        Ok(Ok(output)) => { let _ = task.response_tx.send(Ok(output)); }
+        Ok(Err(e)) => { let _ = task.response_tx.send(Err(e.into())); }
+        Err(_) => { let _ = task.response_tx.send(Err(BramhaError::EngineTimeout)); }
+    }
+}
+```
+
+---
+
+#### 29.8.3 KV Cache Memory Pool
+
+**Anti-pattern:** `slotmap` or `generational-arena` for tensor data. These have O(n) iteration and scattered heap allocations.
+
+**Correct design:**
+1. **Pre-allocate one contiguous buffer:** `Vec<u8>` or `wgpu::Buffer` of max KV cache size.
+2. **Metadata slab tracks slots:** `(offset: usize, len: usize, generation: u64, refcount: AtomicU32, is_allocated: bool)`.
+3. **Tensor data lives in the contiguous pool.** The slab is metadata only.
+4. **Eviction policy:** Only consider slots with `refcount == 0`. Skip in-use pages.
+
+```rust
+pub struct KvPage {
+    pub offset: usize,
+    pub len: usize,
+    pub generation: u64,
+    pub refcount: AtomicU32,
+}
+
+pub struct KvPool {
+    buffer: Vec<u8>,               // Contiguous backing store
+    pages: Vec<KvPage>,            // Metadata slab
+    free_list: Vec<usize>,         // Indices of unallocated pages
+}
+
+impl KvPool {
+    pub fn allocate(&mut self, len: usize) -> Option<usize> {
+        // Find a free page with sufficient capacity
+        // Mark allocated, increment generation, return index
+    }
+
+    pub fn release(&mut self, idx: usize) {
+        // Decrement refcount. If zero, push to free_list.
+    }
+
+    pub fn evict_candidates(&self) -> Vec<usize> {
+        // Return pages with refcount == 0, sorted by LRU
+    }
+}
+```
+
+---
+
+#### 29.8.4 Auth & Key Rotation
+
+**Key Storage:** `ArcSwap<HashMap<String, ApiKeyMeta>>` for lock-free reads.
+
+```rust
+use arc_swap::ArcSwap;
+use std::sync::Arc;
+use std::collections::HashMap;
+
+pub struct AuthManager {
+    keys: ArcSwap<HashMap<String, ApiKeyMeta>>,
+}
+
+pub struct ApiKeyMeta {
+    pub role: Role,
+    pub created_at: u64,
+    pub rotated_from: Option<String>, // Previous key ID, valid until sessions finish
+}
+
+impl AuthManager {
+    pub fn rotate_key(&self, role: Role) -> String {
+        let new_key = generate_random_key();
+        let mut new_map = (**self.keys.load()).clone();
+        // Mark old key as rotated but keep valid for active sessions
+        if let Some((old_key, meta)) = new_map.iter_mut().find(|(_, m)| m.role == role) {
+            meta.rotated_from = Some(old_key.clone());
+        }
+        new_map.insert(new_key.clone(), ApiKeyMeta { role, created_at: now(), rotated_from: None });
+        self.keys.store(Arc::new(new_map));
+        new_key
+    }
+
+    pub fn verify(&self, key: &str) -> Option<Role> {
+        self.keys.load().get(key).map(|m| m.role)
+    }
+}
+```
+
+**Route Guards:**
+```rust
+// Mount BEFORE auth layer
+let public_routes = Router::new()
+    .route("/health", get(health))
+    .route("/ready", get(ready))
+    .route("/metrics", get(metrics));
+
+let protected_routes = Router::new()
+    .route("/generate", post(generate_text))
+    .route("/models/load", post(llm_load_model))
+    .layer(AuthLayer::new().default(ReadOnly));
+
+let app = public_routes.merge(protected_routes);
+```
+
+---
+
+#### 29.8.5 Backend Decision Matrix
+
+| Backend | Pros | Cons | Verdict |
+|---------|------|------|---------|
+| **burn** | Pure Rust, training-friendly | No FlashAttention, no fused kernels, no paged KV, memory bloat | **Delete it** |
+| **candle-core** | Mature, Metal/CUDA/CPU, Qwen2 support, HuggingFace maintained | Memory management is opaque; hard to hook sparse paging | **Use for CPU prototype / rapid validation** |
+| **raw wgpu + gemm** | Full control over memory pools, page-level eviction, custom compute shaders | Must write every kernel (attention, RoPE, RMSNorm) | **Use for GPU sparse paging (production)** |
+| **ndarray** | Numpy-like ergonomics | Not GPU-native; redundant with candle/burn | **Delete** |
+| **nalgebra** | Linear algebra | Overkill for inference; no GPU | **Delete** |
+| **rustfft** | FFT | Not needed for transformers | **Delete** |
+
+**Recommended Path:**
+1. **Sprint 10b:** Prototype Qwen2-0.5B on `candle-core` CPU. Validate end-to-end architecture.
+2. **Post-10b:** If sparse paging is mandatory, migrate to raw `wgpu` + `gemm` for GPU. Keep `candle-core` as a `cpu-only` feature flag.
+3. **Delete:** `burn`, `ndarray`, `nalgebra`, `rustfft` in one mechanical PR after the decision doc.
+
+---
+
+#### 29.8.6 Failure Mode Matrix
+
+| Error Variant | System State | Action | HTTP Status |
+|---------------|--------------|--------|-------------|
+| `InputTooLong` | Request validation | Reject before queueing | 400 |
+| `OutOfVram` | Pre-generation check | Reject; do not OOM kill | 503 |
+| `StorageBackpressure` | WAL channel full | Return to client; client retries | 503 |
+| `EngineTimeout` | Generation hung (60s) | Kill task; free KV pages | 504 |
+| `WalCorrupted` | Boot recovery | Truncate at last valid entry; WARN log | 500 (if detected mid-session) |
+| `ModelNotLoaded` | Request for unloaded model | Load or return error | 404 |
+| `AuthDenied` | Missing/invalid key | Reject immediately | 401 |
+| `RateLimited` | Token bucket empty | Reject; do not enqueue | 429 |
+| `PathTraversal` | Invalid model path | Reject before filesystem access | 400 |
+
+---
+
+#### 29.8.7 Sparse Paging Invariant
+
+**The One-Pager (for docs/SPARSE_PAGING.md):**
+
+```
+Bramha Sparse Paging Invariant v1.0
+=====================================
+
+Memory Tiers (fastest to slowest):
+  GPU VRAM → System RAM → NVMe Disk
+
+Eviction Triggers:
+  1. VRAM usage > 90%:
+     · Evict coldest KV page to RAM.
+     · Evict coldest model weights to RAM if KV pages insufficient.
+  2. RAM usage > 80%:
+     · Evict coldest model weights to disk.
+     · Keep KV pages in RAM (disk is too slow for KV access).
+
+Safety Invariants:
+  · A page with refcount > 0 is NEVER evicted. This is non-negotiable.
+  · A generation NEVER blocks waiting for a page load. If a required page
+    is on disk, the generation returns StorageBackpressure (503) immediately.
+  · Model loading is atomic with respect to active generations. Either wait
+    for active gens to finish, or refuse to load if unreferenced pages are
+    insufficient.
+
+Page Lifecycle:
+  [Allocated] → [In Use] (refcount > 0) → [Idle] (refcount == 0) → [Evicted to RAM] → [Evicted to Disk] → [Reclaimed]
+
+Planner Responsibility:
+  The planner is the sole authority for eviction decisions. It maintains:
+    - A priority queue of idle pages (LRU order).
+    - A map of page locations (VRAM / RAM / Disk / Not Loaded).
+    - Per-model memory footprint estimates.
+```
+
+---
+
+### 29.9 Code Artifacts
+
+#### 29.9.1 `.github/workflows/ci.yml`
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Format check
+        run: cargo fmt -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace -- --nocapture
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Run cargo-deny (advisories + licenses)
+        run: cargo deny check
+```
+
+---
+
+#### 29.9.2 `cargo-deny.toml`
+
+```toml
+# cargo-deny.toml
+# Bramha Dependency Audit Configuration
+# Run: cargo deny check
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+vulnerability = "deny"
+unmaintained = "deny"
+notice = "deny"
+# ignore = [ "RUSTSEC-2024-XXXX" ]
+
+[licenses]
+unlicensed = "deny"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+]
+deny = [
+    "GPL-3.0",
+    "AGPL-3.0",
+    "LGPL-2.1",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# skip = [
+#     { name = "rawpointer", version = "0.2.1" },
+# ]
+# skip-tree = [
+#     { name = "ndarray", version = "0.15", depth = 3 },
+# ]
+
+[sources]
+unknown-git = "warn"
+unknown-registry = "deny"
+# allow-git = ["https://github.com/rust-lang/"]
+```
+
+---
+
+#### 29.9.3 `src/task.rs`
+
+```rust
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use uuid::Uuid;
+
+use crate::errors::BramhaError;
+
+/// Device configuration per-task, replacing the global env var race.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeviceConfig {
+    Gpu { device_id: usize },
+    Cpu,
+    Auto,
+}
+
+/// Output of a successful generation.
+#[derive(Debug, Clone)]
+pub struct GenerateOutput {
+    pub tokens: Vec<u32>,
+    pub text: String,
+    pub finish_reason: Option<String>,
+}
+
+/// A single inference request queued for the worker.
+///
+/// # Security & Correctness
+/// - `device` is resolved per-task at queue consumption time, eliminating the
+///   `std::env::set_var` race condition (fixes #1).
+/// - `max_new_tokens` is validated against the model context window before
+///   the task is ever created (fixes #16).
+#[derive(Debug)]
+pub struct InferenceTask {
+    pub request_id: Uuid,
+    pub model_id: String,
+    pub input_ids: Vec<u32>,
+    pub max_new_tokens: usize,
+    /// Per-task device selection. Replaces the global `CPU_ONLY` flag.
+    pub device: DeviceConfig,
+    pub session_id: Option<String>,
+    /// Channel back to the HTTP handler.
+    pub response_tx: oneshot::Sender<Result<GenerateOutput, BramhaError>>,
+}
+
+impl InferenceTask {
+    /// Resolve the requested device against the actual system state.
+    ///
+    /// Called by the queue consumer, not the request handler, so the
+    /// decision is made at the point of execution — eliminating stale reads.
+    pub fn resolve_device(&self, system_has_gpu: bool) -> DeviceConfig {
+        match self.device {
+            DeviceConfig::Auto if system_has_gpu => DeviceConfig::Gpu { device_id: 0 },
+            DeviceConfig::Auto => DeviceConfig::Cpu,
+            explicit => explicit,
+        }
+    }
+
+    /// Validate that the requested generation fits within the model's context window.
+    ///
+    /// Returns `BramhaError::InputTooLong` if `input_ids.len() + max_new_tokens`
+    /// exceeds the model's `context_window`.
+    pub fn validate_bounds(&self, context_window: usize) -> Result<(), BramhaError> {
+        let total = self.input_ids.len().saturating_add(self.max_new_tokens);
+        if total > context_window {
+            return Err(BramhaError::InputTooLong {
+                requested: total,
+                limit: context_window,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_selects_gpu_when_available() {
+        let task = InferenceTask {
+            request_id: Uuid::new_v4(),
+            model_id: "qwen2-0.5b".to_string(),
+            input_ids: vec![1, 2, 3],
+            max_new_tokens: 10,
+            device: DeviceConfig::Auto,
+            session_id: None,
+            response_tx: {
+                let (tx, _rx) = oneshot::channel();
+                tx
+            },
+        };
+        assert_eq!(task.resolve_device(true), DeviceConfig::Gpu { device_id: 0 });
+    }
+
+    #[test]
+    fn auto_falls_back_to_cpu() {
+        let task = InferenceTask {
+            request_id: Uuid::new_v4(),
+            model_id: "qwen2-0.5b".to_string(),
+            input_ids: vec![1, 2, 3],
+            max_new_tokens: 10,
+            device: DeviceConfig::Auto,
+            session_id: None,
+            response_tx: {
+                let (tx, _rx) = oneshot::channel();
+                tx
+            },
+        };
+        assert_eq!(task.resolve_device(false), DeviceConfig::Cpu);
+    }
+
+    #[test]
+    fn explicit_device_preserved() {
+        let task = InferenceTask {
+            request_id: Uuid::new_v4(),
+            model_id: "qwen2-0.5b".to_string(),
+            input_ids: vec![1, 2, 3],
+            max_new_tokens: 10,
+            device: DeviceConfig::Gpu { device_id: 2 },
+            session_id: None,
+            response_tx: {
+                let (tx, _rx) = oneshot::channel();
+                tx
+            },
+        };
+        assert_eq!(task.resolve_device(false), DeviceConfig::Gpu { device_id: 2 });
+    }
+
+    #[test]
+    fn bounds_rejection() {
+        let task = InferenceTask {
+            request_id: Uuid::new_v4(),
+            model_id: "qwen2-0.5b".to_string(),
+            input_ids: vec![1; 1000],
+            max_new_tokens: 500,
+            device: DeviceConfig::Auto,
+            session_id: None,
+            response_tx: {
+                let (tx, _rx) = oneshot::channel();
+                tx
+            },
+        };
+        assert!(task.validate_bounds(2048).is_ok());
+        assert!(task.validate_bounds(1200).is_err());
+    }
+}
+```
+
+---
+
+#### 29.9.4 `src/errors.rs` (BramhaError)
+
+```rust
+use axum::response::{IntoResponse, Response};
+use axum::http::StatusCode;
+use thiserror::Error;
+
+/// Exhaustive error topology for the Bramha inference engine.
+///
+/// Every variant maps to a specific HTTP status code via `IntoResponse`.
+/// This enables the planner to match on variants for degraded fallback paths.
+#[derive(Error, Debug, Clone)]
+pub enum BramhaError {
+    #[error("Input too long: requested {requested}, limit {limit}")]
+    InputTooLong { requested: usize, limit: usize },
+
+    #[error("Out of VRAM: requested {requested} bytes, available {available} bytes")]
+    OutOfVram { requested: usize, available: usize },
+
+    #[error("Storage backpressure: WAL channel full")]
+    StorageBackpressure,
+
+    #[error("Engine timeout: generation exceeded {seconds}s")]
+    EngineTimeout { seconds: u64 },
+
+    #[error("WAL corrupted at offset {offset}")]
+    WalCorrupted { offset: u64 },
+
+    #[error("Model not loaded: {model_id}")]
+    ModelNotLoaded { model_id: String },
+
+    #[error("Authentication denied")]
+    AuthDenied,
+
+    #[error("Rate limited: retry after {retry_after}s")]
+    RateLimited { retry_after: u64 },
+
+    #[error("Path traversal detected: {path}")]
+    PathTraversal { path: String },
+
+    #[error("Session not found: {session_id}")]
+    SessionNotFound { session_id: String },
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+impl IntoResponse for BramhaError {
+    fn into_response(self) -> Response {
+        let status = match &self {
+            BramhaError::InputTooLong { .. } => StatusCode::BAD_REQUEST,
+            BramhaError::OutOfVram { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            BramhaError::StorageBackpressure => StatusCode::SERVICE_UNAVAILABLE,
+            BramhaError::EngineTimeout { .. } => StatusCode::GATEWAY_TIMEOUT,
+            BramhaError::WalCorrupted { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            BramhaError::ModelNotLoaded { .. } => StatusCode::NOT_FOUND,
+            BramhaError::AuthDenied => StatusCode::UNAUTHORIZED,
+            BramhaError::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
+            BramhaError::PathTraversal { .. } => StatusCode::BAD_REQUEST,
+            BramhaError::SessionNotFound { .. } => StatusCode::NOT_FOUND,
+            BramhaError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+
+        (status, self.to_string()).into_response()
+    }
+}
+```
+
+---
+
+#### 29.9.5 `src/auth.rs` (Key Rotation)
+
+```rust
+use arc_swap::ArcSwap;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Role {
+    ReadOnly,
+    Write,
+    Admin,
+}
+
+pub struct ApiKeyMeta {
+    pub role: Role,
+    pub created_at: u64,
+    pub rotated_from: Option<String>,
+    pub is_active: bool,
+}
+
+pub struct AuthManager {
+    keys: ArcSwap<HashMap<String, ApiKeyMeta>>,
+}
+
+impl AuthManager {
+    pub fn new() -> Self {
+        let mut initial = HashMap::new();
+        // Generate random keys on first boot; do NOT use literals
+        // If keys.json is missing, generate and print to stdout
+        Self {
+            keys: ArcSwap::new(Arc::new(initial)),
+        }
+    }
+
+    pub fn rotate_key(&self, role: Role) -> String {
+        let new_key = generate_random_key();
+        let mut new_map = (**self.keys.load_full()).clone();
+
+        // Deactivate old key of same role but keep it valid for active sessions
+        for (_, meta) in new_map.iter_mut() {
+            if meta.role == role && meta.is_active {
+                meta.is_active = false;
+            }
+        }
+
+        new_map.insert(new_key.clone(), ApiKeyMeta {
+            role,
+            created_at: now(),
+            rotated_from: None,
+            is_active: true,
+        });
+
+        self.keys.store(Arc::new(new_map));
+        new_key
+    }
+
+    pub fn verify(&self, key: &str) -> Option<Role> {
+        self.keys.load().get(key).and_then(|m| {
+            if m.is_active { Some(m.role) } else { None }
+        })
+    }
+}
+
+fn generate_random_key() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+    base64::encode(&bytes)
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+```
+
+---
+
+#### 29.9.6 `src/kv_pool.rs` (Contiguous Pool)
+
+```rust
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// A contiguous memory pool for KV cache pages.
+///
+/// # Design
+/// - One `Vec<u8>` backing store for GPU-friendly contiguous memory.
+/// - Metadata slab (`Vec<KvPage>`) tracks offsets, generations, and refcounts.
+/// - Eviction only considers pages with `refcount == 0`.
+#[derive(Debug)]
+pub struct KvPage {
+    pub offset: usize,
+    pub len: usize,
+    pub generation: u64,
+    pub refcount: AtomicU32,
+    pub is_allocated: bool,
+    pub last_accessed: u64,
+}
+
+pub struct KvPool {
+    buffer: Vec<u8>,
+    pages: Vec<KvPage>,
+    free_list: Vec<usize>,
+    global_generation: u64,
+    page_size: usize,
+}
+
+impl KvPool {
+    pub fn new(total_bytes: usize, page_size: usize) -> Self {
+        let num_pages = total_bytes / page_size;
+        let mut pages = Vec::with_capacity(num_pages);
+        let mut free_list = Vec::with_capacity(num_pages);
+
+        for i in 0..num_pages {
+            pages.push(KvPage {
+                offset: i * page_size,
+                len: page_size,
+                generation: 0,
+                refcount: AtomicU32::new(0),
+                is_allocated: false,
+                last_accessed: 0,
+            });
+            free_list.push(i);
+        }
+
+        Self {
+            buffer: vec![0u8; total_bytes],
+            pages,
+            free_list,
+            global_generation: 0,
+            page_size,
+        }
+    }
+
+    pub fn allocate(&mut self) -> Option<usize> {
+        let idx = self.free_list.pop()?;
+        let page = &mut self.pages[idx];
+        page.is_allocated = true;
+        page.generation = self.global_generation;
+        self.global_generation += 1;
+        page.last_accessed = now();
+        Some(idx)
+    }
+
+    pub fn release(&mut self, idx: usize) {
+        let page = &mut self.pages[idx];
+        let prev = page.refcount.fetch_sub(1, Ordering::Release);
+        if prev == 1 {
+            // Last reference dropped
+            page.is_allocated = false;
+            self.free_list.push(idx);
+        }
+    }
+
+    pub fn acquire(&self, idx: usize) -> bool {
+        let page = &self.pages[idx];
+        if page.is_allocated {
+            page.refcount.fetch_add(1, Ordering::Acquire);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn evict_candidates(&self, n: usize) -> Vec<usize> {
+        let mut candidates: Vec<_> = self.pages
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_allocated && p.refcount.load(Ordering::Relaxed) == 0)
+            .collect();
+
+        // Sort by LRU (oldest first)
+        candidates.sort_by_key(|(_, p)| p.last_accessed);
+        candidates.into_iter().take(n).map(|(i, _)| i).collect()
+    }
+
+    pub fn get_slice(&self, idx: usize) -> Option<&[u8]> {
+        let page = self.pages.get(idx)?;
+        if !page.is_allocated { return None; }
+        Some(&self.buffer[page.offset..page.offset + page.len])
+    }
+
+    pub fn get_slice_mut(&mut self, idx: usize) -> Option<&mut [u8]> {
+        let page = self.pages.get(idx)?;
+        if !page.is_allocated { return None; }
+        Some(&mut self.buffer[page.offset..page.offset + page.len])
+    }
+}
+
+fn now() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allocate_and_release() {
+        let mut pool = KvPool::new(1024, 256); // 4 pages
+        let idx = pool.allocate().unwrap();
+        assert!(pool.pages[idx].is_allocated);
+        pool.release(idx);
+        assert!(!pool.pages[idx].is_allocated);
+        assert_eq!(pool.free_list.len(), 4);
+    }
+
+    #[test]
+    fn refcount_prevents_eviction() {
+        let mut pool = KvPool::new(1024, 256);
+        let idx = pool.allocate().unwrap();
+        pool.acquire(idx); // refcount = 1
+
+        let candidates = pool.evict_candidates(10);
+        assert!(!candidates.contains(&idx)); // Cannot evict while in use
+
+        pool.release(idx); // refcount = 0
+        let candidates = pool.evict_candidates(10);
+        assert!(candidates.contains(&idx)); // Now eligible
+    }
+
+    #[test]
+    fn out_of_memory() {
+        let mut pool = KvPool::new(512, 256); // 2 pages
+        pool.allocate().unwrap();
+        pool.allocate().unwrap();
+        assert!(pool.allocate().is_none()); // OOM
+    }
+}
+```
+
+---
+
+### 29.10 PR Templates
+
+#### PR Template: Sprint 0 (Tests)
+
+```markdown
+## 🧪 Sprint 0: Safety Net (Blocking)
+
+**Context:** The repo has 28.7k LOC but only 137 lines of tests. We cannot safely refactor the auth or threading layers without regression protection.
+
+**Changes:**
+- [ ] Add integration test for `generate_text` (happy path + timeout).
+- [ ] Add integration test for `ingest_model` (path traversal rejection).
+- [ ] Add integration test for auth middleware (missing key -> 401).
+- [ ] Ensure `cargo test` runs in CI.
+- [ ] Add `cargo fmt --check` and `cargo clippy -- -D warnings` to CI.
+
+**Risk:** Low (adds code, doesn't change existing logic).  
+**Merge Requirement:** CI green. Coverage target: >2%.
+```
+
+#### PR Template: Sprint 9a (Auth & Bounds)
+
+```markdown
+## 🔒 Sprint 9a: P0 Auth & Input Validation
+
+**Fixes:**
+1. **Auth defaults (#2, #3, #17):** Apply `RequireReadOnly` globally; mount `/health`/`/metrics` unauthenticated; promote `llm_load_model` to `RequireAdmin`.
+2. **Default keys (#3):** Generate random keys on boot; hash-check against literals; refuse to serve if defaults detected.
+3. **CORS (#4):** Explicit allowlist; enforce `AuthLayer` *before* `CorsLayer`.
+4. **Input bounds (#16):** Hard cap on `input_ids.len() + max_new_tokens <= context_window` *before* queueing.
+
+**Testing:** Requires Sprint 0 tests to validate rejection flows.
+```
+
+#### PR Template: Sprint 9b (Security Hardening)
+
+```markdown
+## 🔒 Sprint 9b: P0 Security Hardening
+
+**Fixes:**
+1. **Path traversal/Symlinks (#15, #27) in `ingest_model`:** Use `canonicalize` + check parent components with `symlink_metadata`; reject symlinks. `payload.path` is user input fed to `find_safetensors_files(dir)`.
+2. **SIGTERM refinement (#18):** `main.rs` already has `ctrl_c` + `with_graceful_shutdown` + DB save. Add `tokio::signal::unix::signal(SignalKind::terminate())` handler. Explicitly drain inference queue (30s) before exit.
+3. **Env var race (#1):** Move `device` into `InferenceTask`; delete `set_var`.
+
+**Testing:** Requires Sprint 0 tests to validate path rejection and graceful shutdown.
+```
+
+#### PR Template: Sprint 10a (Core Refactor)
+
+```markdown
+## ⚙️ Sprint 10a: P1 Structural Hardening
+
+**Fixes:**
+1. **Typed errors (#5):** `thiserror` enum `BramhaError` with `IntoResponse` (maps to HTTP 4xx/5xx).
+2. **Threading (#6):** Audit 16 `tokio::spawn` sites; move tensor math to `spawn_blocking`/`rayon`.
+3. **Panics (#7):** Wrap spawned tasks in `catch_unwind`; write `"Failed"` status.
+4. **Timeouts (#8 corrected):** Remove queue-level timeout; wrap *generation tasks* in 60s (interactive) / 300s (batch) timeout.
+
+**Breaking Changes:** Error types change; API handlers updated accordingly.
+```
+
+#### PR Template: Sprint 10b (Backend Decision)
+
+```markdown
+## 🔬 Sprint 10b: Backend Prototype (Decision Only)
+
+**Goal:** Benchmark `candle-core` CPU vs raw `wgpu` on Qwen2-0.5B. No production code changes.
+
+**Deliverable:** Decision document committed to `docs/ADR-001-BACKEND.md`.
+
+**Options:**
+- Option A: Commit to `candle-core` (CPU + GPU via its backends).
+- Option B: Commit to raw `wgpu` + `gemm` (custom sparse paging).
+
+**Criteria:** Compile time, inference latency, memory control, sparse paging feasibility.
+```
+
+#### PR Template: Sprint 10c (Memory & Keys)
+
+```markdown
+## ⚙️ Sprint 10c: P1 Memory & Key Rotation
+
+**Fixes:**
+1. **KV Pool (#9):** Implement contiguous `Vec<u8>` memory pool; metadata slab tracks `(offset, len, generation)`.
+2. **Refcounts (#21, #35):** Add `Arc<()>` to KV pages; eviction only acts on `refcount == 0` (safety invariant).
+3. **Key rotation (#29):** `ArcSwap<HashMap>` for keys; add `POST /admin/keys/rotate`.
+
+**Testing:** Memory profiler confirms contiguous pages.
+```
+
+#### PR Template: Sprint 11 (Operations & WAL)
+
+```markdown
+## 📊 Sprint 11: P2 Observability & Correct WAL
+
+**Fixes:**
+1. **Metrics (#19):** Prometheus counters/histograms (`queue_depth`, `vram_bytes`, `token_latency_seconds`, errors by variant).
+2. **Tracing:** `tracing::Span` per request; JSON structured logging.
+3. **Rate limiting (#20):** `governor` token bucket per API key (reject 429).
+4. **Session TTL (#22):** 30-min idle; background sweeper appends `SessionClosed` tombstone.
+5. **Boot validation (#23):** Probe `wgpu` adapter at startup; fail fast if GPU requested but unavailable.
+6. **Queue backpressure (#30):** If `queue_depth > max_concurrent * 2`, return `503`.
+7. **GPU warmup (#31):** Dummy 1-token forward pass after load; `/ready` waits for warmup.
+8. **OOM pre-alloc (#32):** Allocate max KV cache size at load; reject generations exceeding it.
+9. **Metrics lockdown (#33):** Separate port (9090) or IP allowlist for `/metrics`.
+10. **WAL correction:** Per-session segments; CRC32C checksums; `O_APPEND`; `fdatasync` only on checkpoint/shutdown or every 64 MB.
+
+**Testing:** Requires `k6` load testing to validate backpressure.
+```
+
+#### PR Template: Post-11 (v0.1 RC)
+
+```markdown
+## 🧹 Post-11: P3 v0.1 Readiness
+
+**Actions:**
+1. **File splits (#12):** Split `cpu_engine.rs` (3.5k lines) and `handlers.rs` (2k lines).
+2. **CI (#24):** Add `cargo audit` + `cargo deny` with license/advisory checks.
+3. **Fuzzing (#25):** `cargo-fuzz` target for `generate_text` (unicode, overflow, edge cases).
+4. **Sparse paging doc (#26):** Write one-pager on VRAM→RAM→disk eviction thresholds.
+5. **Load testing (#34):** Run `wrk2` 100 concurrent clients for 5 min; fix contention bugs.
+6. **Failure matrix (#36):** Document `(Error Variant) × (System State) → (Action)`.
+
+**Outcome:** v0.1 release candidate.
+```
+
+---
+
+### 29.11 CI/CD Integration
+
+**Pre-merge checklist (enforced by CI):**
+- [ ] `cargo fmt --check` passes
+- [ ] `cargo clippy --all-targets --all-features -- -D warnings` passes
+- [ ] `cargo test --workspace` passes
+- [ ] `cargo deny check` passes (no RUSTSEC advisories, no banned licenses)
+- [ ] `cargo audit` passes (no known vulnerabilities)
+- [ ] PR description links to the epic issue and the specific audit items being fixed
+- [ ] New tests accompany every P0 fix (TDD)
+
+**Branch protection rules:**
+- Require 1 review before merge.
+- Require all CI checks to pass.
+- Require linear history (no merge commits).
+- Require signed commits (optional but recommended).
+
+---
+
+### 29.12 Appendix: Dependency Audit
+
+**Current suspicious dependencies (from codebase scan):**
+
+| Dependency | Status | Action |
+|------------|--------|--------|
+| `burn` | Training framework, not inference | **Delete** after Sprint 10b decision |
+| `ndarray` | CPU-only, redundant | **Delete** |
+| `nalgebra` | Overkill for inference | **Delete** |
+| `rustfft` | Not needed for transformers | **Delete** |
+| `wgpu` | Keep for GPU sparse paging | **Keep** |
+| `rayon` | CPU parallelism | **Keep** |
+| `parking_lot` | Non-poisoning mutexes | **Keep** |
+| `thiserror` | Typed errors | **Keep** |
+| `tracing` | Observability | **Keep** |
+| `prometheus` | Metrics | **Keep** (add in Sprint 11) |
+| `governor` | Rate limiting | **Keep** (add in Sprint 11) |
+| `candle-core` | CPU prototype | **Evaluate** in Sprint 10b |
+| `gemm` | BLAS for raw wgpu | **Add** if choosing raw wgpu |
+
+**Binary size target:** After deleting `burn`/`ndarray`/`nalgebra`/`rustfft`, the release binary should drop from ~150MB to ~80MB.

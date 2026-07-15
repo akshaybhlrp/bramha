@@ -9,7 +9,7 @@
 //! These integrate with the existing planner (scheduler, policy, cost_model, optimizer)
 //! and concurrency (rayon_bridge) infrastructure.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,10 +26,7 @@ pub enum QueryOp {
         ef_search: Option<usize>,
     },
     /// Exact nearest neighbor
-    ExactSearch {
-        collection: String,
-        k: usize,
-    },
+    ExactSearch { collection: String, k: usize },
     /// Metadata filter + vector search
     FilteredSearch {
         collection: String,
@@ -44,9 +41,7 @@ pub enum QueryOp {
         high: Option<f64>,
     },
     /// Full collection scan (fallback)
-    FullScan {
-        collection: String,
-    },
+    FullScan { collection: String },
     /// Aggregation (count, avg, etc.)
     Aggregate {
         collection: String,
@@ -114,18 +109,14 @@ pub enum PlanStep {
         estimated_rows: usize,
     },
     /// Limit results
-    Limit {
-        n: usize,
-    },
+    Limit { n: usize },
     /// Parallel execution of sub-steps
     Parallel {
         steps: Vec<Vec<PlanStep>>,
         description: String,
     },
     /// Merge results from parallel branches
-    Merge {
-        strategy: MergeStrategy,
-    },
+    Merge { strategy: MergeStrategy },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -193,8 +184,7 @@ impl QueryOptimizer {
 
     /// Update collection statistics (called by ANALYZE).
     pub fn update_stats(&mut self, stats: CollectionStats) {
-        self.collection_stats
-            .insert(stats.name.clone(), stats);
+        self.collection_stats.insert(stats.name.clone(), stats);
     }
 
     /// Register an available index.
@@ -216,10 +206,7 @@ impl QueryOptimizer {
                 k,
                 ef_search,
             } => self.plan_vector_search(collection, *k, *ef_search, id),
-            QueryOp::ExactSearch {
-                collection,
-                k,
-            } => self.plan_exact_search(collection, *k, id),
+            QueryOp::ExactSearch { collection, k } => self.plan_exact_search(collection, *k, id),
             QueryOp::FilteredSearch {
                 collection,
                 k,
@@ -312,7 +299,12 @@ impl QueryOptimizer {
                 },
                 PlanStep::Limit { n: k },
             ];
-            let cost = QueryCost::new(total_rows * 100.0, total_rows, total_rows * 768.0 * 4.0, total_rows * 0.1);
+            let cost = QueryCost::new(
+                total_rows * 100.0,
+                total_rows,
+                total_rows * 768.0 * 4.0,
+                total_rows * 0.1,
+            );
             (steps, cost)
         };
 
@@ -325,12 +317,7 @@ impl QueryOptimizer {
         }
     }
 
-    fn plan_exact_search(
-        &self,
-        collection: &str,
-        k: usize,
-        id: u64,
-    ) -> ExecutionPlan {
+    fn plan_exact_search(&self, collection: &str, k: usize, id: u64) -> ExecutionPlan {
         let stats = self.collection_stats.get(collection);
         let total_rows = stats.map(|s| s.total_rows).unwrap_or(100_000) as f64;
 
@@ -363,12 +350,7 @@ impl QueryOptimizer {
         }
     }
 
-    fn plan_filtered_search(
-        &self,
-        collection: &str,
-        k: usize,
-        id: u64,
-    ) -> ExecutionPlan {
+    fn plan_filtered_search(&self, collection: &str, k: usize, id: u64) -> ExecutionPlan {
         let stats = self.collection_stats.get(collection);
         let total_rows = stats.map(|s| s.total_rows).unwrap_or(100_000) as f64;
 
@@ -446,10 +428,10 @@ impl QueryOptimizer {
             .unwrap_or(false);
 
         let estimated_selectivity = match (low, high) {
-            (Some(_), Some(_)) => 0.2,  // bounded range
-            (Some(_), None) => 0.5,     // one-sided
+            (Some(_), Some(_)) => 0.2, // bounded range
+            (Some(_), None) => 0.5,    // one-sided
             (None, Some(_)) => 0.5,
-            (None, None) => 1.0,        // full scan
+            (None, None) => 1.0, // full scan
         };
 
         let steps = if has_index {
@@ -888,7 +870,8 @@ impl ConnectionPool {
         self.connections.retain(|c| {
             let age = now - c.created_at;
             let idle = now - c.last_used;
-            age < self.config.max_lifetime_secs && (c.is_in_use || idle < self.config.idle_timeout_secs)
+            age < self.config.max_lifetime_secs
+                && (c.is_in_use || idle < self.config.idle_timeout_secs)
         });
 
         // Find an available connection
@@ -1006,7 +989,10 @@ pub enum PoolError {
 impl std::fmt::Display for PoolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PoolError::PoolExhausted { pool_name, max_connections } => {
+            PoolError::PoolExhausted {
+                pool_name,
+                max_connections,
+            } => {
                 write!(
                     f,
                     "Pool '{}' exhausted (max {})",
@@ -1019,12 +1005,11 @@ impl std::fmt::Display for PoolError {
             PoolError::NotAcquired { connection_id } => {
                 write!(f, "Connection {} was not acquired", connection_id)
             }
-            PoolError::Timeout { pool_name, timeout_ms } => {
-                write!(
-                    f,
-                    "Pool '{}' timed out after {}ms",
-                    pool_name, timeout_ms
-                )
+            PoolError::Timeout {
+                pool_name,
+                timeout_ms,
+            } => {
+                write!(f, "Pool '{}' timed out after {}ms", pool_name, timeout_ms)
             }
         }
     }
@@ -1079,9 +1064,7 @@ impl ConnectionPoolManager {
     pub fn borrow(&mut self, pool_name: &str) -> Result<usize, PoolError> {
         self.pools
             .get_mut(pool_name)
-            .ok_or_else(|| PoolError::ConnectionNotFound {
-                connection_id: 0,
-            })
+            .ok_or_else(|| PoolError::ConnectionNotFound { connection_id: 0 })
             .and_then(|pool| pool.borrow())
     }
 
@@ -1225,18 +1208,16 @@ mod tests {
     fn test_parallel_executor_basic() {
         let mut executor = ParallelQueryExecutor::new(4, 100);
         let tasks: Vec<ParallelTask> = (0..4)
-            .map(|i| {
-                ParallelTask {
-                    id: i,
-                    description: format!("Task {}", i),
-                    work_fn: Arc::new(move || ParallelTaskResult {
-                        task_id: i,
-                        success: true,
-                        rows_processed: 100,
-                        duration_ms: 0.0,
-                        error: None,
-                    }),
-                }
+            .map(|i| ParallelTask {
+                id: i,
+                description: format!("Task {}", i),
+                work_fn: Arc::new(move || ParallelTaskResult {
+                    task_id: i,
+                    success: true,
+                    rows_processed: 100,
+                    duration_ms: 0.0,
+                    error: None,
+                }),
             })
             .collect();
 

@@ -9,7 +9,7 @@
 //!
 //! All strategies are designed for zero-copy, cache-friendly access patterns.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -140,7 +140,8 @@ impl PartitionManager {
                     _ => return None,
                 };
                 for partition in &self.partitions {
-                    if let Some(list_part) = partitions.iter().find(|lp| lp.name == partition.name) {
+                    if let Some(list_part) = partitions.iter().find(|lp| lp.name == partition.name)
+                    {
                         if list_part.values.iter().any(|v| v == key_str) {
                             return Some(partition);
                         }
@@ -196,13 +197,9 @@ pub enum ShardStrategy {
         virtual_nodes: usize,
     },
     /// Range-based sharding
-    Range {
-        shard_key: String,
-    },
+    Range { shard_key: String },
     /// Directory-based sharding (each shard is a directory)
-    Directory {
-        base_path: PathBuf,
-    },
+    Directory { base_path: PathBuf },
 }
 
 /// A single shard holding a subset of data.
@@ -553,10 +550,7 @@ pub struct DataOrganizationManager {
 }
 
 impl DataOrganizationManager {
-    pub fn new(
-        partition_strategy: PartitionStrategy,
-        shard_strategy: ShardStrategy,
-    ) -> Self {
+    pub fn new(partition_strategy: PartitionStrategy, shard_strategy: ShardStrategy) -> Self {
         DataOrganizationManager {
             partition_manager: PartitionManager::new(partition_strategy),
             shard_manager: ShardManager::new(shard_strategy),
@@ -736,10 +730,7 @@ mod tests {
 
         let mut record = serde_json::json!({"id": "doc1", "title": "Hello"});
         let mut related = HashMap::new();
-        related.insert(
-            "author.name".to_string(),
-            serde_json::json!("Alice"),
-        );
+        related.insert("author.name".to_string(), serde_json::json!("Alice"));
 
         dm.apply(&mut record, &related);
         assert_eq!(record["author_name"], serde_json::json!("Alice"));

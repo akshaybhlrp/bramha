@@ -1,11 +1,11 @@
-use std::path::PathBuf;
-use std::sync::OnceLock;
-use burn::tensor::{Tensor, Shape, Data, activation::softmax};
-use burn::tensor::backend::Backend;
 use burn::backend::Wgpu;
 use burn::backend::wgpu::WgpuDevice;
-use tokenizers::Tokenizer;
+use burn::tensor::backend::Backend;
+use burn::tensor::{Data, Shape, Tensor, activation::softmax};
 use memmap2::Mmap;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use tokenizers::Tokenizer;
 
 /// Helper function to load named tensor from safetensors into Burn
 fn get_bert_tensor<B: Backend, const D: usize>(
@@ -13,15 +13,16 @@ fn get_bert_tensor<B: Backend, const D: usize>(
     name: &str,
     device: &<B as Backend>::Device,
 ) -> Result<Tensor<B, D>, String> {
-    let view = st.tensor(name)
+    let view = st
+        .tensor(name)
         .map_err(|e| format!("Tensor '{}' not found in BERT safetensors: {:?}", name, e))?;
     let float_data: &[f32] = bytemuck::cast_slice(view.data());
-    
+
     let mut shape_arr = [0; D];
     for (i, &dim) in view.shape().iter().enumerate().take(D) {
         shape_arr[i] = dim;
     }
-    
+
     let data = Data::new(float_data.to_vec(), Shape::from(shape_arr)).convert();
     Ok(Tensor::<B, D>::from_data(data, device))
 }
@@ -97,14 +98,17 @@ impl Embedder {
                     "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/{}",
                     filename
                 );
-                
-                let res = client.get(&url).send().await
+
+                let res = client
+                    .get(&url)
+                    .send()
+                    .await
                     .map_err(|e| format!("Failed to download {}: {}", filename, e))?;
-                
+
                 if !res.status().is_success() {
                     return Err(format!("Failed download HTTP status: {}", res.status()));
                 }
-                
+
                 let bytes = res.bytes().await.map_err(|e| e.to_string())?;
                 std::fs::write(path, bytes).map_err(|e| e.to_string())?;
             }
@@ -117,7 +121,10 @@ impl Embedder {
         let file = std::fs::File::open(&model_path).map_err(|e| e.to_string())?;
         let mmap = unsafe { Mmap::map(&file).map_err(|e| e.to_string())? };
 
-        println!("⚡ Native WGPU Bramha Embedder initialized successfully on device: {:?}!", device);
+        println!(
+            "⚡ Native WGPU Bramha Embedder initialized successfully on device: {:?}!",
+            device
+        );
         Ok(Embedder {
             tokenizer,
             mmap,
@@ -130,7 +137,10 @@ impl Embedder {
         type B = Wgpu;
         let device = &self.device;
 
-        let tokens = self.tokenizer.encode(text, true).map_err(|e| e.to_string())?;
+        let tokens = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| e.to_string())?;
         let token_ids = tokens.get_ids();
         let seq_len = token_ids.len();
 
@@ -143,10 +153,16 @@ impl Embedder {
 
         // 1. Embeddings Lookups
         let word_emb_w = get_bert_tensor::<B, 2>(&st, "embeddings.word_embeddings.weight", device)?;
-        let pos_emb_w = get_bert_tensor::<B, 2>(&st, "embeddings.position_embeddings.weight", device)?;
-        let type_emb_w = get_bert_tensor::<B, 2>(&st, "embeddings.token_type_embeddings.weight", device)?;
+        let pos_emb_w =
+            get_bert_tensor::<B, 2>(&st, "embeddings.position_embeddings.weight", device)?;
+        let type_emb_w =
+            get_bert_tensor::<B, 2>(&st, "embeddings.token_type_embeddings.weight", device)?;
 
-        let tokens_data = Data::new(token_ids.iter().map(|&t| t as i32).collect::<Vec<i32>>(), Shape::from([seq_len])).convert();
+        let tokens_data = Data::new(
+            token_ids.iter().map(|&t| t as i32).collect::<Vec<i32>>(),
+            Shape::from([seq_len]),
+        )
+        .convert();
         let tokens_t = Tensor::<B, 1, burn::tensor::Int>::from_data(tokens_data, device);
 
         // Word + Position + Token type sums
@@ -179,21 +195,51 @@ impl Embedder {
             let prefix = format!("encoder.layer.{}", layer_idx);
 
             // Self-Attention QKV Projections
-            let q_w = get_bert_tensor::<B, 2>(&st, &format!("{}.attention.self.query.weight", prefix), device)?;
-            let q_b = get_bert_tensor::<B, 1>(&st, &format!("{}.attention.self.query.bias", prefix), device)?;
-            let k_w = get_bert_tensor::<B, 2>(&st, &format!("{}.attention.self.key.weight", prefix), device)?;
-            let k_b = get_bert_tensor::<B, 1>(&st, &format!("{}.attention.self.key.bias", prefix), device)?;
-            let v_w = get_bert_tensor::<B, 2>(&st, &format!("{}.attention.self.value.weight", prefix), device)?;
-            let v_b = get_bert_tensor::<B, 1>(&st, &format!("{}.attention.self.value.bias", prefix), device)?;
+            let q_w = get_bert_tensor::<B, 2>(
+                &st,
+                &format!("{}.attention.self.query.weight", prefix),
+                device,
+            )?;
+            let q_b = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.attention.self.query.bias", prefix),
+                device,
+            )?;
+            let k_w = get_bert_tensor::<B, 2>(
+                &st,
+                &format!("{}.attention.self.key.weight", prefix),
+                device,
+            )?;
+            let k_b = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.attention.self.key.bias", prefix),
+                device,
+            )?;
+            let v_w = get_bert_tensor::<B, 2>(
+                &st,
+                &format!("{}.attention.self.value.weight", prefix),
+                device,
+            )?;
+            let v_b = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.attention.self.value.bias", prefix),
+                device,
+            )?;
 
             let q = x.clone().matmul(q_w.transpose()).add(q_b.unsqueeze_dim(0));
             let k = x.clone().matmul(k_w.transpose()).add(k_b.unsqueeze_dim(0));
             let v = x.clone().matmul(v_w.transpose()).add(v_b.unsqueeze_dim(0));
 
             // Reshape and Transpose for Multi-Head Attention
-            let q = q.reshape(Shape::from([seq_len, num_heads, head_dim])).swap_dims(0, 1);
-            let k = k.reshape(Shape::from([seq_len, num_heads, head_dim])).swap_dims(0, 1);
-            let v = v.reshape(Shape::from([seq_len, num_heads, head_dim])).swap_dims(0, 1);
+            let q = q
+                .reshape(Shape::from([seq_len, num_heads, head_dim]))
+                .swap_dims(0, 1);
+            let k = k
+                .reshape(Shape::from([seq_len, num_heads, head_dim]))
+                .swap_dims(0, 1);
+            let v = v
+                .reshape(Shape::from([seq_len, num_heads, head_dim]))
+                .swap_dims(0, 1);
 
             // Scores
             let scale = 1.0 / (head_dim as f32).sqrt();
@@ -202,32 +248,77 @@ impl Embedder {
             let context = probs.matmul(v);
 
             // Reshape context back
-            let context = context.swap_dims(0, 1).reshape(Shape::from([seq_len, hidden_size]));
+            let context = context
+                .swap_dims(0, 1)
+                .reshape(Shape::from([seq_len, hidden_size]));
 
             // Attention Output Projection
-            let o_w = get_bert_tensor::<B, 2>(&st, &format!("{}.attention.output.dense.weight", prefix), device)?;
-            let o_b = get_bert_tensor::<B, 1>(&st, &format!("{}.attention.output.dense.bias", prefix), device)?;
+            let o_w = get_bert_tensor::<B, 2>(
+                &st,
+                &format!("{}.attention.output.dense.weight", prefix),
+                device,
+            )?;
+            let o_b = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.attention.output.dense.bias", prefix),
+                device,
+            )?;
             let attn_out = context.matmul(o_w.transpose()).add(o_b.unsqueeze_dim(0));
 
             // Residual + LayerNorm
-            let attn_ln_w = get_bert_tensor::<B, 1>(&st, &format!("{}.attention.output.LayerNorm.weight", prefix), device)?;
-            let attn_ln_b = get_bert_tensor::<B, 1>(&st, &format!("{}.attention.output.LayerNorm.bias", prefix), device)?;
+            let attn_ln_w = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.attention.output.LayerNorm.weight", prefix),
+                device,
+            )?;
+            let attn_ln_b = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.attention.output.LayerNorm.bias", prefix),
+                device,
+            )?;
             x = layer_norm(x.add(attn_out), attn_ln_w, attn_ln_b, 1e-12);
 
             // Feed Forward MLP
-            let inter_w = get_bert_tensor::<B, 2>(&st, &format!("{}.intermediate.dense.weight", prefix), device)?;
-            let inter_b = get_bert_tensor::<B, 1>(&st, &format!("{}.intermediate.dense.bias", prefix), device)?;
-            let out_w = get_bert_tensor::<B, 2>(&st, &format!("{}.output.dense.weight", prefix), device)?;
-            let out_b = get_bert_tensor::<B, 1>(&st, &format!("{}.output.dense.bias", prefix), device)?;
+            let inter_w = get_bert_tensor::<B, 2>(
+                &st,
+                &format!("{}.intermediate.dense.weight", prefix),
+                device,
+            )?;
+            let inter_b = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.intermediate.dense.bias", prefix),
+                device,
+            )?;
+            let out_w =
+                get_bert_tensor::<B, 2>(&st, &format!("{}.output.dense.weight", prefix), device)?;
+            let out_b =
+                get_bert_tensor::<B, 1>(&st, &format!("{}.output.dense.bias", prefix), device)?;
 
-            let h_inter = x.clone().matmul(inter_w.transpose()).add(inter_b.unsqueeze_dim(0));
+            let h_inter = x
+                .clone()
+                .matmul(inter_w.transpose())
+                .add(inter_b.unsqueeze_dim(0));
             // GELU activation (approximate via tanh)
-            let gelu_h = h_inter.clone().mul(h_inter.mul_scalar(0.044715).powf_scalar(3.0).add_scalar(1.0).mul_scalar(0.797884).tanh().add_scalar(1.0).mul_scalar(0.5));
+            let gelu_h = h_inter.clone().mul(
+                h_inter
+                    .mul_scalar(0.044715)
+                    .powf_scalar(3.0)
+                    .add_scalar(1.0)
+                    .mul_scalar(0.797884)
+                    .tanh()
+                    .add_scalar(1.0)
+                    .mul_scalar(0.5),
+            );
             let ffn_out = gelu_h.matmul(out_w.transpose()).add(out_b.unsqueeze_dim(0));
 
             // Residual + LayerNorm
-            let ffn_ln_w = get_bert_tensor::<B, 1>(&st, &format!("{}.output.LayerNorm.weight", prefix), device)?;
-            let ffn_ln_b = get_bert_tensor::<B, 1>(&st, &format!("{}.output.LayerNorm.bias", prefix), device)?;
+            let ffn_ln_w = get_bert_tensor::<B, 1>(
+                &st,
+                &format!("{}.output.LayerNorm.weight", prefix),
+                device,
+            )?;
+            let ffn_ln_b =
+                get_bert_tensor::<B, 1>(&st, &format!("{}.output.LayerNorm.bias", prefix), device)?;
             x = layer_norm(x.add(ffn_out), ffn_ln_w, ffn_ln_b, 1e-12);
         }
 

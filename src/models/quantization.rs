@@ -4,14 +4,18 @@
 /// and scale-and-zero-point INT4 quantization with packed nibbles.
 
 /// Quantize f32 weights to i8 using row-wise symmetric quantization.
-pub fn quantize_to_int8(weights: &[f32], out_features: usize, in_features: usize) -> (Vec<i8>, Vec<f32>) {
+pub fn quantize_to_int8(
+    weights: &[f32],
+    out_features: usize,
+    in_features: usize,
+) -> (Vec<i8>, Vec<f32>) {
     let mut q_weights = vec![0i8; out_features * in_features];
     let mut scales = vec![0.0f32; out_features];
 
     for j in 0..out_features {
         let row_offset = j * in_features;
         let row = &weights[row_offset..row_offset + in_features];
-        
+
         let mut max_abs = 0.0f32;
         for &x in row {
             let abs = x.abs();
@@ -34,8 +38,15 @@ pub fn quantize_to_int8(weights: &[f32], out_features: usize, in_features: usize
 }
 
 /// Quantize f32 weights to 4-bit unsigned integers (0-15) packed into u8, using row-wise scale and zero-point=8.
-pub fn quantize_to_int4(weights: &[f32], out_features: usize, in_features: usize) -> (Vec<u8>, Vec<f32>) {
-    assert!(in_features % 2 == 0, "in_features must be a multiple of 2 for INT4 packing");
+pub fn quantize_to_int4(
+    weights: &[f32],
+    out_features: usize,
+    in_features: usize,
+) -> (Vec<u8>, Vec<f32>) {
+    assert!(
+        in_features % 2 == 0,
+        "in_features must be a multiple of 2 for INT4 packing"
+    );
     let mut q_bytes = vec![0u8; out_features * (in_features / 2)];
     let mut scales = vec![0.0f32; out_features];
 

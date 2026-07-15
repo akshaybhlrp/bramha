@@ -3,7 +3,8 @@ pub fn l2_distance(u: &[f32], v: &[f32]) -> f32 {
     if u.len() != v.len() {
         return f32::INFINITY;
     }
-    let sum: f32 = u.iter()
+    let sum: f32 = u
+        .iter()
         .zip(v.iter())
         .map(|(&a, &b)| {
             let diff = a - b;
@@ -30,11 +31,11 @@ pub fn cosine_similarity(u: &[f32], v: &[f32]) -> f32 {
     let dot = dot_product(u, v);
     let norm_u: f32 = u.iter().map(|&x| x * x).sum::<f32>().sqrt();
     let norm_v: f32 = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
-    
+
     if norm_u == 0.0 || norm_v == 0.0 {
         return 0.0;
     }
-    
+
     dot / (norm_u * norm_v)
 }
 
@@ -63,7 +64,7 @@ mod tests {
         let a = vec![1.0, 0.0];
         let b = vec![0.0, 1.0];
         let c = vec![2.0, 0.0];
-        
+
         assert_eq!(cosine_similarity(&a, &b), 0.0); // orthogonal
         assert!((cosine_similarity(&a, &c) - 1.0).abs() < 1e-6); // parallel
     }

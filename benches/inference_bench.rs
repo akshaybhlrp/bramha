@@ -1,15 +1,15 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use std::sync::Arc;
-use tokio::runtime::Runtime;
-use bramha::storage::Database;
 use bramha::inference::cpu_engine::generate_cpu;
 use bramha::inference::engine::InferenceEngine;
 use bramha::inference::set_cpu_only;
+use bramha::storage::Database;
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::sync::Arc;
+use tokio::runtime::Runtime;
 
 // Helper function to setup a self-contained mock model
 async fn setup_mock_model() -> (Arc<Database>, std::path::PathBuf) {
     let db = Arc::new(Database::new(None, 1536));
-    
+
     // Attempt to locate an existing tokenizer.json
     let mut tokenizer_src = std::path::PathBuf::new();
     let candidate_paths = [
@@ -79,14 +79,35 @@ async fn setup_mock_model() -> (Arc<Database>, std::path::PathBuf) {
     write_dummy_weight("lm_head.weight", vocab_size * hidden_size);
     write_dummy_weight("model.norm.weight", hidden_size);
     write_dummy_weight("model.layers.0.input_layernorm.weight", hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.q_proj.weight", (num_q_heads * head_dim) * hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.k_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.v_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.o_proj.weight", hidden_size * (num_q_heads * head_dim));
-    write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
-    write_dummy_weight("model.layers.0.mlp.gate_proj.weight", mlp_size * hidden_size);
+    write_dummy_weight(
+        "model.layers.0.self_attn.q_proj.weight",
+        (num_q_heads * head_dim) * hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.self_attn.k_proj.weight",
+        (num_kv_heads * head_dim) * hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.self_attn.v_proj.weight",
+        (num_kv_heads * head_dim) * hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.self_attn.o_proj.weight",
+        hidden_size * (num_q_heads * head_dim),
+    );
+    write_dummy_weight(
+        "model.layers.0.post_attention_layernorm.weight",
+        hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.mlp.gate_proj.weight",
+        mlp_size * hidden_size,
+    );
     write_dummy_weight("model.layers.0.mlp.up_proj.weight", mlp_size * hidden_size);
-    write_dummy_weight("model.layers.0.mlp.down_proj.weight", hidden_size * mlp_size);
+    write_dummy_weight(
+        "model.layers.0.mlp.down_proj.weight",
+        hidden_size * mlp_size,
+    );
 
     bramha::storage::storage_manifest::write_mock_manifest(
         &temp_dir,
@@ -113,7 +134,9 @@ fn bench_inference(c: &mut Criterion) {
     // iterations with incompatible KV state, causing slice index panics.
     // SAFETY: We are the only thread at this point (before Criterion spawns benchmark threads),
     // and this environment variable is only read, never concurrently mutated elsewhere.
-    unsafe { std::env::set_var("BRAMHA_PREFIX_CACHE", "false"); }
+    unsafe {
+        std::env::set_var("BRAMHA_PREFIX_CACHE", "false");
+    }
 
     let rt = Runtime::new().unwrap();
     let (db, temp_dir) = rt.block_on(setup_mock_model());
@@ -124,14 +147,16 @@ fn bench_inference(c: &mut Criterion) {
     // --- CPU BENCHMARKS ---
     {
         let mut group = c.benchmark_group("CPU Inference");
-        
+
         // CPU Prefill Phase: Long Prompt, 1 target token
         let long_prompt = "hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world";
         group.bench_function("prefill_phase", |b| {
             b.iter(|| {
                 set_cpu_only(true);
                 rt.block_on(async {
-                    let _ = generate_cpu(db.clone(), "bench-mock-model", long_prompt, 1, 0.0).await.unwrap();
+                    let _ = generate_cpu(db.clone(), "bench-mock-model", long_prompt, 1, 0.0)
+                        .await
+                        .unwrap();
                 });
             });
         });
@@ -141,7 +166,9 @@ fn bench_inference(c: &mut Criterion) {
             b.iter(|| {
                 set_cpu_only(true);
                 rt.block_on(async {
-                    let _ = generate_cpu(db.clone(), "bench-mock-model", "hi", 30, 0.0).await.unwrap();
+                    let _ = generate_cpu(db.clone(), "bench-mock-model", "hi", 30, 0.0)
+                        .await
+                        .unwrap();
                 });
             });
         });
@@ -152,25 +179,38 @@ fn bench_inference(c: &mut Criterion) {
             b.iter(|| {
                 set_cpu_only(true);
                 rt.block_on(async {
-                    let _ = generate_cpu(db.clone(), "bench-mock-model", repeating_prompt, 30, 0.0).await.unwrap();
+                    let _ = generate_cpu(db.clone(), "bench-mock-model", repeating_prompt, 30, 0.0)
+                        .await
+                        .unwrap();
                 });
             });
         });
-        
+
         group.finish();
     }
 
     // --- WGPU BENCHMARKS ---
     {
         let mut group = c.benchmark_group("WGPU Inference");
-        
+
         // WGPU Prefill Phase: Long Prompt, 1 target token
         let long_prompt = "hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world";
         group.bench_function("prefill_phase", |b| {
             b.iter(|| {
                 set_cpu_only(false);
                 rt.block_on(async {
-                    let _ = InferenceEngine::new(None).generate(db.clone(), "bench-mock-model", long_prompt, 1, 0.0, None, None).await.unwrap();
+                    let _ = InferenceEngine::new(None)
+                        .generate(
+                            db.clone(),
+                            "bench-mock-model",
+                            long_prompt,
+                            1,
+                            0.0,
+                            None,
+                            None,
+                        )
+                        .await
+                        .unwrap();
                 });
             });
         });
@@ -180,7 +220,10 @@ fn bench_inference(c: &mut Criterion) {
             b.iter(|| {
                 set_cpu_only(false);
                 rt.block_on(async {
-                    let _ = InferenceEngine::new(None).generate(db.clone(), "bench-mock-model", "hi", 30, 0.0, None, None).await.unwrap();
+                    let _ = InferenceEngine::new(None)
+                        .generate(db.clone(), "bench-mock-model", "hi", 30, 0.0, None, None)
+                        .await
+                        .unwrap();
                 });
             });
         });
@@ -191,7 +234,18 @@ fn bench_inference(c: &mut Criterion) {
             b.iter(|| {
                 set_cpu_only(false);
                 rt.block_on(async {
-                    let _ = InferenceEngine::new(None).generate(db.clone(), "bench-mock-model", repeating_prompt, 30, 0.0, None, None).await.unwrap();
+                    let _ = InferenceEngine::new(None)
+                        .generate(
+                            db.clone(),
+                            "bench-mock-model",
+                            repeating_prompt,
+                            30,
+                            0.0,
+                            None,
+                            None,
+                        )
+                        .await
+                        .unwrap();
                 });
             });
         });

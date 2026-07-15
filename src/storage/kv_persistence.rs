@@ -1,5 +1,7 @@
+use crate::inference::paged_kv::prefix_cache::{
+    PrefixCacheEntry, find_longest_prefix, save_prefix,
+};
 use std::path::{Path, PathBuf};
-use crate::inference::paged_kv::prefix_cache::{save_prefix, find_longest_prefix, PrefixCacheEntry};
 
 pub enum KVPersistenceMoment {
     Cold,
@@ -34,12 +36,15 @@ impl KVPersistenceManager {
             KVPersistenceMoment::Evict => "evict",
             KVPersistenceMoment::Shutdown => "shutdown",
         };
-        
-        println!("💾 [KV Persistence] Saving KV cache on lifecycle moment: {}", moment_str);
-        
+
+        println!(
+            "💾 [KV Persistence] Saving KV cache on lifecycle moment: {}",
+            moment_str
+        );
+
         // This automatically handles boundary-aligned trimming and chunks.
         save_prefix(&self.base_path, tokens, keys, values)?;
-        
+
         Ok(())
     }
 
@@ -60,8 +65,12 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
-        unsafe { std::env::set_var("BRAMHA_PREFIX_CACHE", "true"); }
-        unsafe { std::env::set_var("BRAMHA_KV_TRIM_N", "0"); }
+        unsafe {
+            std::env::set_var("BRAMHA_PREFIX_CACHE", "true");
+        }
+        unsafe {
+            std::env::set_var("BRAMHA_KV_TRIM_N", "0");
+        }
 
         let manager = KVPersistenceManager::new(&temp_dir);
 
@@ -70,16 +79,24 @@ mod tests {
         let values = vec![vec![1.5; 16]];
 
         // Test Cold save
-        manager.persist(KVPersistenceMoment::Cold, &tokens, &keys, &values).unwrap();
+        manager
+            .persist(KVPersistenceMoment::Cold, &tokens, &keys, &values)
+            .unwrap();
 
         // Test Continued save
-        manager.persist(KVPersistenceMoment::Continued, &tokens, &keys, &values).unwrap();
+        manager
+            .persist(KVPersistenceMoment::Continued, &tokens, &keys, &values)
+            .unwrap();
 
         // Test Evict save
-        manager.persist(KVPersistenceMoment::Evict, &tokens, &keys, &values).unwrap();
+        manager
+            .persist(KVPersistenceMoment::Evict, &tokens, &keys, &values)
+            .unwrap();
 
         // Test Shutdown save
-        manager.persist(KVPersistenceMoment::Shutdown, &tokens, &keys, &values).unwrap();
+        manager
+            .persist(KVPersistenceMoment::Shutdown, &tokens, &keys, &values)
+            .unwrap();
 
         // Test Load
         let load_res = manager.load(&tokens);
@@ -89,7 +106,11 @@ mod tests {
         assert_eq!(entry.tokens, tokens);
 
         let _ = fs::remove_dir_all(&temp_dir);
-        unsafe { std::env::remove_var("BRAMHA_PREFIX_CACHE"); }
-        unsafe { std::env::remove_var("BRAMHA_KV_TRIM_N"); }
+        unsafe {
+            std::env::remove_var("BRAMHA_PREFIX_CACHE");
+        }
+        unsafe {
+            std::env::remove_var("BRAMHA_KV_TRIM_N");
+        }
     }
 }

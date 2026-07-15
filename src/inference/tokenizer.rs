@@ -1,5 +1,5 @@
-use tokenizers::Tokenizer;
 use std::path::{Path, PathBuf};
+use tokenizers::Tokenizer;
 
 pub struct BramhaTokenizer {
     tokenizer: Tokenizer,
@@ -10,19 +10,30 @@ impl BramhaTokenizer {
     /// and HuggingFace cache snapshots to guarantee a zero-IPC pure-Rust flow.
     pub fn load(model_name: &str, base_path: &Path) -> Result<Self, String> {
         let tokenizer_path = Self::resolve_path(model_name, base_path)?;
-        
-        // Port mistral.rs tokenizer fix: Ensure added_tokens are actually in the vocab 
+
+        // Port mistral.rs tokenizer fix: Ensure added_tokens are actually in the vocab
         // to prevent token_to_id from failing for special tokens.
-        let raw = std::fs::read(&tokenizer_path).map_err(|e| format!("Failed to read tokenizer: {}", e))?;
-        let mut tokenizer_json: serde_json::Value = serde_json::from_slice(&raw)
-            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
-        
-        let added_tokens_opt = tokenizer_json.get("added_tokens").and_then(|v| v.as_array()).cloned();
-        
+        let raw = std::fs::read(&tokenizer_path)
+            .map_err(|e| format!("Failed to read tokenizer: {}", e))?;
+        let mut tokenizer_json: serde_json::Value =
+            serde_json::from_slice(&raw).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+        let added_tokens_opt = tokenizer_json
+            .get("added_tokens")
+            .and_then(|v| v.as_array())
+            .cloned();
+
         if let Some(added_tokens) = added_tokens_opt {
-            if let Some(vocab) = tokenizer_json.get_mut("model").and_then(|m| m.get_mut("vocab")).and_then(|v| v.as_object_mut()) {
+            if let Some(vocab) = tokenizer_json
+                .get_mut("model")
+                .and_then(|m| m.get_mut("vocab"))
+                .and_then(|v| v.as_object_mut())
+            {
                 for token in added_tokens {
-                    if let (Some(content), Some(id)) = (token.get("content").and_then(|c| c.as_str()), token.get("id")) {
+                    if let (Some(content), Some(id)) = (
+                        token.get("content").and_then(|c| c.as_str()),
+                        token.get("id"),
+                    ) {
                         if !vocab.contains_key(content) {
                             vocab.insert(content.to_string(), id.clone());
                         }
@@ -30,11 +41,11 @@ impl BramhaTokenizer {
                 }
             }
         }
-        
+
         let raw_fixed = serde_json::to_vec(&tokenizer_json).map_err(|e| e.to_string())?;
         let tokenizer = Tokenizer::from_bytes(&raw_fixed)
             .map_err(|e| format!("Failed to parse fixed tokenizer.json: {}", e))?;
-        
+
         Ok(BramhaTokenizer { tokenizer })
     }
 
@@ -46,8 +57,12 @@ impl BramhaTokenizer {
         }
 
         // 2. Check HuggingFace Cache Snapshots if not found locally
-        let hf_home = std::env::var("HF_HOME")
-            .unwrap_or_else(|_| format!("{}/.cache/huggingface", std::env::var("HOME").unwrap_or_default()));
+        let hf_home = std::env::var("HF_HOME").unwrap_or_else(|_| {
+            format!(
+                "{}/.cache/huggingface",
+                std::env::var("HOME").unwrap_or_default()
+            )
+        });
         let hub_dir = format!("{}/hub", hf_home);
         let model_lower = model_name.to_lowercase();
 
@@ -85,15 +100,28 @@ impl BramhaTokenizer {
     /// In-process encoding of textual prompt to tokens
     pub fn encode(&self, prompt: &str, add_special_tokens: bool) -> Result<Vec<u32>, String> {
         let special_tokens = [
-            "<|system|>", "<|user|>", "<|assistant|>", "</s>", "<s>",
-            "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>",
-            "[INST]", "[/INST]", "<<SYS>>", "<</SYS>>",
+            "<|system|>",
+            "<|user|>",
+            "<|assistant|>",
+            "</s>",
+            "<s>",
+            "<|start_header_id|>",
+            "<|end_header_id|>",
+            "<|eot_id|>",
+            "[INST]",
+            "[/INST]",
+            "<<SYS>>",
+            "<</SYS>>",
             "<|begin_of_text|>",
-            "<|im_start|>", "<|im_end|>",
+            "<|im_start|>",
+            "<|im_end|>",
         ];
 
         let mut final_ids = Vec::new();
-        println!("BramhaTokenizer::encode called with add_special_tokens={}", add_special_tokens);
+        println!(
+            "BramhaTokenizer::encode called with add_special_tokens={}",
+            add_special_tokens
+        );
         if add_special_tokens && !prompt.starts_with("<s>") {
             if let Some(bos) = self.tokenizer.token_to_id("<s>") {
                 final_ids.push(bos);
@@ -144,7 +172,8 @@ impl BramhaTokenizer {
 
     /// In-process decoding of tokens back to human-readable string
     pub fn decode(&self, ids: &[u32], skip_special_tokens: bool) -> Result<String, String> {
-        self.tokenizer.decode(ids, skip_special_tokens)
+        self.tokenizer
+            .decode(ids, skip_special_tokens)
             .map_err(|e| format!("Tokenization decoding error: {}", e))
     }
 
@@ -164,13 +193,21 @@ impl BramhaTokenizer {
         if config_path.is_file() {
             if let Ok(raw) = std::fs::read(&config_path) {
                 if let Ok(config_json) = serde_json::from_slice::<serde_json::Value>(&raw) {
-                    if let Some(chat_template) = config_json.get("chat_template").and_then(|v| v.as_str()) {
+                    if let Some(chat_template) =
+                        config_json.get("chat_template").and_then(|v| v.as_str())
+                    {
                         let mut env = minijinja::Environment::new();
                         // Add some basic functions HF templates expect
-                        env.add_function("raise_exception", |_msg: String| -> Result<String, minijinja::Error> {
-                            Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, "HF Template exception"))
-                        });
-                        
+                        env.add_function(
+                            "raise_exception",
+                            |_msg: String| -> Result<String, minijinja::Error> {
+                                Err(minijinja::Error::new(
+                                    minijinja::ErrorKind::InvalidOperation,
+                                    "HF Template exception",
+                                ))
+                            },
+                        );
+
                         if let Ok(template) = env.template_from_str(chat_template) {
                             let context = minijinja::context! {
                                 messages => vec![
@@ -181,7 +218,7 @@ impl BramhaTokenizer {
                                 bos_token => config_json.get("bos_token").and_then(|v| v.as_str()).unwrap_or(""),
                                 eos_token => config_json.get("eos_token").and_then(|v| v.as_str()).unwrap_or(""),
                             };
-                            
+
                             if let Ok(rendered) = template.render(context) {
                                 return rendered;
                             }
@@ -193,10 +230,21 @@ impl BramhaTokenizer {
 
         // Fallback for missing template
         let model_name_lower = model_name.to_lowercase();
-        if !prompt.contains("<|system|>") && !prompt.contains("<|user|>") && model_name_lower.contains("tinyllama") {
-            format!("<|system|>\nYou are a helpful AI assistant.</s>\n<|user|>\n{}</s>\n<|assistant|>\n", prompt)
-        } else if !prompt.contains("<|im_start|>") && (model_name_lower.contains("llama") || model_name_lower.contains("qwen")) {
-            format!("<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n", prompt)
+        if !prompt.contains("<|system|>")
+            && !prompt.contains("<|user|>")
+            && model_name_lower.contains("tinyllama")
+        {
+            format!(
+                "<|system|>\nYou are a helpful AI assistant.</s>\n<|user|>\n{}</s>\n<|assistant|>\n",
+                prompt
+            )
+        } else if !prompt.contains("<|im_start|>")
+            && (model_name_lower.contains("llama") || model_name_lower.contains("qwen"))
+        {
+            format!(
+                "<|im_start|>system\nYou are a helpful AI assistant.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+                prompt
+            )
         } else {
             prompt.to_string()
         }

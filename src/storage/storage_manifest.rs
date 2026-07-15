@@ -12,7 +12,6 @@
 /// - Storage locations and offsets
 /// - Compression ratios achieved
 /// - Access patterns and statistics
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -405,15 +404,14 @@ impl ModelManifest {
         );
         println!(
             "Saved: {:.2} MB",
-            (self.total_original_size as i64 - self.total_stored_size as i64) as f64 / 1024.0 / 1024.0
+            (self.total_original_size as i64 - self.total_stored_size as i64) as f64
+                / 1024.0
+                / 1024.0
         );
 
         println!("\n🔐 Quantization Statistics");
         println!("───────────────────────────────────────────────────────────");
-        println!(
-            "Full precision: {} layers",
-            self.full_precision_layers
-        );
+        println!("Full precision: {} layers", self.full_precision_layers);
         println!("Quantized:      {} layers", self.quantized_layers);
         println!(
             "Ratio:          {:.1}% quantized",
@@ -524,7 +522,11 @@ mod tests {
         assert_eq!(loaded_manifest.num_layers, 12);
         assert_eq!(loaded_manifest.important_count, 1);
         assert_eq!(
-            loaded_manifest.layers.get("layer_0").unwrap().compression_format,
+            loaded_manifest
+                .layers
+                .get("layer_0")
+                .unwrap()
+                .compression_format,
             CompressionFormat::Int8Linear
         );
     }
@@ -567,7 +569,11 @@ pub fn write_mock_manifest(
 
     let mut add_mock_layer = |layer_id: &str, shape: Vec<usize>| {
         let mut meta = LayerMetadata::new(layer_id.to_string(), shape);
-        meta.storage_tier = if layer_id.contains("embed") || layer_id.contains("lm_head") || layer_id.contains("norm") || layer_id.contains("attn") {
+        meta.storage_tier = if layer_id.contains("embed")
+            || layer_id.contains("lm_head")
+            || layer_id.contains("norm")
+            || layer_id.contains("attn")
+        {
             StorageTier::Critical
         } else {
             StorageTier::Important
@@ -579,14 +585,38 @@ pub fn write_mock_manifest(
     add_mock_layer("lm_head.weight", vec![vocab_size, hidden_size]);
     add_mock_layer("model.norm.weight", vec![hidden_size]);
     add_mock_layer("model.layers.0.input_layernorm.weight", vec![hidden_size]);
-    add_mock_layer("model.layers.0.self_attn.q_proj.weight", vec![num_q_heads * head_dim, hidden_size]);
-    add_mock_layer("model.layers.0.self_attn.k_proj.weight", vec![num_kv_heads * head_dim, hidden_size]);
-    add_mock_layer("model.layers.0.self_attn.v_proj.weight", vec![num_kv_heads * head_dim, hidden_size]);
-    add_mock_layer("model.layers.0.self_attn.o_proj.weight", vec![hidden_size, num_q_heads * head_dim]);
-    add_mock_layer("model.layers.0.post_attention_layernorm.weight", vec![hidden_size]);
-    add_mock_layer("model.layers.0.mlp.gate_proj.weight", vec![mlp_size, hidden_size]);
-    add_mock_layer("model.layers.0.mlp.up_proj.weight", vec![mlp_size, hidden_size]);
-    add_mock_layer("model.layers.0.mlp.down_proj.weight", vec![hidden_size, mlp_size]);
+    add_mock_layer(
+        "model.layers.0.self_attn.q_proj.weight",
+        vec![num_q_heads * head_dim, hidden_size],
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.k_proj.weight",
+        vec![num_kv_heads * head_dim, hidden_size],
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.v_proj.weight",
+        vec![num_kv_heads * head_dim, hidden_size],
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.o_proj.weight",
+        vec![hidden_size, num_q_heads * head_dim],
+    );
+    add_mock_layer(
+        "model.layers.0.post_attention_layernorm.weight",
+        vec![hidden_size],
+    );
+    add_mock_layer(
+        "model.layers.0.mlp.gate_proj.weight",
+        vec![mlp_size, hidden_size],
+    );
+    add_mock_layer(
+        "model.layers.0.mlp.up_proj.weight",
+        vec![mlp_size, hidden_size],
+    );
+    add_mock_layer(
+        "model.layers.0.mlp.down_proj.weight",
+        vec![hidden_size, mlp_size],
+    );
 
     let manifest_json = serde_json::to_string_pretty(&manifest).unwrap();
     std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
@@ -619,7 +649,11 @@ pub fn write_mock_moe_manifest(
 
     let mut add_mock_layer = |layer_id: &str, shape: Vec<usize>, chunks: Option<Vec<String>>| {
         let mut meta = LayerMetadata::new(layer_id.to_string(), shape);
-        meta.storage_tier = if layer_id.contains("embed") || layer_id.contains("lm_head") || layer_id.contains("norm") || layer_id.contains("attn") {
+        meta.storage_tier = if layer_id.contains("embed")
+            || layer_id.contains("lm_head")
+            || layer_id.contains("norm")
+            || layer_id.contains("attn")
+        {
             StorageTier::Critical
         } else {
             StorageTier::Important
@@ -628,18 +662,50 @@ pub fn write_mock_moe_manifest(
         manifest.add_layer(meta);
     };
 
-    add_mock_layer("model.embed_tokens.weight", vec![vocab_size, hidden_size], None);
+    add_mock_layer(
+        "model.embed_tokens.weight",
+        vec![vocab_size, hidden_size],
+        None,
+    );
     add_mock_layer("lm_head.weight", vec![vocab_size, hidden_size], None);
     add_mock_layer("model.norm.weight", vec![hidden_size], None);
-    add_mock_layer("model.layers.0.input_layernorm.weight", vec![hidden_size], None);
-    add_mock_layer("model.layers.0.self_attn.q_proj.weight", vec![num_q_heads * head_dim, hidden_size], None);
-    add_mock_layer("model.layers.0.self_attn.k_proj.weight", vec![num_kv_heads * head_dim, hidden_size], None);
-    add_mock_layer("model.layers.0.self_attn.v_proj.weight", vec![num_kv_heads * head_dim, hidden_size], None);
-    add_mock_layer("model.layers.0.self_attn.o_proj.weight", vec![hidden_size, num_q_heads * head_dim], None);
-    add_mock_layer("model.layers.0.post_attention_layernorm.weight", vec![hidden_size], None);
-    
+    add_mock_layer(
+        "model.layers.0.input_layernorm.weight",
+        vec![hidden_size],
+        None,
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.q_proj.weight",
+        vec![num_q_heads * head_dim, hidden_size],
+        None,
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.k_proj.weight",
+        vec![num_kv_heads * head_dim, hidden_size],
+        None,
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.v_proj.weight",
+        vec![num_kv_heads * head_dim, hidden_size],
+        None,
+    );
+    add_mock_layer(
+        "model.layers.0.self_attn.o_proj.weight",
+        vec![hidden_size, num_q_heads * head_dim],
+        None,
+    );
+    add_mock_layer(
+        "model.layers.0.post_attention_layernorm.weight",
+        vec![hidden_size],
+        None,
+    );
+
     // Router / Gate Weight
-    add_mock_layer("model.layers.0.mlp.router.weight", vec![num_experts, hidden_size], None);
+    add_mock_layer(
+        "model.layers.0.mlp.router.weight",
+        vec![num_experts, hidden_size],
+        None,
+    );
 
     // Dynamic Chunks for Experts
     let mut mlp_chunks = Vec::new();
@@ -647,7 +713,7 @@ pub fn write_mock_moe_manifest(
         let gate_name = format!("model.layers.0.mlp.experts.{}.gate_proj.weight", e);
         let up_name = format!("model.layers.0.mlp.experts.{}.up_proj.weight", e);
         let down_name = format!("model.layers.0.mlp.experts.{}.down_proj.weight", e);
-        
+
         add_mock_layer(&gate_name, vec![mlp_size, hidden_size], None);
         add_mock_layer(&up_name, vec![mlp_size, hidden_size], None);
         add_mock_layer(&down_name, vec![hidden_size, mlp_size], None);
@@ -663,4 +729,3 @@ pub fn write_mock_moe_manifest(
     let manifest_json = serde_json::to_string_pretty(&manifest).unwrap();
     std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
 }
-

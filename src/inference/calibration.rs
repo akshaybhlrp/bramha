@@ -16,16 +16,16 @@ pub fn calibrate_thresholds(model: &ModelTable) -> Vec<f32> {
             }
         }
     }
-    
+
     let num_layers = max_layer + 1;
     let mut thresholds = vec![0.0; num_layers];
-    
+
     for i in 0..num_layers {
         // Model-specific confidence band: early layers need extremely high confidence,
         // deeper layers require progressively less additional confidence to exit.
         let ratio = i as f32 / num_layers as f32;
         thresholds[i] = 0.95 - 0.25 * ratio; // e.g. layer 0 = 0.95, last layer = 0.70
     }
-    
+
     thresholds
 }

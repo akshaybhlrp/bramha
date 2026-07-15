@@ -1,10 +1,10 @@
-pub mod memory;
-pub mod goal_graph;
-pub mod integrity;
+pub mod adapter;
 pub mod analytics;
 pub mod controller;
-pub mod router;
 pub mod dashboard_ops;
+pub mod goal_graph;
+pub mod integrity;
+pub mod memory;
 pub mod onboard;
-pub mod adapter;
+pub mod router;
 pub mod verifier;

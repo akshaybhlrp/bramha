@@ -10,7 +10,7 @@
 //! All caches are thread-safe, support zero-copy reads where possible,
 //! and integrate with the existing multi-tier storage system.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -121,10 +121,14 @@ impl InMemoryDatabase {
             .as_secs();
 
         // Check TTL expiry first (needs separate lookup to avoid borrow conflicts)
-        let is_expired = self.entries.get(key).and_then(|e| e.ttl_secs).map_or(false, |ttl| {
-            let created = self.entries.get(key).map(|e| e.created_at).unwrap_or(0);
-            now - created >= ttl
-        });
+        let is_expired = self
+            .entries
+            .get(key)
+            .and_then(|e| e.ttl_secs)
+            .map_or(false, |ttl| {
+                let created = self.entries.get(key).map(|e| e.created_at).unwrap_or(0);
+                now - created >= ttl
+            });
 
         if is_expired {
             if let Some(entry) = self.entries.remove(key) {
@@ -172,9 +176,7 @@ impl InMemoryDatabase {
     /// Evict a single entry based on the current policy.
     fn evict_one(&mut self) {
         let victim_key = match self.eviction_policy {
-            EvictionPolicy::Lru | EvictionPolicy::Fifo => {
-                self.access_order.pop_front()
-            }
+            EvictionPolicy::Lru | EvictionPolicy::Fifo => self.access_order.pop_front(),
             EvictionPolicy::Lfu => {
                 // Find least frequently used
                 let mut min_freq = u64::MAX;
@@ -593,10 +595,7 @@ impl BufferPool {
 
     /// Get all dirty pages for write-back.
     pub fn dirty_pages(&self) -> Vec<&BufferPage> {
-        self.pages
-            .values()
-            .filter(|p| p.is_dirty)
-            .collect()
+        self.pages.values().filter(|p| p.is_dirty).collect()
     }
 
     /// Clear all pages.
@@ -764,9 +763,11 @@ impl EdgeCache {
             .as_secs();
 
         // Check TTL expiry first (separate lookup to avoid borrow conflicts)
-        let expired = self.region_caches.get(region).and_then(|cache| {
-            cache.get(key).filter(|e| now - e.cached_at > e.ttl_secs)
-        }).is_some();
+        let expired = self
+            .region_caches
+            .get(region)
+            .and_then(|cache| cache.get(key).filter(|e| now - e.cached_at > e.ttl_secs))
+            .is_some();
 
         if expired {
             if let Some(cache) = self.region_caches.get_mut(region) {
@@ -804,10 +805,7 @@ impl EdgeCache {
     pub fn record_latency(&mut self, region: GeoRegion, latency_ms: f64) {
         // Exponential moving average
         let alpha = 0.3;
-        let entry = self
-            .region_latency
-            .entry(region)
-            .or_insert(latency_ms);
+        let entry = self.region_latency.entry(region).or_insert(latency_ms);
         *entry = alpha * latency_ms + (1.0 - alpha) * *entry;
     }
 
@@ -830,10 +828,7 @@ impl EdgeCache {
 
     /// Get the number of cached entries for a region.
     pub fn region_size(&self, region: &GeoRegion) -> usize {
-        self.region_caches
-            .get(region)
-            .map(|c| c.len())
-            .unwrap_or(0)
+        self.region_caches.get(region).map(|c| c.len()).unwrap_or(0)
     }
 
     /// Total cached entries across all regions.
@@ -1078,7 +1073,12 @@ impl SemanticCache {
         None
     }
 
-    pub fn insert(&mut self, prompt: String, vector: Vec<f32>, completion: String) -> Result<(), String> {
+    pub fn insert(
+        &mut self,
+        prompt: String,
+        vector: Vec<f32>,
+        completion: String,
+    ) -> Result<(), String> {
         self.items.push(CacheItem {
             prompt,
             prompt_vector: vector,

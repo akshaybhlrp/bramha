@@ -1,8 +1,8 @@
-use std::fs::File;
-use memmap2::Mmap;
 use bytemuck::cast_slice;
-use std::path::Path;
+use memmap2::Mmap;
+use std::fs::File;
 use std::io;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,8 +12,8 @@ pub enum DType {
     BF16,
     I8,
     U8,
-    U4, // Packed 4-bit unsigned integers
-    Svd, // Low-rank SVD factorization
+    U4,           // Packed 4-bit unsigned integers
+    Svd,          // Low-rank SVD factorization
     ColumnarDict, // Column-major dictionary encoding
     Other,
 }
@@ -38,28 +38,33 @@ pub struct TensorPage {
     pub shape: Vec<usize>,
     pub dtype: DType,
     data: Arc<TensorData>,
-    start: usize,    // Byte offset start
-    end: usize,      // Byte offset end
+    start: usize,                // Byte offset start
+    end: usize,                  // Byte offset end
     pub svd_rank: Option<usize>, // SVD Rank if factorized
 }
 
 impl TensorPage {
     /// Loads a single file as a complete tensor page
-    pub fn load_mmap_single(name: String, path: &Path, shape: Vec<usize>, dtype: DType) -> io::Result<Self> {
+    pub fn load_mmap_single(
+        name: String,
+        path: &Path,
+        shape: Vec<usize>,
+        dtype: DType,
+    ) -> io::Result<Self> {
         let file = File::open(path)?;
         let mmap = unsafe {
             let mut opts = memmap2::MmapOptions::new();
             // Try to use hugepages and populate the page tables immediately for latency reduction
             #[cfg(target_os = "linux")]
             opts.huge(None);
-            
-            // Note: populate is not always supported or might fail if hugepages are strict, 
+
+            // Note: populate is not always supported or might fail if hugepages are strict,
             // but we use standard map as a fallback if needed. For now, try populate.
             let _ = opts.populate();
             opts.map(&file)?
         };
         let end = mmap.len();
-        
+
         Ok(TensorPage {
             name,
             shape,
@@ -86,7 +91,14 @@ impl TensorPage {
     }
 
     /// Creates a tensor page as a slice of a larger memory-mapped file (e.g. safetensors)
-    pub fn new_slice(name: String, data: Arc<TensorData>, shape: Vec<usize>, dtype: DType, start: usize, end: usize) -> Self {
+    pub fn new_slice(
+        name: String,
+        data: Arc<TensorData>,
+        shape: Vec<usize>,
+        dtype: DType,
+        start: usize,
+        end: usize,
+    ) -> Self {
         TensorPage {
             name,
             shape,
@@ -134,15 +146,18 @@ impl TensorPage {
     /// Access as f32 slice (assumes tensor is actually f32)
     pub fn as_f32(&self) -> &[f32] {
         let b = self.as_bytes();
-        assert!((b.as_ptr() as usize) % 4 == 0, "CRITICAL ALIGNMENT ERROR: ptr is not 4-byte aligned!");
+        assert!(
+            (b.as_ptr() as usize) % 4 == 0,
+            "CRITICAL ALIGNMENT ERROR: ptr is not 4-byte aligned!"
+        );
         cast_slice(b)
     }
-    
+
     /// Dynamic LoRA joining (adding an adapter to a base layer)
     pub fn join_f32(&self, lora: &TensorPage) -> Vec<f32> {
         let base = self.as_f32();
         let adapter = lora.as_f32();
-        
+
         // Fast SIMD-friendly vector addition
         base.iter()
             .zip(adapter.iter())

@@ -11,8 +11,9 @@ pub fn atomic_write_file(path: &Path, data: &[u8]) -> std::io::Result<()> {
     }
 
     // 2. Generate path for the temporary file
-    let file_name = path.file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file path"))?;
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file path")
+    })?;
     let mut tmp_file_name = file_name.to_os_string();
     tmp_file_name.push(".tmp");
     let tmp_path = path.with_file_name(tmp_file_name);
@@ -25,7 +26,7 @@ pub fn atomic_write_file(path: &Path, data: &[u8]) -> std::io::Result<()> {
         .open(&tmp_path)?;
 
     file.write_all(data)?;
-    
+
     // 4. Force synchronization of both data and metadata to disk platters/chips
     file.sync_all()?;
 
@@ -46,7 +47,7 @@ mod tests {
     fn test_atomic_write_file_correctness() {
         let temp_dir = std::env::temp_dir();
         let target_path = temp_dir.join("test_atomic_write_final.bin");
-        
+
         let test_data = b"Bramha Neural Engine Crash-Safe Shard Writing";
         atomic_write_file(&target_path, test_data).unwrap();
 

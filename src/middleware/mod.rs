@@ -1,2 +1,2 @@
-pub mod queue;
 pub mod auth;
+pub mod queue;

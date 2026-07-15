@@ -1,12 +1,11 @@
-use std::fs::File;
-use std::path::Path;
 use safetensors::SafeTensors;
 use safetensors::tensor::Dtype as ST_Dtype;
+use std::fs::File;
+use std::path::Path;
 
-
-use crate::core::tensor::{TensorPage, DType};
-use crate::storage::tensor_db::ModelTable;
+use crate::core::tensor::{DType, TensorPage};
 use crate::storage::atomic_write::atomic_write_file;
+use crate::storage::tensor_db::ModelTable;
 
 /// Helper to convert safetensors dtype to our internal DType
 fn convert_dtype(st_dtype: ST_Dtype) -> DType {
@@ -19,8 +18,6 @@ fn convert_dtype(st_dtype: ST_Dtype) -> DType {
         _ => DType::Other,
     }
 }
-
-
 
 pub fn string_to_dtype(s: &str) -> DType {
     match s {
@@ -37,7 +34,10 @@ pub fn string_to_dtype(s: &str) -> DType {
 /// Natively shards an entire `.safetensors` file into 1MB blocks stored in the content-addressed block database
 /// and registers them as independent in-memory TensorPages in the given ModelTable.
 /// Also writes a `model_view.json` for virtual restoration on restart.
-pub fn shard_safetensors_file(table: &mut ModelTable, file_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn shard_safetensors_file(
+    table: &mut ModelTable,
+    file_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(file_path)?;
     // Create a memory map of the whole source file
     let mmap = unsafe {
@@ -57,7 +57,11 @@ pub fn shard_safetensors_file(table: &mut ModelTable, file_path: &Path) -> Resul
     // Parse the safetensors header using the safetensors crate
     let st = SafeTensors::deserialize(mmap_arc.as_bytes())?;
 
-    let content_dir = table.base_path.parent().unwrap_or(Path::new("")).join("content");
+    let content_dir = table
+        .base_path
+        .parent()
+        .unwrap_or(Path::new(""))
+        .join("content");
     let block_db = std::sync::Mutex::new(crate::storage::block_db::BlockDB::new(&content_dir)?);
 
     let model_view_path = table.base_path.join("model_view.json");
@@ -91,12 +95,12 @@ pub fn shard_safetensors_file(table: &mut ModelTable, file_path: &Path) -> Resul
 
     let layer_indices_dir = table.base_path.join("layer_indices");
     std::fs::create_dir_all(&layer_indices_dir)?;
-    
-    // Process tensors sequentially to drastically reduce peak memory usage 
+
+    // Process tensors sequentially to drastically reduce peak memory usage
     // and avoid lock contention on the block_db.
     for task in tasks {
         let tensor_data = &mmap_arc.as_bytes()[task.start..task.end];
-        
+
         let is_originally_f32 = task.dtype == DType::F32;
         let mapped_dtype = DType::F32;
         let is_f32_conversion = matches!(task.dtype, DType::F16 | DType::BF16 | DType::I8);
@@ -155,7 +159,7 @@ pub fn shard_safetensors_file(table: &mut ModelTable, file_path: &Path) -> Resul
             for chunk in chunks {
                 db.store_block(&chunk.hash, &chunk.data).unwrap();
                 block_hashes.push(chunk.hash.clone());
-                
+
                 let location = db.get_block_location(&chunk.hash);
                 layer_chunks.push(crate::storage::model_view::LayerChunk {
                     chunk_index: chunk_idx,
@@ -166,7 +170,7 @@ pub fn shard_safetensors_file(table: &mut ModelTable, file_path: &Path) -> Resul
             }
             offset = end;
         }
-        
+
         let layer_index = crate::storage::model_view::LayerIndex {
             layer_name: task.name.clone(),
             chunks: layer_chunks,
@@ -230,11 +234,11 @@ mod tests {
         let header_json = r#"{"__metadata__":{},"model.layers.0.input_layernorm.weight":{"dtype":"F32","shape":[2,2],"data_offsets":[0,16]}}"#;
         let header_bytes = header_json.as_bytes();
         let header_len = header_bytes.len() as u64;
-        
+
         let mut file_bytes = Vec::new();
         file_bytes.extend_from_slice(&header_len.to_le_bytes());
         file_bytes.extend_from_slice(header_bytes);
-        
+
         let tensor_data = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32];
         file_bytes.extend_from_slice(bytemuck::cast_slice(&tensor_data));
         file_bytes
@@ -267,12 +271,14 @@ mod tests {
         assert!(res.is_ok());
 
         // 4. Verify results
-        assert!(table.layers.contains_key("model.layers.0.input_layernorm.weight"));
+        assert!(
+            table
+                .layers
+                .contains_key("model.layers.0.input_layernorm.weight")
+        );
         assert_eq!(table.early_exit_thresholds, vec![0.95]);
 
         let model_view_path = table.base_path.join("model_view.json");
         assert!(model_view_path.exists());
     }
 }
-
-

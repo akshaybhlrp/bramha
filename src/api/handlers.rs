@@ -1208,6 +1208,7 @@ pub struct LoadModelPayload {
 }
 
 pub async fn llm_load_model(
+    _admin: crate::middleware::auth::RequireAdmin,
     State(db): State<SharedState>,
     Json(payload): Json<LoadModelPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {

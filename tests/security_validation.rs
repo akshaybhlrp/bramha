@@ -199,3 +199,55 @@ async fn test_ingest_model_symlink_rejection() {
     let _ = std::fs::remove_dir_all(target_dir);
     let _ = std::fs::remove_file(db_path);
 }
+
+#[tokio::test]
+async fn test_llm_load_model_authorization() {
+    let db_path = "storage/test_security_load_model.db";
+    let _ = std::fs::remove_file(db_path);
+
+    let db = Database::new(Some(db_path.to_string()), 1536);
+    let shared_db = Arc::new(db);
+    let app = create_router(shared_db);
+
+    let payload = json!({
+        "model_name": "tinyllama",
+        "device": "cpu"
+    });
+
+    // 1. Unauthenticated -> 401
+    let req = Request::builder()
+        .uri("/api/llm/load_model")
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. ReadOnly -> 403
+    let req = Request::builder()
+        .uri("/api/llm/load_model")
+        .method("POST")
+        .header("Authorization", "Bearer read_key")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. Admin -> Not 401 or 403 (could be 400 Bad Request or 200 depending on actual file existence)
+    let req = Request::builder()
+        .uri("/api/llm/load_model")
+        .method("POST")
+        .header("Authorization", "Bearer admin_key")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert!(res.status() != StatusCode::UNAUTHORIZED && res.status() != StatusCode::FORBIDDEN);
+
+    let _ = std::fs::remove_file(db_path);
+}

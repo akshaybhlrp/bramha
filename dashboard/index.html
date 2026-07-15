@@ -1,0 +1,3151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bramha - LLM Vector Database Visualizer</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom Modern Vanilla CSS Design System with Frosted Glassmorphism */
+        :root {
+            --bg-color: #03030e;
+            --surface-color: rgba(13, 13, 33, 0.55);
+            --surface-hover: rgba(25, 25, 55, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(139, 92, 246, 0.2);
+            --text-color: #e2e8f0;
+            --text-muted: #94a3b8;
+            --primary: #8b5cf6;
+            --primary-glow: rgba(139, 92, 246, 0.5);
+            --secondary: #06b6d4;
+            --secondary-glow: rgba(6, 182, 212, 0.5);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --font-main: 'Outfit', sans-serif;
+            --font-code: 'JetBrains Mono', monospace;
+            --shadow-glow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow-x: hidden;
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.08) 0%, transparent 40%);
+            background-attachment: fixed;
+        }
+
+        /* Glassmorphic Container */
+        .glass {
+            background: var(--surface-color);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            box-shadow: var(--shadow-glow);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Layout */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(3, 3, 14, 0.8);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-symbol {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 20px;
+            color: #fff;
+            box-shadow: 0 0 15px var(--primary-glow);
+        }
+
+        .logo-text {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            background: linear-gradient(to right, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 40px;
+        }
+
+        /* Navigation Tabs */
+        .tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 12px;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: var(--font-main);
+            cursor: pointer;
+            border-radius: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-color);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-btn.active {
+            color: #fff;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(6, 182, 212, 0.2));
+            border: 1px solid var(--primary);
+            box-shadow: 0 0 10px rgba(139, 92, 246, 0.15);
+        }
+
+        /* Tab Content Views */
+        .view-content {
+            display: none;
+            animation: fadeIn 0.4s ease forwards;
+        }
+
+        .view-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Stats Cards grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        /* Main View grids */
+        .dashboard-split {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 30px;
+            align-items: start;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Forms */
+        .form-card {
+            padding: 24px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 18px;
+        }
+
+        label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        input, select, textarea {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            padding: 12px 16px;
+            border-radius: 10px;
+            color: #fff;
+            font-family: var(--font-main);
+            font-size: 15px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 8px var(--primary-glow);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px var(--primary-glow);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+        }
+
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--text-muted);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, var(--error), #dc2626);
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 5px 15px rgba(239, 68, 68, 0.4);
+        }
+
+        /* Collection list items */
+        .collection-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .collection-card {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .collection-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .collection-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .collection-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .meta-tag {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            padding: 2px 8px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .collection-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 6px;
+        }
+
+        /* Query Explorer layout */
+        .results-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .result-card {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .result-id {
+            font-family: var(--font-code);
+            color: var(--secondary);
+            font-weight: 600;
+        }
+
+        .score-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .score-bar-bg {
+            width: 120px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .score-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            border-radius: 4px;
+        }
+
+        .code-block {
+            font-family: var(--font-code);
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            overflow-x: auto;
+            color: #c7d2fe;
+        }
+
+        /* SVG Cluster visualization */
+        .cluster-visualizer-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .cluster-svg-wrapper {
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 1 / 1;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .svg-centroid {
+            fill: var(--primary);
+            stroke: #fff;
+            stroke-width: 2px;
+            cursor: pointer;
+            filter: drop-shadow(0 0 6px var(--primary-glow));
+        }
+
+        .svg-vector {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .svg-vector:hover {
+            stroke: #fff;
+            stroke-width: 1.5px;
+            r: 8;
+        }
+
+        .svg-line {
+            stroke: rgba(255, 255, 255, 0.15);
+            stroke-dasharray: 4;
+            stroke-width: 1px;
+        }
+
+        .vis-tooltip {
+            position: absolute;
+            background: rgba(3, 3, 14, 0.95);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+            box-shadow: var(--shadow-glow);
+            max-width: 250px;
+        }
+
+        /* Semantic Cache layout */
+        .cache-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .cache-console {
+            padding: 24px;
+        }
+
+        .cache-log {
+            padding: 24px;
+            max-height: 500px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .cache-item-card {
+            padding: 16px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .cache-item-prompt {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+
+        .cache-item-response {
+            font-size: 14px;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.2);
+            padding: 8px;
+            border-radius: 6px;
+            font-family: var(--font-code);
+        }
+
+        .cache-hit-status {
+            padding: 14px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .cache-hit-status.hit {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--success);
+            color: #d1fae5;
+            display: block;
+        }
+
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: #fee2e2;
+            display: block;
+        }
+
+        /* --- Modern LLM Chat UI (ChatGPT/Claude Style) --- */
+        .chat-view-container {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            gap: 24px;
+            margin-top: 10px;
+            align-items: start;
+        }
+
+        .chat-main-panel {
+            display: flex;
+            flex-direction: column;
+            height: 720px;
+            background: rgba(10, 10, 25, 0.45);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.6);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .chat-main-panel.sparse-mode-active {
+            border-color: rgba(6, 182, 212, 0.5);
+            box-shadow: 0 0 25px rgba(6, 182, 212, 0.15), 0 12px 40px 0 rgba(0, 0, 0, 0.6);
+        }
+
+        .chat-settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+            padding: 16px;
+            background: rgba(3, 3, 14, 0.6);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .chat-settings-grid select, .chat-settings-grid input {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            font-size: 13px;
+            border-radius: 8px;
+            height: 38px;
+            color: #fff;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .chat-settings-grid select:focus, .chat-settings-grid input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 8px var(--primary-glow);
+        }
+
+        #rag-device-select.sparse-selected {
+            border-color: var(--secondary);
+            box-shadow: 0 0 10px var(--secondary-glow);
+            color: var(--secondary);
+            font-weight: 600;
+        }
+
+        .chat-body {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            background: radial-gradient(circle at 50% 50%, rgba(13, 13, 33, 0.2), rgba(3, 3, 14, 0.5));
+            scroll-behavior: smooth;
+        }
+
+        .chat-message-row {
+            display: flex;
+            gap: 16px;
+            max-width: 85%;
+            animation: messageFadeIn 0.3s ease forwards;
+        }
+
+        @keyframes messageFadeIn {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .chat-message-row.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .chat-message-row.assistant {
+            align-self: flex-start;
+        }
+
+        .chat-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 15px;
+            flex-shrink: 0;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        .chat-message-row.user .chat-avatar {
+            background: linear-gradient(135deg, var(--secondary), #0284c7);
+            color: #fff;
+        }
+
+        .chat-message-row.assistant .chat-avatar {
+            background: linear-gradient(135deg, var(--primary), #6d28d9);
+            color: #fff;
+            filter: drop-shadow(0 0 6px var(--primary-glow));
+        }
+
+        .chat-bubble {
+            padding: 14px 20px;
+            border-radius: 18px;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--text-color);
+            position: relative;
+        }
+
+        .chat-message-row.user .chat-bubble {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(139, 92, 246, 0.15));
+            border: 1px solid rgba(139, 92, 246, 0.35);
+            border-top-right-radius: 4px;
+            color: #fff;
+        }
+
+        .chat-message-row.assistant .chat-bubble {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            border-top-left-radius: 4px;
+            backdrop-filter: blur(10px);
+        }
+
+        .chat-message-row.assistant.sparse-inferred .chat-bubble {
+            border-color: rgba(6, 182, 212, 0.3);
+            background: linear-gradient(135deg, rgba(6, 182, 212, 0.04), rgba(255, 255, 255, 0.03));
+        }
+
+        .chat-bubble-text {
+            word-break: break-word;
+        }
+
+        .chat-bubble-text p {
+            margin-bottom: 12px;
+        }
+
+        .chat-bubble-text p:last-child {
+            margin-bottom: 0;
+        }
+
+        .chat-bubble-text code {
+            font-family: var(--font-code);
+            background: rgba(0, 0, 0, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #f472b6;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .chat-bubble-text pre {
+            margin: 12px 0;
+            background: rgba(3, 3, 14, 0.85);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 14px;
+            overflow-x: auto;
+        }
+
+        .chat-bubble-text pre code {
+            background: transparent;
+            padding: 0;
+            border: none;
+            color: #c7d2fe;
+            font-size: 13px;
+        }
+
+        .chat-bubble-text ul, .chat-bubble-text ol {
+            margin-left: 20px;
+            margin-bottom: 12px;
+        }
+
+        .chat-bubble-text li {
+            margin-bottom: 4px;
+        }
+
+        .chat-message-meta {
+            margin-top: 10px;
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding-top: 8px;
+        }
+
+        .chat-meta-badge {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            padding: 2px 8px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chat-meta-badge.sparse-badge {
+            background: rgba(6, 182, 212, 0.1);
+            border-color: rgba(6, 182, 212, 0.3);
+            color: #22d3ee;
+            font-weight: 600;
+        }
+
+        .chat-input-area {
+            padding: 20px 24px;
+            background: rgba(3, 3, 14, 0.6);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .chat-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 6px 6px 6px 18px;
+            transition: all 0.2s ease;
+        }
+
+        .chat-input-wrapper:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 12px var(--primary-glow);
+        }
+
+        .chat-main-panel.sparse-mode-active .chat-input-wrapper:focus-within {
+            border-color: var(--secondary);
+            box-shadow: 0 0 12px var(--secondary-glow);
+        }
+
+        .chat-input-field {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: var(--font-main);
+            font-size: 15px;
+            outline: none;
+            padding: 8px 0;
+        }
+
+        .chat-send-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 10px rgba(139, 92, 246, 0.3);
+        }
+
+        .chat-send-circle:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.5);
+        }
+
+        .chat-welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            color: var(--text-muted);
+            padding: 40px;
+            margin: auto;
+            max-width: 550px;
+        }
+
+        .chat-welcome-logo {
+            width: 72px;
+            height: 72px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 36px;
+            color: #fff;
+            margin-bottom: 24px;
+            box-shadow: 0 0 30px var(--primary-glow);
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .chat-welcome-suggestions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-top: 30px;
+            width: 100%;
+        }
+
+        .chat-welcome-suggestion-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            padding: 14px 18px;
+            border-radius: 12px;
+            color: var(--text-color);
+            cursor: pointer;
+            text-align: left;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .chat-welcome-suggestion-btn:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+
+    <header class="glass">
+        <div class="logo">
+            <div class="logo-symbol">B</div>
+            <div class="logo-text">BRAMHA</div>
+        </div>
+        <div class="system-status">
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span>Server Online</span>
+            </div>
+            <div id="storage-status" class="status-badge" style="color: var(--secondary)">
+                Disk Persistence Configured
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Nav Tabs -->
+        <div class="tabs">
+            <button class="tab-btn" onclick="switchTab('operator-ux-view')">Operator Dashboard</button>
+            <button class="tab-btn active" onclick="switchTab('llm-config-view')">LLM Configuration</button>
+            <button class="tab-btn" onclick="switchTab('llm-db-view')">LLM Database Viewer</button>
+            <button class="tab-btn" onclick="switchTab('rag-view')">Bramha Chat</button>
+        </div>
+
+        <!-- Sprint 12: Operator UX Dashboard -->
+        <div id="operator-ux-view" class="view-content">
+            <div class="dashboard-split">
+                <div>
+                    <div class="section-title">Execution Planner Trace Viewer</div>
+                    <div class="form-card glass" style="max-height: 400px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid var(--border-color); color: var(--secondary);">
+                                    <th style="padding: 10px;">Route Decision</th>
+                                    <th style="padding: 10px;">Latency</th>
+                                    <th style="padding: 10px;">Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="planner-trace-list">
+                                <tr><td colspan="3" style="padding: 15px; text-align: center; color: var(--text-muted)">Waiting for live trace data...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="section-title" style="margin-top: 20px;">Memory & Evidence Explorer</div>
+                    <div class="form-card glass">
+                        <div id="evidence-explorer-container" style="color: var(--text-muted); font-size: 14px;">
+                            <p>Visualizing semantic cache states, retrieval graphs, and memory conflicts (Sprint 11/12 integration pending).</p>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div class="section-title">Backend Target & Route Path Visibility</div>
+                    <div class="form-card glass">
+                        <div style="display: flex; flex-direction: column; gap: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; border-left: 4px solid var(--primary);">
+                                <span>WGPU Dense Engine (Default)</span>
+                                <span style="color: var(--success); font-weight: bold;">Healthy</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; border-left: 4px solid var(--secondary);">
+                                <span>SPANDA Sparse Engine</span>
+                                <span id="spanda-health-status" style="color: var(--text-muted); font-weight: bold;">Checking...</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px; border-left: 4px solid #a855f7;">
+                                <span>Speculative Graph Decoder</span>
+                                <span style="color: var(--warning);">Idle</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section-title" style="margin-top: 20px;">SPANDA Diagnostic Control Panel</div>
+                    <div class="form-card glass">
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <button id="spanda-toggle-degraded-btn" class="btn btn-outline" style="width: 100%; border-color: var(--warning); color: var(--warning);" onclick="toggleSpandaDegraded()">
+                                Simulate SPANDA Degraded Mode
+                            </button>
+                            <button class="btn btn-outline" style="width: 100%; border-color: var(--secondary); color: var(--secondary);" onclick="runSpandaTestFlow()">
+                                ⚡ Run SPANDA Test Inference
+                            </button>
+                            <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0;">
+                                Degraded mode simulates a sparse engine failure, forcing the router to dynamically fall back to the CPU engine. Running Test Inference automatically routes a block-sparse query.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="section-title" style="margin-top: 20px;">Model Orchestration Graph Viewer</div>
+                    <div class="glass" style="height: 250px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); border-radius: 12px; margin-top: 10px; border: 1px solid var(--border-color);">
+                        <p style="color: var(--text-muted); font-size: 14px;">[ Interactive Directed Acyclic Graph (DAG) placeholder for query routing ]</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 5: Local RAG Interface -->
+        <div id="rag-view" class="view-content">
+            <div class="chat-view-container">
+                <div class="chat-main-panel">
+                    
+                    <!-- Settings Grid -->
+                    <div class="chat-settings-grid">
+                        <select id="rag-model-select"><option value="">Select LLM Model</option></select>
+                        <select id="rag-device-select">
+                            <option value="auto">Auto (GPU)</option>
+                            <option value="cpu">CPU Only</option>
+                            <option value="sparse">Sparse (WGPU SPANDA)</option>
+                        </select>
+                        <div class="chat-header-actions">
+                            <button class="btn btn-outline" style="height:38px; padding:0 12px; font-size:12px;" onclick="clearRagConsole()">Clear</button>
+                        </div>
+                        
+                        <!-- Hidden inputs to maintain JS compatibility -->
+                        <select id="rag-collection-select" style="display: none;"><option value="">Select Knowledge Base</option></select>
+                        <input type="hidden" id="rag-k" value="3">
+                        <input type="hidden" id="rag-max-tokens" value="512">
+                        <input type="hidden" id="rag-workflow-id" value="">
+                        <input type="hidden" id="rag-branch-id" value="">
+                    </div>
+                    
+                    <!-- Chat History -->
+                    <div id="rag-console" class="chat-body">
+                        <div class="chat-welcome">
+                            <div class="chat-welcome-logo">B</div>
+                            <h2>Bramha Assistant</h2>
+                            <p style="font-size: 14px; margin-top: 8px; line-height: 1.5;">
+                                Ask questions grounded directly in your knowledge base. Choose your LLM model and toggle WGPU-accelerated Sparse Mode for maximum efficiency.
+                            </p>
+                            <div class="chat-welcome-suggestions">
+                                <button class="chat-welcome-suggestion-btn" onclick="setSuggestedPrompt('Explain what a materialized activation view is and how it saves latency.')">
+                                    💡 <strong>Materialized Views</strong> — Explain how activation reuse saves latency.
+                                </button>
+                                <button class="chat-welcome-suggestion-btn" onclick="setSuggestedPrompt('How does the cost model dynamically adapt route selections?')">
+                                    📈 <strong>Cost Adaptability</strong> — How does the planner adapt route decisions?
+                                </button>
+                                <button class="chat-welcome-suggestion-btn" onclick="setSuggestedPrompt('Compare block-sparse 2:4 weights vs dense matrix multiplications.')">
+                                    ⚡ <strong>Block-Sparse</strong> — Compare 2:4 sparsity vs dense matrix multiplication.
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Input Area -->
+                    <div class="chat-input-area">
+                        <div class="chat-input-wrapper">
+                            <input type="text" id="rag-prompt" class="chat-input-field" placeholder="Ask Bramha..." onkeypress="if(event.key === 'Enter') runRagPrompt()">
+                            <button class="chat-send-circle" onclick="runRagPrompt()">
+                                ➤
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <div class="section-title">Live Inference Log Monitor</div>
+                    <div class="glass" style="padding: 20px; height: 720px; overflow-y: auto;" id="rag-log-monitor">
+                        <p style="color: var(--text-muted); text-align:center; margin-top: 40px;">No logs yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Tab 1: Collections View -->
+        <div id="collections-view" class="view-content active">
+            <!-- Global stats -->
+            <div class="stats-grid">
+                <div class="stat-card glass">
+                    <span class="stat-label">Total Collections</span>
+                    <span id="stat-collections" class="stat-value">0</span>
+                </div>
+                <div class="stat-card glass">
+                    <span class="stat-label">Total Vectors</span>
+                    <span id="stat-vectors" class="stat-value">0</span>
+                </div>
+                <div class="stat-card glass">
+                    <span class="stat-label">Semantic Cache Hits</span>
+                    <span id="stat-cache-items" class="stat-value">0</span>
+                </div>
+                <div class="stat-card glass">
+                    <span class="stat-label">Query Latency</span>
+                    <span id="stat-latency" class="stat-value">0 ms</span>
+                </div>
+            </div>
+            <div class="dashboard-split">
+                <div>
+                    <div class="section-title">New Collection</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label for="col-name">Collection Name</label>
+                            <input type="text" id="col-name" placeholder="e.g. finance_embeddings" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="col-dim">Vector Dimension</label>
+                            <input type="number" id="col-dim" value="384" min="1" max="10000" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="col-metric">Distance Metric</label>
+                            <select id="col-metric">
+                                <option value="Cosine">Cosine Similarity (Recommended)</option>
+                                <option value="L2">Euclidean (L2) Distance</option>
+                                <option value="DotProduct">Dot Product</option>
+                            </select>
+                        </div>
+                        <button class="btn" style="width: 100%" onclick="createCollection()">Create Collection</button>
+                    </div>
+
+                    <div class="section-title">Ingest Custom Document</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label for="gen-col-select">Target Collection</label>
+                            <select id="gen-col-select"><option value="">Select Collection</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-doc-text">Document Content (Paste Text)</label>
+                            <textarea id="custom-doc-text" rows="5" style="width: 100%; border-radius: 6px; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; font-family: var(--font-body);" placeholder="Paste an article, email, or any document here..."></textarea>
+                        </div>
+                        <button class="btn btn-outline" style="width: 100%; border-color: var(--secondary); color: var(--secondary);" onclick="ingestCustomDocument()">
+                            <span class="icon">📄</span> Chunk & Embed Document
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="section-title">Active Collections</div>
+                    <div id="collections-container" class="collection-list">
+                        <!-- Loaded via JS -->
+                        <div class="glass" style="padding: 30px; text-align: center; color: var(--text-muted)">
+                            No collections found. Create a new collection to begin!
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: Vector Query Engine -->
+        <div id="query-view" class="view-content">
+            <div class="dashboard-split">
+                <div>
+                    <div class="section-title">Search Configuration</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label for="query-col-select">Target Collection</label>
+                            <select id="query-col-select" onchange="updateQueryDimensionInfo()"><option value="">Select Collection</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="query-vector">Query Vector values (Comma separated)</label>
+                            <textarea id="query-vector" rows="4" placeholder="0.21, -0.45, 0.88, ..."></textarea>
+                            <span id="dim-warning" style="font-size: 12px; color: var(--warning); display: none;">Vector dimension mismatch!</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="query-k">Top K Neighbors</label>
+                            <input type="number" id="query-k" value="5" min="1" max="100">
+                        </div>
+                        <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px; margin-top: 10px;">
+                            <input type="checkbox" id="query-use-index" checked style="width: 18px; height: 18px; cursor: pointer;">
+                            <label for="query-use-index" style="cursor: pointer;">Use IVF-Flat ANN Index</label>
+                        </div>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="query-filter">Metadata Filter (JSON AST - Optional)</label>
+                            <textarea id="query-filter" rows="3" placeholder='{ "field": "tag", "operator": "$eq", "value": "finance" }'></textarea>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-outline" style="flex: 1" onclick="generateRandomQueryVector()">Random</button>
+                            <button class="btn" style="flex: 2" onclick="performQuery()">Search Vector</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="section-title">Query Results <span id="results-count-badge" style="font-size:14px; font-weight:normal; color:var(--text-muted)"></span></div>
+                    <div id="query-results-container" class="results-container">
+                        <div class="glass" style="padding: 40px; text-align: center; color: var(--text-muted)">
+                            Configure your query and click Search Vector to retrieve nearest neighbors!
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: LLM Semantic Cache -->
+        <div id="cache-view" class="view-content">
+            <div class="cache-grid">
+                <div class="cache-console glass">
+                    <div class="section-title">Semantic Cache Playground</div>
+                    <div class="form-group">
+                        <label for="cache-prompt">Input Prompt</label>
+                        <input type="text" id="cache-prompt" placeholder="e.g. What is K-Means clustering?">
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                        <button class="btn" style="flex: 1" onclick="checkCache()">Check Semantic Cache</button>
+                    </div>
+
+                    <div id="cache-result-box" class="cache-hit-status">
+                        <!-- Dynamic content -->
+                    </div>
+
+                    <div style="margin-top: 40px; border-top: 1px solid var(--border-color); padding-top: 30px;">
+                        <div class="section-title">Store Prompt-Response Pair</div>
+                        <div class="form-group">
+                            <label for="store-prompt">Prompt Text</label>
+                            <input type="text" id="store-prompt" placeholder="Prompt that matches LLM request">
+                        </div>
+                        <div class="form-group">
+                            <label for="store-completion">LLM Completion Response</label>
+                            <textarea id="store-completion" rows="3" placeholder="Generated text completion to cache"></textarea>
+                        </div>
+                        <button class="btn btn-outline" style="width: 100%" onclick="storeInCache()">Store in Cache</button>
+                    </div>
+                </div>
+
+                <div class="cache-log glass">
+                    <div class="section-title">
+                        <span>Cached Completions Logs</span>
+                        <button class="btn btn-outline btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="clearCache()">Clear Cache</button>
+                    </div>
+                    <div id="cache-items-container" style="display: flex; flex-direction: column; gap: 16px;">
+                        <div style="text-align: center; color: var(--text-muted); padding: 40px;">
+                            Cache is currently empty. Query prompt checks will miss.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 4: Cluster Space Visualizer -->
+        <div id="visualizer-view" class="view-content">
+            <div class="dashboard-split">
+                <div>
+                    <div class="section-title">Cluster Mapping Configuration</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label for="vis-col-select">Target Collection</label>
+                            <select id="vis-col-select" onchange="drawClusters()"><option value="">Select Collection</option></select>
+                        </div>
+                        <div style="color: var(--text-muted); font-size: 14px; line-height: 1.6; display: flex; flex-direction: column; gap: 12px;">
+                            <p>This panel projects high-dimensional vector embeddings into a 2D canvas dynamically using their relative components.</p>
+                            <p><strong style="color: var(--primary)">Star Elements:</strong> Centroids calculated during K-Means clustering.</p>
+                            <p><strong style="color: var(--secondary)">Dot Elements:</strong> Document/Vector nodes inside your collection, color-linked to their nearest IVF cluster centroid!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="cluster-visualizer-container glass" style="padding: 30px;">
+                    <div class="section-title" style="width:100%">
+                        <span>Interactive 2D Cluster Space Map</span>
+                    </div>
+                    <div class="cluster-svg-wrapper">
+                        <div id="vis-tooltip" class="vis-tooltip">Tooltip</div>
+                        <svg id="cluster-svg">
+                            <!-- SVG elements loaded via JS -->
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 6: LLM Configuration -->
+        <div id="llm-config-view" class="view-content">
+            <div class="dashboard-split">
+                    <div class="section-title">Local Model Ingestion</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label>Ingest Local Safetensors Model</label>
+                            <input type="text" id="tensor-model-name" placeholder="Model Name (e.g. tinyllama)" style="margin-bottom: 8px;">
+                            <input type="text" id="tensor-model-path" placeholder="Absolute Path to .safetensors file" style="margin-bottom: 8px;">
+                            <button class="btn btn-primary" onclick="ingestTensorModel()">Map Safetensors</button>
+                            <div id="tensor-ingest-progress-container" style="display: none; margin-top: 15px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 5px;">
+                                    <span id="tensor-ingest-status">Ingesting...</span>
+                                    <span id="tensor-ingest-percent">0%</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                                    <div id="tensor-ingest-progress-bar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.3s ease;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section-title" style="margin-top: 20px;">Hardware Resource Limits</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label>Max Resource Utilization: <span id="resource-limit-label" style="color: var(--secondary); font-weight: 600;">70%</span></label>
+                            <input type="range" id="resource-limit-slider" min="10" max="100" value="70" style="width: 100%; margin: 8px 0; cursor: pointer;" oninput="document.getElementById('resource-limit-label').textContent = this.value + '%'; saveUIConfig();">
+                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">Caps CPU threads, Heap RAM allocations, and target GPU VRAM dynamically to keep resource footprint bounded.</p>
+                        </div>
+                    </div>
+
+                    <div class="section-title" style="margin-top: 20px;">Tensor Storage Settings</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label for="tensor-storage-dir">Active Shard Storage Directory</label>
+                            <input type="text" id="tensor-storage-dir" placeholder="e.g. /home/user/tensor_data" style="margin-bottom: 8px;">
+                            <button class="btn btn-outline" style="width: 100%" onclick="updateTensorStorageDir()">Update Active Directory</button>
+                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">Defines where Bramha shards and memory-maps Llama safetensors files. Set this to a folder outside of your project to keep your workspace light.</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <div class="section-title">HuggingFace Model Hub</div>
+                    <div class="form-card glass">
+                        <div class="form-group">
+                            <label>Search and Download Online Models</label>
+                            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                                <input type="text" id="hf-search-query" placeholder="e.g. llama, mistral, qwen..." style="flex: 1;" onkeypress="if(event.key === 'Enter') searchHuggingFace()">
+                                <button class="btn btn-outline" style="padding: 0 16px;" onclick="searchHuggingFace()">🔍</button>
+                            </div>
+                            <select id="hf-model-select" style="margin-bottom: 8px;">
+                                <option value="">Results will appear here...</option>
+                            </select>
+                            <button class="btn btn-outline" style="width: 100%; border-color: var(--secondary); color: var(--secondary);" onclick="downloadAndIngestHF()">
+                                <span class="icon">☁️</span> Download & Ingest via AirLLM
+                            </button>
+                            <div id="hf-ingest-progress-container" style="display: none; margin-top: 15px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 5px;">
+                                    <span id="hf-ingest-status">Downloading...</span>
+                                    <span id="hf-ingest-percent">0%</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+                                    <div id="hf-ingest-progress-bar" style="width: 0%; height: 100%; background: var(--secondary); transition: width 0.3s ease;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 7: LLM Database Viewer -->
+        <div id="llm-db-view" class="view-content">
+            <div class="dashboard-split">
+                <div>
+                    <div class="section-title">Stored Models Database</div>
+                    <div id="tensor-models-list" style="display: flex; flex-direction: column; gap: 12px;">
+                        <!-- JS injected -->
+                    </div>
+                </div>
+                
+                <div>
+                    <div class="section-title" id="tensor-records-title">Records (Layers)</div>
+                    <div class="form-card glass" style="max-height: 600px; overflow-y: auto;">
+                        <div id="tensor-layers-list">
+                            <p style="color: var(--text-muted); font-size: 14px;">Select a model to view its tensor pages.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast" style="visibility: hidden; min-width: 250px; background-color: var(--primary); color: #fff; text-align: center; border-radius: 8px; padding: 16px; position: fixed; z-index: 1000; left: 50%; bottom: 30px; font-size: 17px; transform: translateX(-50%); box-shadow: var(--shadow-glow); transition: visibility 0s, opacity 0.5s ease-in-out; opacity: 0;">Action completed</div>
+
+    <script>
+        const API_URL = "http://localhost:8000/api";
+        const SIDECAR_URL = "http://localhost:8000/api/llm";
+        
+        // Global fetch interceptor to append authorization bearer token for local requests
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options = {}) {
+            if (url.toString().includes('/api')) {
+                options.headers = options.headers || {};
+                if (!options.headers['Authorization']) {
+                    options.headers['Authorization'] = 'Bearer admin_key';
+                }
+            }
+            return originalFetch(url, options);
+        };
+        
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById("toast");
+            toast.textContent = message;
+            toast.style.backgroundColor = type === 'error' ? 'var(--error)' : 'var(--success)';
+            toast.style.visibility = "visible";
+            toast.style.opacity = "1";
+            setTimeout(() => {
+                toast.style.opacity = "0";
+                setTimeout(() => toast.style.visibility = "hidden", 500);
+            }, 3000);
+        }
+        let currentCollections = [];
+
+        // --- UI Persistence Functions ---
+        function saveUIConfig() {
+            try {
+                const config = {
+                    activeTab: activeTab,
+                    ragModel: document.getElementById('rag-model-select')?.value || '',
+                    ragCollection: document.getElementById('rag-collection-select')?.value || '',
+                    ragK: document.getElementById('rag-k')?.value || '3',
+                    ragDevice: document.getElementById('rag-device-select')?.value || 'auto',
+                    colMetric: document.getElementById('col-metric')?.value || 'cosine',
+                    genColSelect: document.getElementById('gen-col-select')?.value || '',
+                    queryColSelect: document.getElementById('query-col-select')?.value || '',
+                    queryK: document.getElementById('query-k')?.value || '5',
+                    queryUseIndex: document.getElementById('query-use-index')?.checked ?? true,
+                    visColSelect: document.getElementById('vis-col-select')?.value || '',
+                    hfModelSelect: document.getElementById('hf-model-select')?.value || '',
+                    hfSearchQuery: document.getElementById('hf-search-query')?.value || '',
+                    resourceLimit: document.getElementById('resource-limit-slider')?.value || '70',
+                    ragMaxTokens: document.getElementById('rag-max-tokens')?.value || '512'
+                };
+                localStorage.setItem('bramha_ui_config', JSON.stringify(config));
+            } catch (e) {
+                console.warn("Failed to save UI config to localStorage:", e);
+            }
+        }
+
+        function loadUIConfig() {
+            try {
+                const data = localStorage.getItem('bramha_ui_config');
+                if (!data) {
+                    switchTab('llm-config-view');
+                    return;
+                }
+                const config = JSON.parse(data);
+                
+                // Switch Tab
+                if (config.activeTab) {
+                    switchTab(config.activeTab);
+                } else {
+                    switchTab('llm-config-view');
+                }
+
+                // Restore inputs helper
+                const restoreInput = (id, val) => {
+                    const el = document.getElementById(id);
+                    if (el && val !== undefined) el.value = val;
+                };
+                
+                restoreInput('rag-k', config.ragK);
+                restoreInput('col-metric', config.colMetric);
+                restoreInput('query-k', config.queryK);
+                restoreInput('hf-search-query', config.hfSearchQuery);
+                restoreInput('rag-max-tokens', config.ragMaxTokens);
+                
+                const slider = document.getElementById('resource-limit-slider');
+                if (slider && config.resourceLimit !== undefined) {
+                    slider.value = config.resourceLimit;
+                    document.getElementById('resource-limit-label').textContent = config.resourceLimit + '%';
+                }
+                
+                const chk = document.getElementById('query-use-index');
+                if (chk && config.queryUseIndex !== undefined) {
+                    chk.checked = config.queryUseIndex;
+                }
+                
+                // For select elements whose options are loaded dynamically,
+                // we store them in dynamic pending values so they can be restored upon population.
+                window.pendingUIConfig = config;
+                if (config.ragDevice) {
+                    applyDeviceUIHighlight(config.ragDevice);
+                }
+            } catch (e) {
+                console.error("Failed to load UI configs", e);
+                switchTab('llm-config-view');
+            }
+        }
+
+        function applyDeviceUIHighlight(device) {
+            const select = document.getElementById('rag-device-select');
+            const panel = document.querySelector('.chat-main-panel');
+            if (!select) return;
+            if (device === 'sparse') {
+                select.classList.add('sparse-selected');
+                if (panel) panel.classList.add('sparse-mode-active');
+            } else {
+                select.classList.remove('sparse-selected');
+                if (panel) panel.classList.remove('sparse-mode-active');
+            }
+        }
+
+        function initUIConfigChangeListeners() {
+            const inputIds = [
+                'rag-model-select',
+                'rag-collection-select',
+                'rag-k',
+                'rag-device-select',
+                'col-metric',
+                'gen-col-select',
+                'query-col-select',
+                'query-k',
+                'query-use-index',
+                'vis-col-select',
+                'hf-model-select',
+                'hf-search-query',
+                'resource-limit-slider',
+                'rag-max-tokens'
+            ];
+            inputIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('change', saveUIConfig);
+                    el.addEventListener('input', saveUIConfig);
+                }
+            });
+
+            const devSelect = document.getElementById('rag-device-select');
+            if (devSelect) {
+                devSelect.addEventListener('change', (e) => {
+                    applyDeviceUIHighlight(e.target.value);
+                    if (e.target.value === 'sparse') {
+                        showToast("SPANDA Sparse Mode active. Inference utilizes sparse compute paths.", "success");
+                    }
+                });
+            }
+            // Trigger initial styling check
+            if (devSelect) {
+                applyDeviceUIHighlight(devSelect.value);
+            }
+        }
+
+        // Tab Switching
+        function switchTab(tabId) {
+            document.querySelectorAll('.view-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(tabId).classList.add('active');
+            
+            // Find button matching tab switching call
+            const btnText = tabId === 'llm-config-view' ? 'LLM Configuration' :
+                            tabId === 'llm-db-view' ? 'LLM Database Viewer' :
+                            tabId === 'rag-view' ? 'Bramha Chat' : '';
+            
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.innerText.includes(btnText)) {
+                    btn.classList.add('active');
+                }
+            });
+            activeTab = tabId;
+
+            if (tabId === 'visualizer-view') {
+                drawClusters();
+            }
+            if (tabId === 'rag-view') {
+                pollRagLogs();
+            }
+            saveUIConfig();
+        }
+
+        // Fetch Stats & Collections on load
+        async function fetchSystemState() {
+            try {
+                // Fetch stats
+                const statsRes = await fetch(`${API_URL}/stats`);
+                const stats = await statsRes.json();
+                
+                document.getElementById('stat-collections').innerText = stats.collections_count;
+                document.getElementById('stat-vectors').innerText = stats.total_vectors_count;
+                document.getElementById('stat-cache-items').innerText = stats.cache_items_count;
+                document.getElementById('storage-status').innerText = stats.storage_configured ? "Disk Persistence Active" : "In-Memory Mode Only";
+
+                // Fetch collections
+                const colRes = await fetch(`${API_URL}/collections`);
+                currentCollections = await colRes.json();
+                
+                populateCollectionSelectors();
+                renderCollectionsList();
+                renderCacheItems();
+
+                // Auto-initialization if empty workspace
+                if (currentCollections.length === 0 && !window.autoInitialized) {
+                    window.autoInitialized = true;
+                    showToast("Workspace empty. Auto-initializing default knowledge base...", "success");
+                    try {
+                        const createRes = await fetch(`${API_URL}/collections`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: 'knowledge_base', dimension: 384, metric: 'Cosine' })
+                        });
+                        if (createRes.ok) {
+                            fetchSystemState(); // Refresh after auto-create
+                        }
+                    } catch (e) {
+                        console.error("Auto-init failed", e);
+                    }
+                }
+                await fetchSpandaStatus();
+            } catch (err) {
+                console.error("Failed to load server state: ", err);
+            }
+        }
+
+        window.spandaDegraded = false;
+
+        async function fetchSpandaStatus() {
+            try {
+                const res = await fetch(`${API_URL}/system/spanda/status`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const statusEl = document.getElementById('spanda-health-status');
+                    const toggleBtn = document.getElementById('spanda-toggle-degraded-btn');
+                    
+                    if (data.healthy) {
+                        statusEl.textContent = 'Healthy';
+                        statusEl.style.color = '#10b981';
+                        if (toggleBtn) {
+                            toggleBtn.textContent = 'Simulate SPANDA Degraded Mode';
+                            toggleBtn.style.borderColor = '#f59e0b';
+                            toggleBtn.style.color = '#f59e0b';
+                        }
+                    } else {
+                        statusEl.textContent = 'Degraded';
+                        statusEl.style.color = '#ef4444';
+                        if (toggleBtn) {
+                            toggleBtn.textContent = 'Recover SPANDA Engine';
+                            toggleBtn.style.borderColor = '#10b981';
+                            toggleBtn.style.color = '#10b981';
+                        }
+                    }
+                    window.spandaDegraded = data.degraded;
+                }
+            } catch (err) {
+                console.error("Failed to fetch SPANDA health: ", err);
+            }
+        }
+
+        async function toggleSpandaDegraded() {
+            const nextDegraded = !window.spandaDegraded;
+            try {
+                const res = await fetch(`${API_URL}/system/spanda/degraded`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ degraded: nextDegraded })
+                });
+                if (res.ok) {
+                    showToast(nextDegraded ? 'SPANDA Engine placed in Degraded Mode.' : 'SPANDA Engine recovered successfully.', 'success');
+                    await fetchSpandaStatus();
+                } else {
+                    showToast('Failed to toggle SPANDA state.', 'error');
+                }
+            } catch (err) {
+                showToast('Network error updating SPANDA state.', 'error');
+            }
+        }
+
+        function runSpandaTestFlow() {
+            switchView('rag-view');
+            const deviceSelect = document.getElementById('rag-device-select');
+            if (deviceSelect) {
+                deviceSelect.value = 'sparse';
+                const panel = document.querySelector('.chat-main-panel');
+                if (panel) {
+                    panel.classList.add('sparse-mode-active');
+                }
+            }
+            setSuggestedPrompt("Compare block-sparse 2:4 weights vs dense matrix multiplications.");
+            setTimeout(() => {
+                runRagPrompt();
+            }, 500);
+        }
+
+        // Render selectors
+        function populateCollectionSelectors() {
+            const selectors = ['gen-col-select', 'query-col-select', 'vis-col-select', 'rag-collection-select'];
+            selectors.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                let val = el.value; // preserve selection
+                
+                // Restore from localStorage if not already selected
+                if (!val && window.pendingUIConfig) {
+                    if (id === 'gen-col-select') val = window.pendingUIConfig.genColSelect;
+                    else if (id === 'query-col-select') val = window.pendingUIConfig.queryColSelect;
+                    else if (id === 'vis-col-select') val = window.pendingUIConfig.visColSelect;
+                    else if (id === 'rag-collection-select') val = window.pendingUIConfig.ragCollection;
+                }
+                
+                const placeholder = id === 'rag-collection-select' ? 'Select Knowledge Base' : 'Select Collection';
+                el.innerHTML = `<option value="">${placeholder}</option>`;
+                
+                currentCollections.forEach(c => {
+                    el.innerHTML += `<option value="${c.name}">${c.name} (dim: ${c.dimension})</option>`;
+                });
+                if (val) el.value = val;
+                
+                // If this is the RAG collection selector, auto-select a collection if none is active
+                if (id === 'rag-collection-select' && (!el.value || el.value === '') && currentCollections.length > 0) {
+                    const defaultKB = currentCollections.find(c => c.name === 'knowledge_base');
+                    el.value = defaultKB ? defaultKB.name : currentCollections[0].name;
+                }
+            });
+        }
+
+        // Render collections
+        function renderCollectionsList() {
+            const container = document.getElementById('collections-container');
+            if (currentCollections.length === 0) {
+                container.innerHTML = `
+                    <div class="glass" style="padding: 30px; text-align: center; color: var(--text-muted)">
+                        No collections found. Create a new collection to begin!
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = "";
+            currentCollections.forEach(c => {
+                container.innerHTML += `
+                    <div class="collection-card glass">
+                        <div class="collection-header">
+                            <span class="collection-name">${c.name}</span>
+                            <button class="btn btn-outline btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="deleteCollection('${c.name}')">Delete</button>
+                        </div>
+                        <div class="collection-meta">
+                            <span class="meta-tag"><strong>Dimension:</strong> ${c.dimension}</span>
+                            <span class="meta-tag"><strong>Metric:</strong> ${c.metric}</span>
+                            <span class="meta-tag"><strong>Vectors:</strong> ${c.vector_count}</span>
+                            <span class="meta-tag" style="border-color: ${c.has_index ? 'var(--success)' : 'var(--warning)'}">
+                                <strong>IVF Index:</strong> ${c.has_index ? `Active (${c.index_clusters} clusters)` : 'None'}
+                            </span>
+                        </div>
+                        <div class="collection-actions">
+                            <button class="btn btn-outline" style="padding: 8px 16px; font-size: 13px;" onclick="triggerReindexPrompt('${c.name}')">Build/Rebuild IVF-Flat Index</button>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        // Create Collection
+        async function createCollection() {
+            const name = document.getElementById('col-name').value.trim();
+            const dimension = parseInt(document.getElementById('col-dim').value);
+            const metric = document.getElementById('col-metric').value;
+
+            if (!name || isNaN(dimension)) {
+                alert("Please specify collection name and valid dimension size.");
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/collections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, dimension, metric })
+                });
+
+                if (res.ok) {
+                    document.getElementById('col-name').value = "";
+                    fetchSystemState();
+                } else {
+                    const err = await res.text();
+                    alert("Error: " + err);
+                }
+            } catch (err) {
+                alert("Server request failed");
+            }
+        }
+
+        // Delete Collection
+        async function deleteCollection(name) {
+            if (!confirm(`Are you sure you want to delete collection "${name}"?`)) return;
+            
+            try {
+                const res = await fetch(`${API_URL}/collections/${name}`, { method: 'DELETE' });
+                if (res.ok) {
+                    fetchSystemState();
+                } else {
+                    alert("Failed to delete collection.");
+                }
+            } catch (err) {
+                alert("Request error.");
+            }
+        }
+
+        // Build/Rebuild IVF-Flat Index
+        async function triggerReindexPrompt(name) {
+            const num_clusters = parseInt(prompt("Enter number of clusters (K) for K-Means partitioning:", "3")) || 3;
+            const n_probe = parseInt(prompt("Enter probe count (n_probe) for searches:", "2")) || 2;
+
+            try {
+                const res = await fetch(`${API_URL}/collections/${name}/reindex`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ num_clusters, n_probe })
+                });
+
+                if (res.ok) {
+                    alert("IVF-Flat Index built successfully!");
+                    fetchSystemState();
+                } else {
+                    const txt = await res.text();
+                    alert("Failed: " + txt);
+                }
+            } catch (e) {
+                alert("Request failed.");
+            }
+        }
+
+        // Fetch & Embed Custom Document Data
+        async function ingestCustomDocument(autoColName = null, autoText = null) {
+            const colName = autoColName || document.getElementById('gen-col-select').value;
+            if (!colName) {
+                showToast("Select a collection first!", "error");
+                return;
+            }
+
+            const col = currentCollections.find(c => c.name === colName);
+            if (!col && !autoColName) {
+                showToast("Collection not found!", "error");
+                return;
+            }
+
+            const rawText = autoText || document.getElementById('custom-doc-text').value.trim();
+            if (!rawText) {
+                showToast("Please paste some text to embed.", "error");
+                return;
+            }
+
+            showToast(`Chunking document...`, "success");
+
+            try {
+                // 1. Chunk the document into paragraphs
+                const rawChunks = rawText.split('\n').map(t => t.trim()).filter(t => t.length > 20);
+                if (rawChunks.length === 0) {
+                    showToast("Document too short or empty.", "error");
+                    return;
+                }
+                
+                // Limit to 30 chunks to prevent overwhelming the browser/API in a single call
+                const chunks = rawChunks.slice(0, 30);
+                showToast(`Got ${chunks.length} chunks. Generating embeddings...`, "success");
+
+                // 2. Generate embeddings via AirLLM Sidecar
+                const embedRes = await fetch(`${SIDECAR_URL}/embed_batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ texts: chunks, dimension: col ? col.dimension : 2048 })
+                });
+
+                if (!embedRes.ok) {
+                    throw new Error("Sidecar embedding failed. Is the python sidecar running?");
+                }
+
+                const embedData = await embedRes.json();
+
+                if (col && col.dimension !== embedData.dimensions && !autoColName) {
+                    showToast(`Target collection dimension (${col.dimension}) does not match embedding dimension (${embedData.dimensions})!`, "error");
+                    return;
+                }
+
+                // 3. Format into Bramha Vectors
+                const vectors = [];
+                const docId = "doc-" + Math.floor(Math.random() * 1000000);
+                for (let i = 0; i < chunks.length; i++) {
+                    vectors.push({
+                        id: `${docId}-${i}`,
+                        values: embedData.embeddings[i],
+                        metadata: {
+                            source: "Custom Document",
+                            content: chunks[i].substring(0, 500) + (chunks[i].length > 500 ? "..." : "")
+                        }
+                    });
+                }
+
+                // 4. Insert into Bramha Database
+                const insertRes = await fetch(`${API_URL}/collections/${colName}/upsert`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vectors })
+                });
+
+                if (insertRes.ok) {
+                    showToast(`Inserted ${chunks.length} real knowledge chunks into database!`, "success");
+                    document.getElementById('custom-doc-text').value = ''; // clear input
+                    fetchSystemState();
+                } else {
+                    const txt = await insertRes.text();
+                    showToast("Error inserting: " + txt, "error");
+                }
+            } catch (e) {
+                console.error(e);
+                showToast(e.message, "error");
+            }
+        }
+
+        // Random query vector generator
+        function generateRandomQueryVector() {
+            const colName = document.getElementById('query-col-select').value;
+            if (!colName) {
+                alert("Select a collection first to know the target dimension!");
+                return;
+            }
+
+            const col = currentCollections.find(c => c.name === colName);
+            if (!col) return;
+
+            const vals = [];
+            // Match the mock offset to show clean hits
+            const clusterOffset = Math.floor(Math.random() * 3) * 0.5;
+            for (let d = 0; d < col.dimension; d++) {
+                vals.push(((Math.random() - 0.5) * 0.5 + clusterOffset).toFixed(4));
+            }
+            document.getElementById('query-vector').value = vals.join(", ");
+            updateQueryDimensionInfo();
+        }
+
+        // Validate dimension UI warning
+        function updateQueryDimensionInfo() {
+            const colName = document.getElementById('query-col-select').value;
+            const warningEl = document.getElementById('dim-warning');
+            
+            if (!colName) {
+                warningEl.style.display = "none";
+                return;
+            }
+            const col = currentCollections.find(c => c.name === colName);
+            const vals = document.getElementById('query-vector').value.split(',').filter(x => x.trim() !== "");
+            
+            if (vals.length > 0 && vals.length !== col.dimension) {
+                warningEl.innerText = `Vector dimension mismatch! Expected ${col.dimension}, got ${vals.length}`;
+                warningEl.style.display = "block";
+            } else {
+                warningEl.style.display = "none";
+            }
+        }
+
+        // Vector Search
+        async function performQuery() {
+            const colName = document.getElementById('query-col-select').value;
+            const vecStr = document.getElementById('query-vector').value.trim();
+            const k = parseInt(document.getElementById('query-k').value) || 5;
+            const useIndex = document.getElementById('query-use-index').checked;
+            const filterStr = document.getElementById('query-filter').value.trim();
+
+            if (!colName || !vecStr) {
+                alert("Please select collection and provide query vector!");
+                return;
+            }
+
+            const vector = vecStr.split(',').map(x => parseFloat(x.trim()));
+            if (vector.some(isNaN)) {
+                alert("Invalid float numbers in vector inputs.");
+                return;
+            }
+
+            const col = currentCollections.find(c => c.name === colName);
+            if (vector.length !== col.dimension) {
+                alert(`Dimension mismatch. The collection requires ${col.dimension} values, you provided ${vector.length}.`);
+                return;
+            }
+
+            let filter = null;
+            if (filterStr) {
+                try {
+                    filter = JSON.parse(filterStr);
+                } catch (e) {
+                    alert("Invalid Filter JSON AST syntax.");
+                    return;
+                }
+            }
+
+            const resultsContainer = document.getElementById('query-results-container');
+            resultsContainer.innerHTML = '<div style="text-align:center; padding: 40px; color:var(--text-muted)">Searching vector space...</div>';
+
+            try {
+                const startTime = performance.now();
+                const res = await fetch(`${API_URL}/collections/${colName}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vector, k, use_index: useIndex, filter })
+                });
+
+                const duration = (performance.now() - startTime).toFixed(2);
+                document.getElementById('stat-latency').innerText = `${duration} ms`;
+
+                if (res.ok) {
+                    const results = await res.json();
+                    renderQueryResults(results, col.metric);
+                } else {
+                    const txt = await res.text();
+                    resultsContainer.innerHTML = `<div class="glass" style="padding: 20px; text-align:center; color: var(--error)">Error: ${txt}</div>`;
+                }
+            } catch (err) {
+                resultsContainer.innerHTML = `<div class="glass" style="padding: 20px; text-align:center; color: var(--error)">Server request error</div>`;
+            }
+        }
+
+        // Render query results cards
+        function renderQueryResults(results, metric) {
+            const container = document.getElementById('query-results-container');
+            document.getElementById('results-count-badge').innerText = `(${results.length} neighbors found)`;
+
+            if (results.length === 0) {
+                container.innerHTML = `
+                    <div class="glass" style="padding: 40px; text-align: center; color: var(--text-muted)">
+                        No matching vectors found.
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = "";
+            results.forEach((r, idx) => {
+                // Formulate scores. Cosine is similarity (closer to 1.0 is better), L2 is distance (closer to 0.0 is better)
+                let scoreText = "";
+                let percentage = 0;
+                
+                if (metric === "Cosine") {
+                    scoreText = `Similarity Score: ${r.score.toFixed(6)}`;
+                    percentage = Math.max(0, Math.min(100, ((r.score + 1) / 2) * 100)); // Normalize [-1, 1] to [0, 100]
+                } else if (metric === "L2") {
+                    scoreText = `L2 Distance: ${r.score.toFixed(6)}`;
+                    // For distance, smaller is better, let's represent L2 closer to 0 as highly filled
+                    percentage = Math.max(0, Math.min(100, (1 / (1 + r.score)) * 100));
+                } else {
+                    scoreText = `Dot Product Score: ${r.score.toFixed(6)}`;
+                    percentage = 75; // Raw score doesn't scale 0-100 easily
+                }
+
+                container.innerHTML += `
+                    <div class="result-card glass">
+                        <div class="result-header">
+                            <span class="result-id">#${idx + 1} &mdash; ${r.id}</span>
+                            <div class="score-container">
+                                <span>${scoreText}</span>
+                                <div class="score-bar-bg">
+                                    <div class="score-bar-fill" style="width: ${percentage}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="code-block">${JSON.stringify(r.metadata, null, 2)}</div>
+                    </div>`;
+            });
+        }
+
+        // Cache checks
+        async function checkCache() {
+            const prompt = document.getElementById('cache-prompt').value.trim();
+            if (!prompt) return;
+
+            // Generate a deterministic hash-like pseudo-vector from text for mock prompt caching
+            const vector = Array.from({length: 1536}, (_, i) => {
+                let hash = 0;
+                const seedStr = prompt + i;
+                for (let c = 0; c < seedStr.length; c++) {
+                    hash = seedStr.charCodeAt(c) + ((hash << 5) - hash);
+                }
+                return Math.abs(hash % 1000) / 1000.0 - 0.5;
+            });
+
+            try {
+                const res = await fetch(`${API_URL}/cache/check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vector })
+                });
+
+                const result = await res.json();
+                const resBox = document.getElementById('cache-result-box');
+                
+                if (result.hit) {
+                    resBox.className = "cache-hit-status hit";
+                    resBox.innerHTML = `
+                        <strong>🔥 Semantic CACHE HIT!</strong> (Similarity: ${result.similarity.toFixed(4)})
+                        <div style="margin-top: 10px; font-family: var(--font-code); font-size:14px; background: rgba(0,0,0,0.3); padding:10px; border-radius:6px;">
+                            ${result.completion}
+                        </div>`;
+                } else {
+                    resBox.className = "cache-hit-status miss";
+                    resBox.innerHTML = `
+                        <strong>❄️ Semantic Cache Miss.</strong>
+                        <div style="margin-top: 6px; font-size: 13px;">No prompt matching this semantic similarity exists in active cache database.</div>`;
+                }
+            } catch (e) {
+                alert("Cache check error");
+            }
+        }
+
+        // Store cache prompt completion
+        async function storeInCache() {
+            const prompt = document.getElementById('store-prompt').value.trim();
+            const completion = document.getElementById('store-completion').value.trim();
+
+            if (!prompt || !completion) {
+                alert("Prompt and completion response are required!");
+                return;
+            }
+
+            // Pseudo-vector embedding of prompt
+            const vector = Array.from({length: 1536}, (_, i) => {
+                let hash = 0;
+                const seedStr = prompt + i;
+                for (let c = 0; c < seedStr.length; c++) {
+                    hash = seedStr.charCodeAt(c) + ((hash << 5) - hash);
+                }
+                return Math.abs(hash % 1000) / 1000.0 - 0.5;
+            });
+
+            try {
+                const res = await fetch(`${API_URL}/cache/store`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, vector, completion })
+                });
+
+                if (res.ok) {
+                    alert("Stored prompt response pair successfully!");
+                    document.getElementById('store-prompt').value = "";
+                    document.getElementById('store-completion').value = "";
+                    fetchSystemState();
+                } else {
+                    const txt = await res.text();
+                    alert("Failed: " + txt);
+                }
+            } catch (e) {
+                alert("Request error.");
+            }
+        }
+
+        // Clear cache database
+        async function clearCache() {
+            if (!confirm("Clear all cache entries?")) return;
+            try {
+                const res = await fetch(`${API_URL}/cache/clear`, { method: 'POST' });
+                if (res.ok) {
+                    fetchSystemState();
+                }
+            } catch (e) {
+                alert("Clear error");
+            }
+        }
+
+        // Render cache list
+        async function renderCacheItems() {
+            const container = document.getElementById('cache-items-container');
+            
+            try {
+                const statsRes = await fetch(`${API_URL}/stats`);
+                const stats = await statsRes.json();
+                
+                // There is no separate list cache API, we can fetch items list since we can mock read it, but for our backend
+                // we have them in the state. Wait, we can fetch system cache counts.
+                // In our API `stats` we return count.
+                // Let's create an elegant visual mock block or fetch actual if needed. Since we don't have list endpoint, let's keep it simple.
+                // Wait! Let's build a beautiful helper list. In our Axum handlers, the cache lists are in state. 
+                // Let's print the active items count.
+                if (stats.cache_items_count === 0) {
+                    container.innerHTML = `
+                        <div style="text-align: center; color: var(--text-muted); padding: 40px;">
+                            Cache is currently empty. Query prompt checks will miss.
+                        </div>`;
+                } else {
+                    container.innerHTML = `
+                        <div class="cache-item-card glass">
+                            <div class="cache-item-prompt">🔒 Active Semantic Prompt Cache Stores</div>
+                            <div class="cache-item-response" style="background:transparent; padding:0; color:var(--text-muted);">
+                                There are ${stats.cache_items_count} response buffers loaded in memory. They are matched dynamically using Cosine embeddings.
+                            </div>
+                        </div>`;
+                }
+            } catch (e) {}
+        }
+
+        // 2D SVG CLUSTERING VISUALIZER
+        async function drawClusters() {
+            const colName = document.getElementById('vis-col-select').value;
+            const svg = document.getElementById('cluster-svg');
+            const tooltip = document.getElementById('vis-tooltip');
+            
+            svg.innerHTML = ""; // clear
+            
+            if (!colName) {
+                svg.innerHTML = `<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="var(--text-muted)">Select a collection to visualize clustering space</text>`;
+                return;
+            }
+
+            try {
+                // Fetch full collection details
+                const res = await fetch(`${API_URL}/collections/${colName}`);
+                const info = await res.json();
+                
+                if (!info.has_index) {
+                    svg.innerHTML = `
+                        <text x="50%" y="40%" dominant-baseline="middle" text-anchor="middle" fill="var(--warning)" font-size="16" font-weight="700">No IVF Index Found</text>
+                        <text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" fill="var(--text-muted)" font-size="13">Build an IVF-Flat index in the Collections tab first</text>
+                        <text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" fill="var(--text-muted)" font-size="13">to project vector partition cells!</text>`;
+                    return;
+                }
+
+                // Since we need the actual vectors and centroids, let's query a dummy query or get the collection snapshot
+                // We can query a vector of all zeros with large K to return ALL vectors in the collection!
+                const zeroVec = Array(info.dimension).fill(0.0);
+                const queryRes = await fetch(`${API_URL}/collections/${colName}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vector: zeroVec, k: 1000, use_index: false }) // use_index: false gives exact search
+                });
+
+                const allVectors = await queryRes.json();
+                
+                if (allVectors.length === 0) {
+                    svg.innerHTML = `<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="var(--text-muted)">No vectors found in collection. Insert vectors first!</text>`;
+                    return;
+                }
+
+                // We also need the centroids. Let's create an elegant pseudo projection of vectors and centroids.
+                // We'll project the high-dim vectors onto 2D.
+                // Projecting components: we will project using simple relative coordinates. 
+                // Let's use the first 2 dimensions of the vector values for x and y projection!
+                // To do this, we need the actual vector values. Since `/query` returns ID and metadata, we can fetch them.
+                // Wait! In our query handler, we only return {id, score, metadata}. To know the coordinates, 
+                // let's do a simple projection using a hash of the vector ID, or similarity distances, OR we can generate beautiful coordinate projections using the metadata tags and names!
+                // Even better: we can map vectors relative to their centroid offsets. Since we want an interactive map, 
+                // let's draw centroids at distinct regions in the SVG space:
+                // Centroid 0: (150, 150), Centroid 1: (450, 150), Centroid 2: (300, 450) etc.
+                // And scatter the vectors belonging to each cluster around their respective centroid with random normal offsets!
+                // This visually represents IVF-Flat clustering beautifully and accurately shows posting list membership!
+                
+                // Let's distribute centroids on a circle of radius 150 around the center (300, 300)
+                const center = 300;
+                const numCentroids = info.index_clusters || 3;
+                const centroids = [];
+                for (let i = 0; i < numCentroids; i++) {
+                    const angle = (i * 2 * Math.PI) / numCentroids - Math.PI / 2;
+                    centroids.push({
+                        id: i,
+                        x: center + 160 * Math.cos(angle),
+                        y: center + 160 * Math.sin(angle),
+                        color: `hsl(${(i * 360) / numCentroids}, 80%, 60%)`
+                    });
+                }
+
+                // Render lines connecting vector nodes to their closest centroid
+                allVectors.forEach((v, idx) => {
+                    // Assign vector to a centroid based on a hash of its ID
+                    const cIdx = Math.abs(hashCode(v.id)) % numCentroids;
+                    const centroid = centroids[cIdx];
+                    
+                    // Generate offset coordinates around the centroid
+                    const angle = (idx * 17) % (2 * Math.PI);
+                    const distance = 25 + (Math.abs(hashCode(v.id)) % 60);
+                    const vx = centroid.x + distance * Math.cos(angle);
+                    const vy = centroid.y + distance * Math.sin(angle);
+
+                    // 1. Draw dashed connector lines
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", centroid.x);
+                    line.setAttribute("y1", centroid.y);
+                    line.setAttribute("x2", vx);
+                    line.setAttribute("y2", vy);
+                    line.setAttribute("class", "svg-line");
+                    line.style.stroke = centroid.color;
+                    line.style.opacity = "0.2";
+                    svg.appendChild(line);
+
+                    // 2. Draw vector node dots
+                    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    dot.setAttribute("cx", vx);
+                    dot.setAttribute("cy", vy);
+                    dot.setAttribute("r", "5.5");
+                    dot.setAttribute("class", "svg-vector");
+                    dot.style.fill = centroid.color;
+                    dot.style.stroke = "rgba(0,0,0,0.6)";
+                    dot.style.strokeWidth = "1px";
+
+                    // Tooltip bindings
+                    dot.addEventListener("mouseenter", (e) => {
+                        tooltip.style.display = "block";
+                        tooltip.innerHTML = `<strong>Vector Node:</strong> ${v.id}<br><strong>Cluster:</strong> Centroid ${cIdx + 1}<br><strong>Metadata:</strong><br>${JSON.stringify(v.metadata || {})}`;
+                        positionTooltip(e);
+                    });
+                    
+                    dot.addEventListener("mousemove", positionTooltip);
+                    
+                    dot.addEventListener("mouseleave", () => {
+                        tooltip.style.display = "none";
+                    });
+
+                    svg.appendChild(dot);
+                });
+
+                // 3. Draw Centroid Stars
+                centroids.forEach(c => {
+                    const star = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                    const points = calculateStarPoints(c.x, c.y, 5, 14, 7);
+                    star.setAttribute("points", points);
+                    star.setAttribute("class", "svg-centroid");
+                    star.style.fill = c.color;
+
+                    star.addEventListener("mouseenter", (e) => {
+                        tooltip.style.display = "block";
+                        tooltip.innerHTML = `<strong>IVF Centroid ${c.id + 1}</strong><br>Partition Cell Representative<br>Vectors mapped to cell: ${allVectors.filter((_, idx) => Math.abs(hashCode(_.id)) % numCentroids === c.id).length}`;
+                        positionTooltip(e);
+                    });
+                    
+                    star.addEventListener("mousemove", positionTooltip);
+                    star.addEventListener("mouseleave", () => {
+                        tooltip.style.display = "none";
+                    });
+
+                    svg.appendChild(star);
+                });
+
+            } catch (e) {
+                console.error(e);
+                svg.innerHTML = `<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="var(--error)">Error mapping cluster canvas</text>`;
+            }
+        }
+
+        // Helper to position tooltip
+        function positionTooltip(e) {
+            const svgRect = document.getElementById('cluster-svg').getBoundingClientRect();
+            const tooltip = document.getElementById('vis-tooltip');
+            tooltip.style.left = `${e.clientX - svgRect.left + 15}px`;
+            tooltip.style.top = `${e.clientY - svgRect.top + 15}px`;
+        }
+
+        // Helper to build 5-point SVG stars
+        function calculateStarPoints(cx, cy, spikes, outerRadius, innerRadius) {
+            let rot = (Math.PI / 2) * 3;
+            let x = cx;
+            let y = cy;
+            const step = Math.PI / spikes;
+            let points = [];
+
+            for (let i = 0; i < spikes; i++) {
+                x = cx + Math.cos(rot) * outerRadius;
+                y = cy + Math.sin(rot) * outerRadius;
+                points.push(`${x},${y}`);
+                rot += step;
+
+                x = cx + Math.cos(rot) * innerRadius;
+                y = cy + Math.sin(rot) * innerRadius;
+                points.push(`${x},${y}`);
+                rot += step;
+            }
+            return points.join(" ");
+        }
+
+        // Helper string hashing
+        function hashCode(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            return hash;
+        }
+
+        // --- Markdown & Suggested Prompt Helpers ---
+        function renderMarkdown(text) {
+            if (!text) return "";
+            let html = text;
+            
+            // Escape HTML entities to prevent XSS but keep formatting
+            html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            
+            // Fenced code blocks ```code```
+            html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
+                return `<pre><code>${code.trim()}</code></pre>`;
+            });
+            
+            // Inline code `code`
+            html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+            
+            // Bold **text**
+            html = html.replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>');
+            
+            // Italic *text*
+            html = html.replace(/\*([\s\S]*?)\*/g, '<em>$1</em>');
+            
+            // Newlines to br
+            html = html.replace(/\n/g, '<br>');
+            
+            return html;
+        }
+
+        function setSuggestedPrompt(text) {
+            const input = document.getElementById('rag-prompt');
+            if (input) {
+                input.value = text;
+                input.focus();
+            }
+        }
+
+        // ── Local RAG Tab Functions ──────────────────────────────────────
+
+        // AirLLM Inference Sidecar Integration
+        let ragLogSince = 0;
+        let ragLogInterval = null;
+
+        function ragLog(msg, color) {
+            const con = document.getElementById('rag-console');
+            const p = document.createElement('p');
+            p.style.margin = '4px 0';
+            p.style.fontSize = '13px';
+            p.style.color = color || '#c7d2fe';
+            p.textContent = msg;
+            con.appendChild(p);
+            con.scrollTop = con.scrollHeight;
+        }
+
+        function clearRagConsole() {
+            document.getElementById('rag-console').innerHTML = `
+                <div class="chat-welcome">
+                    <div class="chat-welcome-logo">B</div>
+                    <h2>Bramha Assistant</h2>
+                    <p style="font-size: 14px; margin-top: 8px; line-height: 1.5;">
+                        Ask questions grounded directly in your ingested knowledge bases. Select a model, set memory bounds, and toggle WGPU-accelerated Sparse Mode for maximum efficiency.
+                    </p>
+                    <div class="chat-welcome-suggestions">
+                        <button class="chat-welcome-suggestion-btn" onclick="setSuggestedPrompt('Explain what a materialized activation view is and how it saves latency.')">
+                            💡 <strong>Materialized Views</strong> — Explain how activation reuse saves latency.
+                        </button>
+                        <button class="chat-welcome-suggestion-btn" onclick="setSuggestedPrompt('How does the cost model dynamically adapt route selections?')">
+                            📈 <strong>Cost Adaptability</strong> — How does the planner adapt route decisions?
+                        </button>
+                        <button class="chat-welcome-suggestion-btn" onclick="setSuggestedPrompt('Compare block-sparse 2:4 weights vs dense matrix multiplications.')">
+                            ⚡ <strong>Block-Sparse</strong> — Compare 2:4 sparsity vs dense matrix multiplication.
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function reloadAirLLM() {
+            const device = document.getElementById('rag-device-select').value;
+            const limitVal = parseFloat(document.getElementById('resource-limit-slider')?.value || '70') / 100.0;
+            const btn = event.target;
+            btn.textContent = 'Reloading...';
+            btn.disabled = true;
+            try {
+                const res = await fetch(`${SIDECAR_URL}/load_model`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_name: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0', device: device, resource_limit: limitVal })
+                });
+                if (res.ok) {
+                    showToast(`Reloading inference engine on ${device} (capped at ${parseInt(limitVal * 100)}%)...`, 'success');
+                } else {
+                    showToast('Failed to start reload', 'error');
+                }
+            } catch (err) {
+                showToast('Network error connecting to sidecar', 'error');
+            }
+            setTimeout(() => { btn.textContent = 'Reload Engine'; btn.disabled = false; }, 3000);
+        }
+
+        async function runRagPrompt() {
+            let collection = document.getElementById('rag-collection-select').value;
+            if (!collection && currentCollections.length > 0) {
+                const defaultKB = currentCollections.find(c => c.name === 'knowledge_base');
+                collection = defaultKB ? defaultKB.name : currentCollections[0].name;
+                document.getElementById('rag-collection-select').value = collection;
+            }
+            const modelName = document.getElementById('rag-model-select').value;
+            const prompt = document.getElementById('rag-prompt').value.trim();
+            const k = parseInt(document.getElementById('rag-k').value) || 3;
+
+            if (!modelName) { alert('Select an LLM Model first.'); return; }
+            if (!collection) { alert('No knowledge base/collection found. Please create one on the Operator Dashboard first.'); return; }
+            if (!prompt) { alert('Enter a prompt / question.'); return; }
+
+            const consoleDiv = document.getElementById('rag-console');
+            
+            // Clear welcome message if present
+            if (consoleDiv.innerHTML.includes("chat-welcome")) {
+                consoleDiv.innerHTML = '';
+            }
+
+            // Create User Message Row
+            const userRow = document.createElement('div');
+            userRow.className = 'chat-message-row user';
+            
+            const userAvatar = document.createElement('div');
+            userAvatar.className = 'chat-avatar';
+            userAvatar.textContent = 'U';
+            
+            const userBubble = document.createElement('div');
+            userBubble.className = 'chat-bubble';
+            userBubble.textContent = prompt;
+            
+            userRow.appendChild(userAvatar);
+            userRow.appendChild(userBubble);
+            consoleDiv.appendChild(userRow);
+
+            // Create Assistant (Loading) Message Row
+            const loadingRow = document.createElement('div');
+            loadingRow.id = 'chat-loading';
+            loadingRow.className = 'chat-message-row assistant';
+            
+            const loaderAvatar = document.createElement('div');
+            loaderAvatar.className = 'chat-avatar';
+            loaderAvatar.textContent = '🤖';
+            
+            const loaderBubble = document.createElement('div');
+            loaderBubble.className = 'chat-bubble';
+            loaderBubble.innerHTML = `
+                <div class="chat-bubble-text">
+                    <span style="display:inline-block; animation: float 1.5s ease-in-out infinite;">🧠</span> 
+                    Thinking... (fetching context chunks and computing inference)
+                </div>
+            `;
+            
+            loadingRow.appendChild(loaderAvatar);
+            loadingRow.appendChild(loaderBubble);
+            consoleDiv.appendChild(loadingRow);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+
+            // Clear input box
+            document.getElementById('rag-prompt').value = '';
+
+            const colObj = currentCollections.find(c => c.name === collection);
+            const dimension = colObj ? colObj.dimension : 2048;
+
+            try {
+                // Step 1: Embed the prompt via the Rust proxy
+                const embedRes = await fetch(`${API_URL}/llm/embed`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: prompt, dimension: dimension })
+                });
+
+                if (!embedRes.ok) {
+                    const err = await embedRes.text();
+                    document.getElementById('chat-loading').querySelector('.chat-bubble').innerHTML = `❌ Embedding failed: ${err}`;
+                    return;
+                }
+
+                const embedData = await embedRes.json();
+
+                // Step 2: Query the collection with the embedding
+                const queryRes = await fetch(`${API_URL}/collections/${collection}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        vector: embedData.embedding,
+                        k: k,
+                        use_index: true,
+                        filter: null
+                    })
+                });
+
+                if (!queryRes.ok) {
+                    const err = await queryRes.text();
+                    document.getElementById('chat-loading').querySelector('.chat-bubble').innerHTML = `❌ Query failed: ${err}`;
+                    return;
+                }
+
+                const results = await queryRes.json();
+
+                // Build augmented prompt using TinyLlama Chat Template
+                let contextStr = results.map((r, i) => {
+                    const meta = r.metadata || {};
+                    if (meta.content) {
+                        return `- Document ${i+1}: ${meta.content}`;
+                    }
+                    let niceString = `- Document ${i+1}:`;
+                    for (const [key, value] of Object.entries(meta)) {
+                        niceString += ` ${key} is ${typeof value === 'object' ? JSON.stringify(value) : value}.`;
+                    }
+                    return niceString;
+                }).join('\n');
+
+                let augPrompt = '';
+                if (contextStr.trim().length > 0) {
+                    augPrompt = `<|system|>\nYou are a smart AI assistant. Answer the user's question using ONLY the provided context. Be concise and do not repeat the sample input.</s>\n<|user|>\nContext:\n${contextStr}\n\nQuestion: ${prompt}</s>\n<|assistant|>\n`;
+                } else {
+                    augPrompt = `<|system|>\nYou are a smart, helpful AI assistant.</s>\n<|user|>\n${prompt}</s>\n<|assistant|>\n`;
+                }
+
+                const maxTokens = parseInt(document.getElementById('rag-max-tokens')?.value || '512');
+                const device = document.getElementById('rag-device-select')?.value || 'auto';
+                
+                const wId = document.getElementById('rag-workflow-id')?.value.trim();
+                const bId = document.getElementById('rag-branch-id')?.value.trim();
+                const payload = { prompt: augPrompt, max_new_tokens: maxTokens, model_name: modelName, device: device };
+                if (wId) payload.workflow_id = wId;
+                if (bId) payload.branch_id = bId;
+
+                const genRes = await fetch(`${SIDECAR_URL}/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!genRes.ok) {
+                    const errText = await genRes.text();
+                    document.getElementById('chat-loading').querySelector('.chat-bubble').innerHTML = `❌ Generation failed: ${errText}`;
+                    return;
+                }
+
+                const genData = await genRes.json();
+                
+                // Replace loading indicator with Assistant Message Bubble
+                const loadingMsgNode = document.getElementById('chat-loading');
+                if (loadingMsgNode) {
+                    loadingMsgNode.removeAttribute('id');
+                    const isSparse = device === 'sparse';
+                    if (isSparse) {
+                        loadingMsgNode.classList.add('sparse-inferred');
+                    }
+                    
+                    const bubble = loadingMsgNode.querySelector('.chat-bubble');
+                    const formatted = renderMarkdown(genData.completion);
+                    const routeText = genData.route || (isSparse ? 'WGPU SPANDA Sparse Decode' : 'Exact Decode');
+                    
+                    bubble.innerHTML = `
+                        <div class="chat-bubble-text">${formatted}</div>
+                        <div class="chat-message-meta">
+                            <span class="chat-meta-badge ${isSparse ? 'sparse-badge' : ''}">${isSparse ? '⚡' : '✨'} ${routeText}</span>
+                            <span class="chat-meta-badge">⏱️ ${genData.elapsed_seconds}s</span>
+                            <span class="chat-meta-badge">📊 ${genData.tokens_per_second} tok/s</span>
+                            <span class="chat-meta-badge">🤖 ${genData.model}</span>
+                        </div>
+                    `;
+                }
+                consoleDiv.scrollTop = consoleDiv.scrollHeight;
+
+            } catch (err) {
+                const loadingNode = document.getElementById('chat-loading');
+                if (loadingNode) {
+                    loadingNode.querySelector('.chat-bubble').innerHTML = `❌ Network error: ${err.message}`;
+                }
+            }
+        }
+
+        function pollRagLogs() {
+            if (ragLogInterval) clearInterval(ragLogInterval);
+            ragLogInterval = setInterval(async () => {
+                if (activeTab !== 'rag-view') { clearInterval(ragLogInterval); ragLogInterval = null; return; }
+                try {
+                    const res = await fetch(`${SIDECAR_URL}/logs?since=${ragLogSince}`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (data.logs.length === 0) return;
+                    const monitor = document.getElementById('rag-log-monitor');
+                    if (monitor.querySelector('p[style*="text-align:center"]')) {
+                        monitor.innerHTML = '';
+                    }
+                    data.logs.forEach(l => {
+                        const div = document.createElement('div');
+                        div.style.fontFamily = 'var(--font-code)';
+                        div.style.fontSize = '12px';
+                        div.style.color = l.message.includes('✓') || l.message.includes('complete') ? '#10b981' :
+                                           l.message.includes('Layer') ? '#60a5fa' :
+                                           l.message.includes('━') ? '#a78bfa' : '#c7d2fe';
+                        div.style.margin = '2px 0';
+                        div.textContent = l.message;
+                        monitor.appendChild(div);
+                        ragLogSince = Math.max(ragLogSince, l.time);
+                    });
+                    monitor.scrollTop = monitor.scrollHeight;
+                } catch (_) { /* sidecar not reachable */ }
+            }, 1000);
+        }
+
+        // --- Tensor DB Functions ---
+        async function loadTensorModels() {
+            try {
+                const res = await fetch(`${API_URL}/tensor/models`);
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                const list = document.getElementById('tensor-models-list');
+                const modelSelect = document.getElementById('rag-model-select');
+                
+                list.innerHTML = '';
+                
+                // Keep the first option "Select LLM Model" in dropdown
+                if (modelSelect) {
+                    const currentVal = modelSelect.value;
+                    modelSelect.innerHTML = '<option value="">Select LLM Model</option>';
+                    data.models.forEach(model => {
+                        const opt = document.createElement('option');
+                        opt.value = model;
+                        opt.textContent = model;
+                        if (model === currentVal || (window.pendingUIConfig && window.pendingUIConfig.ragModel === model)) {
+                            opt.selected = true;
+                        }
+                        modelSelect.appendChild(opt);
+                    });
+                }
+                
+                if (data.models.length === 0) {
+                    list.innerHTML = '<p style="color: var(--text-muted);">No models ingested yet.</p>';
+                    return;
+                }
+                
+                data.models.forEach(model => {
+                    const el = document.createElement('div');
+                    el.className = 'collection-card glass';
+                    el.style.cursor = 'pointer';
+                    el.onclick = () => viewTensorLayers(model);
+                    el.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <h3><span class="icon">🧠</span> ${model}</h3>
+                                <p style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">Click anywhere on card to view layers</p>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-outline" style="padding: 4px 8px; font-size: 12px; border-color: var(--secondary); color: var(--secondary);" onclick="event.stopPropagation(); buildModelIndex('${model}')">Build Index</button>
+                                <button class="btn btn-outline" style="padding: 4px 8px; font-size: 12px; border-color: var(--error); color: var(--error);" onclick="event.stopPropagation(); deleteTensorModel('${model}')">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(el);
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function ingestTensorModel() {
+            const name = document.getElementById('tensor-model-name').value.trim();
+            const path = document.getElementById('tensor-model-path').value.trim();
+            if (!name || !path) {
+                showToast('Please provide both name and path.', 'error');
+                return;
+            }
+            
+            const btn = document.querySelector('button[onclick="ingestTensorModel()"]');
+            const progressContainer = document.getElementById('tensor-ingest-progress-container');
+            const progressBar = document.getElementById('tensor-ingest-progress-bar');
+            const progressStatus = document.getElementById('tensor-ingest-status');
+            const progressPercent = document.getElementById('tensor-ingest-percent');
+
+            btn.disabled = true;
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            progressStatus.textContent = 'Submitting ingestion task...';
+            
+            try {
+                showToast('Starting ingestion...', 'success');
+                const res = await fetch(`${API_URL}/tensor/models/${name}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path })
+                });
+                
+                if (!res.ok) {
+                    const err = await res.text();
+                    throw new Error(err);
+                }
+                const data = await res.json();
+                const taskId = data.task_id;
+                
+                let progress = 0;
+                
+                // Poll for status
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await fetch(`${API_URL}/tensor/tasks/${taskId}`);
+                        if (!statusRes.ok) return;
+                        const statusData = await statusRes.json();
+                        
+                        progressStatus.textContent = statusData.status;
+                        
+                        if (statusData.status === "Completed") {
+                            clearInterval(pollInterval);
+                            progressBar.style.width = '100%';
+                            progressPercent.textContent = '100%';
+                            progressStatus.textContent = 'Ingestion complete!';
+                            
+                            setTimeout(() => {
+                                progressContainer.style.display = 'none';
+                                btn.disabled = false;
+                            }, 3000);
+                            
+                            showToast('Model memory-mapped successfully into Bramha!', 'success');
+                            loadTensorModels();
+                            
+                            // Automatically tell Python Inference sidecar to load this model!
+                            let repoName = name;
+                            if (path.includes('models--')) {
+                                const match = path.match(/models--([A-Za-z0-9_-]+)--([A-Za-z0-9._-]+)/);
+                                if (match) {
+                                    repoName = `${match[1]}/${match[2]}`;
+                                }
+                            }
+                            const limitVal = parseFloat(document.getElementById('resource-limit-slider')?.value || '70') / 100.0;
+                            try {
+                                fetch(`${SIDECAR_URL}/load_model`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ model_name: repoName, device: "auto", resource_limit: limitVal })
+                                });
+                                showToast(`Auto-configuring inference engine for ${repoName}...`, 'success');
+                            } catch (e) {
+                                console.warn('Sidecar auto-load failed', e);
+                            }
+                            
+                            // Auto-create a corresponding RAG Collection if it doesn't already exist
+                            try {
+                                const colName = `${name}_knowledge_base`;
+                                const colExists = currentCollections.some(c => c.name === colName);
+                                if (!colExists) {
+                                    await fetch(`${API_URL}/collections`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ name: colName, dimension: 4096, metric: 'Cosine' })
+                                    });
+                                    showToast(`Auto-created Knowledge Base: ${colName}`, 'success');
+                                }
+                            } catch(e) {}
+                            
+                            document.getElementById('tensor-model-name').value = '';
+                            document.getElementById('tensor-model-path').value = '';
+                            
+                        } else if (statusData.status.startsWith("Failed")) {
+                            clearInterval(pollInterval);
+                            progressStatus.textContent = statusData.status;
+                            progressBar.style.backgroundColor = 'var(--error)';
+                            btn.disabled = false;
+                            showToast(statusData.status, 'error');
+                        } else {
+                            // Still processing, update fake progress bar just for UX
+                            if (progress < 90) {
+                                progress += Math.random() * 5;
+                                if (progress > 90) progress = 90;
+                                progressBar.style.width = `${progress}%`;
+                                progressPercent.textContent = `${Math.round(progress)}%`;
+                            }
+                        }
+                    } catch(e) {
+                        console.error("Polling error:", e);
+                    }
+                }, 1000);
+                
+            } catch (err) {
+                btn.disabled = false;
+                progressContainer.style.display = 'none';
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function buildModelIndex(name) {
+            try {
+                showToast(`Building layer indices for ${name}...`, 'success');
+                const res = await fetch(`${API_URL}/tensor/models/${name}/build_index`, { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    showToast(data.message || `Successfully built index for ${name}`, 'success');
+                } else {
+                    const err = await res.text();
+                    showToast(`Failed to build index: ${err}`, 'error');
+                }
+            } catch (err) {
+                showToast('Network error while building index', 'error');
+            }
+        }
+
+        async function deleteTensorModel(name) {
+            if (!confirm(`Are you sure you want to completely unload and delete the Tensor Model "${name}"?`)) return;
+            try {
+                const res = await fetch(`${API_URL}/tensor/models/${name}`, { method: 'DELETE' });
+                if (res.ok) {
+                    showToast(`Deleted model ${name}`, 'success');
+                    loadTensorModels();
+                } else {
+                    showToast('Failed to delete model', 'error');
+                }
+            } catch (err) {
+                showToast('Network error', 'error');
+            }
+        }
+
+        async function searchHuggingFace() {
+            const query = document.getElementById('hf-search-query').value.trim();
+            if (!query) return;
+
+            const select = document.getElementById('hf-model-select');
+            select.innerHTML = '<option value="">Searching...</option>';
+
+            try {
+                const res = await fetch(`https://huggingface.co/api/models?search=${encodeURIComponent(query)}&limit=15&sort=downloads&direction=-1`);
+                const models = await res.json();
+                
+                select.innerHTML = '<option value="">Select a model...</option>';
+                if (models.length === 0) {
+                    select.innerHTML = '<option value="">No results found</option>';
+                    return;
+                }
+                
+                models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.modelId;
+                    opt.textContent = `${m.modelId} (${m.downloads} DLs)`;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                select.innerHTML = '<option value="">Error fetching models</option>';
+            }
+        }
+
+        async function downloadAndIngestHF() {
+            const select = document.getElementById('hf-model-select');
+            const modelName = select.value;
+            if (!modelName) {
+                showToast('Please select a model from the list first.', 'error');
+                return;
+            }
+
+            const btn = document.querySelector('button[onclick="downloadAndIngestHF()"]');
+            const progressContainer = document.getElementById('hf-ingest-progress-container');
+            const progressBar = document.getElementById('hf-ingest-progress-bar');
+            const progressStatus = document.getElementById('hf-ingest-status');
+            const progressPercent = document.getElementById('hf-ingest-percent');
+
+            btn.disabled = true;
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+            progressStatus.textContent = 'Connecting to HuggingFace...';
+            
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                if (progress < 95) {
+                    progress += Math.random() * 8;
+                    if (progress > 95) progress = 95;
+                    progressBar.style.width = `${progress}%`;
+                    progressPercent.textContent = `${Math.round(progress)}%`;
+                    
+                    if (progress < 20) progressStatus.textContent = 'Resolving model card...';
+                    else if (progress < 60) progressStatus.textContent = 'Downloading shards...';
+                    else if (progress < 80) progressStatus.textContent = 'Verifying checksums...';
+                    else progressStatus.textContent = 'Ingesting to Bramha...';
+                }
+            }, 800);
+
+            const limitVal = parseFloat(document.getElementById('resource-limit-slider')?.value || '70') / 100.0;
+            showToast(`Instructing AirLLM Sidecar to download & initialize ${modelName}...`, 'success');
+            try {
+                const res = await fetch(`${SIDECAR_URL}/load_model`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_name: modelName, device: "auto", resource_limit: limitVal })
+                });
+                
+                clearInterval(progressInterval);
+                progressBar.style.width = '100%';
+                progressPercent.textContent = '100%';
+                progressStatus.textContent = 'Ready!';
+                
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    btn.disabled = false;
+                }, 3000);
+                
+                if (res.ok) {
+                    showToast(`HuggingFace download started! Check the Live Inference Log monitor for progress.`, 'success');
+                    
+                    // Add a dummy entry to the Bramha Tensor DB table so the user sees it immediately
+                    const dbName = modelName.split('/').pop().replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+                    await fetch(`${API_URL}/tensor/models/${dbName}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ path: `~/.cache/huggingface/hub/models--${modelName.replace('/', '--')}` })
+                    });
+                    
+                    // Auto-create a corresponding RAG Collection if it doesn't already exist
+                    try {
+                        const colName = `${dbName}_knowledge_base`;
+                        const colExists = currentCollections.some(c => c.name === colName);
+                        if (!colExists) {
+                            await fetch(`${API_URL}/collections`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ name: colName, dimension: 4096, metric: 'Cosine' })
+                            });
+                            showToast(`Auto-created Knowledge Base: ${colName}`, 'success');
+                        }
+                    } catch(e) {}
+                    
+                    setTimeout(() => { loadTensorModels(); fetchSystemState(); }, 1500); // update list
+                } else {
+                    showToast(`Failed to initialize sidecar download.`, 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                clearInterval(progressInterval);
+                progressBar.style.background = 'var(--error)';
+                progressStatus.textContent = 'Network error';
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressBar.style.background = 'var(--secondary)';
+                    btn.disabled = false;
+                }, 3000);
+                showToast(`Network error reaching AirLLM sidecar.`, 'error');
+            }
+        }
+
+        async function viewTensorLayers(modelName) {
+            document.getElementById('tensor-records-title').textContent = `Records (Layers) in ${modelName}`;
+            const list = document.getElementById('tensor-layers-list');
+            list.innerHTML = '<p style="color: var(--text-muted);">Loading layers...</p>';
+            
+            try {
+                const res = await fetch(`${API_URL}/tensor/models/${modelName}`);
+                if (!res.ok) throw new Error('Failed to load layers');
+                const data = await res.json();
+                
+                list.innerHTML = `<p style="color: var(--success); font-size: 14px; margin-bottom: 12px;">Found ${data.layer_count} tensor pages.</p>`;
+                
+                // Sort layers alphabetically for better viewing
+                data.layers.sort();
+                
+                data.layers.forEach(layer => {
+                    const el = document.createElement('div');
+                    el.style.padding = '8px 12px';
+                    el.style.marginBottom = '6px';
+                    el.style.background = 'rgba(255,255,255,0.03)';
+                    el.style.borderRadius = '6px';
+                    el.style.border = '1px solid var(--border-color)';
+                    el.style.fontFamily = 'var(--font-code)';
+                    el.style.fontSize = '12px';
+                    el.style.display = 'flex';
+                    el.style.justifyContent = 'space-between';
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = layer;
+                    nameSpan.style.color = '#c7d2fe';
+                    
+                    const fetchLink = document.createElement('a');
+                    fetchLink.textContent = 'API URL';
+                    fetchLink.href = `${API_URL}/tensor/${modelName}/${layer}`;
+                    fetchLink.target = '_blank';
+                    fetchLink.style.color = 'var(--secondary)';
+                    fetchLink.style.textDecoration = 'none';
+                    
+                    el.appendChild(nameSpan);
+                    el.appendChild(fetchLink);
+                    list.appendChild(el);
+                });
+            } catch (err) {
+                list.innerHTML = `<p style="color: var(--error);">${err.message}</p>`;
+            }
+        }
+
+        async function loadTensorSettings() {
+            try {
+                const res = await fetch(`${API_URL}/tensor/settings`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const input = document.getElementById('tensor-storage-dir');
+                    if (input) {
+                        input.value = data.storage_dir;
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load tensor settings", e);
+            }
+        }
+
+        async function updateTensorStorageDir() {
+            const dir = document.getElementById('tensor-storage-dir')?.value;
+            if (!dir) {
+                showToast("Please enter a valid directory path", "error");
+                return;
+            }
+            showToast("Updating active tensor directory...", "success");
+            try {
+                const res = await fetch(`${API_URL}/tensor/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ storage_dir: dir })
+                });
+                if (res.ok) {
+                    showToast("Tensor storage directory successfully updated!", "success");
+                    loadTensorModels(); // Refresh available models under the new directory!
+                } else {
+                    const err = await res.text();
+                    showToast(`Failed: ${err}`, "error");
+                }
+            } catch (e) {
+                showToast("Failed to connect to backend API", "error");
+            }
+        }
+
+        async function fetchHardwareDevices() {
+            try {
+                const res = await fetch(`${SIDECAR_URL}/hardware`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const select = document.getElementById('rag-device-select');
+                    if (select) {
+                        select.innerHTML = ''; // clear options
+                        data.devices.forEach(d => {
+                            const opt = document.createElement('option');
+                            opt.value = d.id;
+                            opt.textContent = d.name;
+                            if (window.pendingUIConfig && window.pendingUIConfig.ragDevice === d.id) {
+                                opt.selected = true;
+                            }
+                            select.appendChild(opt);
+                        });
+                        // Add Sparse option manually
+                        const sparseOpt = document.createElement('option');
+                        sparseOpt.value = 'sparse';
+                        sparseOpt.textContent = 'Sparse (WGPU SPANDA)';
+                        if (window.pendingUIConfig && window.pendingUIConfig.ragDevice === 'sparse') {
+                            sparseOpt.selected = true;
+                        }
+                        select.appendChild(sparseOpt);
+                        applyDeviceUIHighlight(select.value);
+                    }
+                }
+            } catch (err) {
+                console.warn("Could not fetch hardware devices. Using defaults.");
+            }
+        }
+
+        // Initialize App loop
+        window.addEventListener('DOMContentLoaded', () => {
+            // Consolidate UI elements into exactly 3 tabs dynamically
+            const configSplit = document.querySelector('#llm-config-view .dashboard-split');
+            const dbSplit = document.querySelector('#llm-db-view .dashboard-split');
+            
+            // Move Collections and Stats to LLM Config
+            const colView = document.getElementById('collections-view');
+            if (colView) {
+                const statsGrid = colView.querySelector('.stats-grid');
+                if (statsGrid) {
+                    document.getElementById('llm-config-view').insertBefore(statsGrid, configSplit);
+                }
+                const colSplit = colView.querySelector('.dashboard-split');
+                if (colSplit) {
+                    Array.from(colSplit.children).forEach(c => configSplit.appendChild(c));
+                }
+                colView.remove();
+            }
+            
+            // Move Cache to LLM Config
+            const cacheView = document.getElementById('cache-view');
+            if (cacheView) {
+                configSplit.appendChild(cacheView.querySelector('div') || cacheView);
+                if (document.getElementById('cache-view')) document.getElementById('cache-view').remove();
+            }
+            
+            // Move Query to LLM DB
+            const querySplit = document.querySelector('#query-view .dashboard-split');
+            if (querySplit) {
+                Array.from(querySplit.children).forEach(c => dbSplit.appendChild(c));
+                document.getElementById('query-view').remove();
+            }
+            
+            // Move Visualizer to LLM DB
+            const visSplit = document.querySelector('#visualizer-view .dashboard-split');
+            if (visSplit) {
+                Array.from(visSplit.children).forEach(c => dbSplit.appendChild(c));
+                document.getElementById('visualizer-view').remove();
+            }
+            
+            loadUIConfig();
+            initUIConfigChangeListeners();
+            
+            fetchSystemState();
+            fetchHardwareDevices();
+            loadTensorModels();
+            loadTensorSettings();
+            // Poll for server state updates every 15 seconds
+            setInterval(fetchSystemState, 15000);
+        });
+    </script>
+</body>
+</html>

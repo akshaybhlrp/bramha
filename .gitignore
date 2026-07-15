@@ -1,0 +1,25 @@
+/target
+/graphify-out
+
+# Local data and cache
+/tensor_data/
+/models/
+/cache/
+/*.bin
+/storage/query_analytics.db
+/storage/keys.json
+
+# Environment/Venvs
+/venv/
+/hf_env/
+/.env
+
+# Temporary and backup files
+/*.log
+/*.csv
+/*.py
+/src/inference/cpu_engine.rs.orig
+/dashboard/index.html.recovered
+/scratch.rs
+/test_huge.rs
+/tmp_s10.md

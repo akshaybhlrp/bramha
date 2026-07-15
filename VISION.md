@@ -1,0 +1,168 @@
+# VISION.md — Bramha + SPANDA
+
+> This document describes what the system wants to become.
+> For what we are building now, see `EXECUTION_ROADMAP.md`.
+> For what we will not touch until v1.0 is frozen, see `HYPERSCALE.md`.
+
+---
+
+## 1. Paradigm Shift Thesis
+
+Traditional LLM systems behave like mainframe SQL: token-by-token sequential processing, full recomputation on every step, minimal reuse of intermediate state, weak planning before expensive execution, fragmented storage/cache/routing/memory layers.
+
+**Bramha exists to create the "SQL on laptops" moment for local intelligence.**
+
+Database analogy:
+
+| Database Concept | Bramha Equivalent |
+|---|---|
+| B-tree indexes | super-tokens, phrase tries, output-space narrowing |
+| Materialized views | activation materialized views, prefix-state compilation, reasoning checkpoints |
+| Query optimizer | inference planner and multi-model execution planner |
+| Vectorized execution | chunkwise decoding, speculative trees, parallel refinement |
+| Buffer pool | hot weights, hot experts, hot activations, hot prefixes |
+| Query cache | deterministic answer cache and reusable workflows |
+
+Bramha is not a faster transformer runner. **Bramha is a database-native intelligence execution system.**
+
+---
+
+## 2. The Four Pillars
+
+### Pillar 1 — High-Performance Inference Engine (SPANDA)
+
+Rust-native, standalone crate. Pre-decomposed tensor storage, adaptive-rank inference, quantization, flash attention, paged KV cache, prefix cache, speculative decoding, CPU SIMD path, wgpu GPU path, planner-driven execution paths, exact fallback for every optimization.
+
+**Scope rule:** SPANDA supports one model family per release. It is validated end-to-end against a single target model. Generic multi-model support is Bramha's concern.
+
+### Pillar 2 — Intelligence Database
+
+Stores and manages collections, documents, chunks, embeddings, memories, entities, relations, execution traces, activation views, answer caches, model profiles, adapters, routing policies, planner state, workflow state, reusable execution artifacts.
+
+**v0.1 scope:** SQLite control plane + content-addressed payload store. Specialized subsystems (Graph DB, Memory DB) deferred until metrics prove the unified path is insufficient.
+
+### Pillar 3 — Adaptive Learning System
+
+Working memory, episodic memory, semantic memory, adapter learning, planner learning. Base model weights remain stable by default. Learning happens first through memory, graph updates, adapters, and routing policy adjustment.
+
+**v0.1 scope:** Working and episodic memory only. Semantic promotion and adapter learning deferred.
+
+### Pillar 4 — Multi-Model Query Orchestration
+
+A single query may use multiple models for classification, retrieval planning, reasoning, verification, formatting.
+
+**v0.1 scope:** Router mode + exact fallback only. Pipeline, verifier, ensemble, debate deferred.
+
+---
+
+## 3. Core Inventions (Production Track)
+
+### Invention 1 — Incremental and Bounded KV State
+
+Paged KV storage, INT8 KV quantization, prefix reuse, bounded incremental compression, spill to disk, resumable session checkpoints.
+
+**DS4-validated patterns:**
+- **Save lifecycle**: `cold` (after long first prompt), `continued` (at aligned frontiers), `evict` (before replacing live session), `shutdown` (clean exit)
+- **Boundary-aligned trimming**: trim last N tokens, align to prefill chunk boundaries (default: trim 32, align 2048)
+- **Rendered-text SHA1 key**: cache lookup by decoded prefix bytes, not semantic hash
+- **Cross-quant compatibility**: snapshots reusable across quantization variants of same model family
+
+### Invention 2 — Activation Materialized Views
+
+Store intermediate layer activations for reusable prompt patterns. Skip layers, not just tokens. Reduce TTFT.
+
+**Target:** v0.5
+
+### Invention 3 — Inference Planner
+
+Chooses execution path per request: exact decode, speculative decode, activation replay, deterministic cached answer, multi-model pipeline, ensemble verification, degraded fallback.
+
+**v0.1 scope:** Exact decode only. Planner framework exists but selects only the exact path.
+
+### Invention 4 — Intelligence CRUD
+
+Extend CRUD from data into intelligence state: create documents/chunks/memories/entities/adapters/views, read facts/evidence/graph paths, update confidence/reinforcement scores/policies, delete stale memories/expired cache.
+
+### Invention 5 — Multi-Model Federation
+
+Router, pipeline, ensemble, verifier, fallback, debate modes.
+
+**v0.1 scope:** Router + fallback only.
+
+### Invention 6 — Conditional Computation Runtime
+
+Adaptive rank, confidence-based early exit, expert routing, reduced-depth decode, retrieval-conditioned activation, uncertainty-triggered escalation, verifier-only full-depth fallback.
+
+**Target:** v0.5+
+
+### Invention 7 — Exact Tool-Call Replay *(DS4-Inspired)*
+
+- Unguessable API tool ID per call
+- Bounded map: `tool_id → exact generated bytes`
+- Split sampling: deterministic (temp=0) for syntax, user-configured for payloads
+- Map persisted alongside KV cache files
+
+**Target:** v0.5
+
+---
+
+## 4. System Doctrine
+
+| Rule | Statement |
+|---|---|
+| **Golden Rule** | Inference is stateless compute. Intelligence lives in the database. |
+| **Learning Rule** | Base model weights are stable by default. Learning happens first through memory, graph updates, adapters, and planner adjustment. |
+| **Safety Rule** | Every optimization path must have an exact fallback. |
+| **Storage Rule** | Anything worth reusing must become a database object. |
+| **Explainability Rule** | Every answer must be traceable to evidence, memory, planner decision, and model path. |
+| **Backend Rule** | CPU is the canonical backend. wgpu is the portable acceleration plane. Distributed workers are the scale-out plane. |
+| **Planner Rule** | Inference is not a single decode loop. It is a planner-selected execution strategy. |
+| **Gate Rule** | No phase begins until the previous phase's gate is passed. If a gate fails, execute the fallback immediately. |
+| **Banker Rule** | When in doubt, ship the conservative option that works. |
+| **P99 Rule** | Latency must never exceed dense baseline +15% at the 99th percentile. |
+
+---
+
+## 5. End State
+
+Bramha becomes:
+
+- A local-first intelligence database
+- A planned inference engine
+- A retrieval and evidence system
+- A memory and learning system
+- A multi-model orchestration runtime
+- A CPU-first heterogeneous execution engine
+- A wgpu-accelerated portable compute system
+- A horizontally scalable distributed intelligence platform
+
+**One Rust-native system for local intelligence, from CPU-only laptops to heterogeneous clusters.**
+
+---
+
+## 6. DS4 Reference Learnings (Adopted)
+
+> Source: [antirez/ds4](https://github.com/antirez/ds4) — DeepSeek V4 Flash/PRO local inference engine
+
+| Pattern | Source | Adoption |
+|---|---|---|
+| KV save lifecycle (`cold/continued/evict/shutdown`) | ds4 kvstore.c | Invention 1 |
+| Boundary-aligned trimming | ds4 README | Invention 1 |
+| Rendered-text SHA key | ds4 README | Invention 1 |
+| Exact tool-call replay | ds4 server | Invention 7 |
+| Split sampling (syntax vs payload) | ds4 server | Invention 7 |
+| Power throttling (measure + sleep) | ds4 README | Sprint 10 |
+| Frontier-based benchmarking | ds4 README | Sprint 10 |
+| Tensor classification (Resident vs Pageable) | ds4 design | SPANDA Phase 1 |
+| Layer-serial execution while paging | ds4 issue #384 | Architecture Invariant |
+| Conversion-time memory budget | ds4 startup | SPANDA Phase 0 |
+| One model family per release | ds4 philosophy | SPANDA Scope Rule |
+
+---
+
+## 7. DS4 Patterns NOT Adopted
+
+- **Distributed inference layer splitting** — Bramha Sprint 13 only. SPANDA does not need it.
+- **MTP speculative decoding** — ds4 calls it "experimental, slight speedup." On 4GB GPUs, a draft model doubles memory pressure. Defer until post-v1.0.
+- **Multi-process serving** — ds4 shows 1.5x scaling on 256GB. On 4GB, no headroom. SPANDA is single-process.
+- **Dynamic batching across users** — ds4 closed as "~zero gain on a Mac." Defer to post-v1.0.

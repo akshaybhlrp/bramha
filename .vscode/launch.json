@@ -1,0 +1,146 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "⚡ Run Bramha Server (Default)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=bramha"
+                ],
+                "filter": {
+                    "name": "bramha",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "info",
+                "RAYON_NUM_THREADS": "8"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🚀 Run Bramha Server (Release)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--release",
+                    "--bin=bramha"
+                ],
+                "filter": {
+                    "name": "bramha",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "info",
+                "RAYON_NUM_THREADS": "8"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🧪 Debug Bramha Core Tests",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib"
+                ],
+                "filter": {
+                    "name": "bramha",
+                    "kind": "lib"
+                }
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "🌐 Debug Dashboard (Chrome)",
+            "request": "launch",
+            "type": "chrome",
+            "url": "http://localhost:8000",
+            "webRoot": "${workspaceFolder}/dashboard"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "📊 Debug Multi-Model Benchmark",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=multi_model_benchmark"
+                ],
+                "filter": {
+                    "name": "multi_model_benchmark",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "✅ Run All Bramha Tests",
+            "cargo": {
+                "args": [
+                    "test"
+                ]
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_TEST_THREADS": "1"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🕵️ Run Real Inference (Shadow Mode)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=run_real_inference"
+                ],
+                "filter": {
+                    "name": "run_real_inference",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "info",
+                "SPANDA_FORCE_SHADOW": "1"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🧪 Run Shadow Mode Integration Test",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--",
+                    "test_shadow_mode_and_gate_check"
+                ],
+                "filter": {
+                    "name": "bramha",
+                    "kind": "lib"
+                }
+            },
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "info",
+                "SPANDA_FORCE_SHADOW": "1"
+            }
+        }
+    ]
+}

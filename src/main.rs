@@ -191,7 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ctrl_c = tokio::signal::ctrl_c();
         #[cfg(unix)]
         let terminate = async {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::{SignalKind, signal};
             if let Ok(mut stream) = signal(SignalKind::terminate()) {
                 stream.recv().await;
             } else {

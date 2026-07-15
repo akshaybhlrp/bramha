@@ -24,9 +24,9 @@ pub fn set_cpu_only(val: bool) {
 }
 
 pub fn is_cpu_only() -> bool {
-    CPU_ONLY_TASK.try_with(|val| *val).unwrap_or_else(|_| {
-        CPU_ONLY.load(Ordering::SeqCst) || std::env::var("BRAMHA_CPU").is_ok()
-    })
+    CPU_ONLY_TASK
+        .try_with(|val| *val)
+        .unwrap_or_else(|_| CPU_ONLY.load(Ordering::SeqCst) || std::env::var("BRAMHA_CPU").is_ok())
 }
 pub mod power;
 pub mod spanda_backend;

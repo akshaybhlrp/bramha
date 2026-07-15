@@ -1755,7 +1755,7 @@ pub async fn build_model_index(
     let model_view_path = base_path.join("model_view.json");
     if !model_view_path.exists() {
         return Err((
-            StatusCode::BAD_REQUEST, 
+            StatusCode::BAD_REQUEST,
             "This model does not use the BUTS (Bramha Unified Tensor Storage) format. Layer indexing requires block hashes and locations which are only available for fully ingested BUTS models. If this is a HuggingFace model or a legacy model, please ingest it properly using the local safetensors ingestion tool to enable indexing.".to_string()
         ));
     }

@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use tokio::runtime::Runtime;
-use bramha::storage::Database;
 use bramha::inference::engine::InferenceEngine;
 use bramha::inference::set_cpu_only;
-use std::time::Instant;
+use bramha::storage::Database;
 use std::fs::File;
 use std::io::Write;
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::runtime::Runtime;
 
 async fn setup_mock_model() -> (Arc<Database>, std::path::PathBuf) {
     let db = Arc::new(Database::new(None, 1536));
@@ -35,14 +35,35 @@ async fn setup_mock_model() -> (Arc<Database>, std::path::PathBuf) {
     write_dummy_weight("lm_head.weight", vocab_size * hidden_size);
     write_dummy_weight("model.norm.weight", hidden_size);
     write_dummy_weight("model.layers.0.input_layernorm.weight", hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.q_proj.weight", (num_q_heads * head_dim) * hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.k_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.v_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-    write_dummy_weight("model.layers.0.self_attn.o_proj.weight", hidden_size * (num_q_heads * head_dim));
-    write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
-    write_dummy_weight("model.layers.0.mlp.gate_proj.weight", mlp_size * hidden_size);
+    write_dummy_weight(
+        "model.layers.0.self_attn.q_proj.weight",
+        (num_q_heads * head_dim) * hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.self_attn.k_proj.weight",
+        (num_kv_heads * head_dim) * hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.self_attn.v_proj.weight",
+        (num_kv_heads * head_dim) * hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.self_attn.o_proj.weight",
+        hidden_size * (num_q_heads * head_dim),
+    );
+    write_dummy_weight(
+        "model.layers.0.post_attention_layernorm.weight",
+        hidden_size,
+    );
+    write_dummy_weight(
+        "model.layers.0.mlp.gate_proj.weight",
+        mlp_size * hidden_size,
+    );
     write_dummy_weight("model.layers.0.mlp.up_proj.weight", mlp_size * hidden_size);
-    write_dummy_weight("model.layers.0.mlp.down_proj.weight", hidden_size * mlp_size);
+    write_dummy_weight(
+        "model.layers.0.mlp.down_proj.weight",
+        hidden_size * mlp_size,
+    );
 
     bramha::storage::storage_manifest::write_mock_manifest(
         &temp_dir,
@@ -65,9 +86,11 @@ async fn setup_mock_model() -> (Arc<Database>, std::path::PathBuf) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🏁 Starting Frontier-Based Benchmark...");
-    
+
     // Disable prefix caching to get raw measurements per configuration
-    unsafe { std::env::set_var("BRAMHA_PREFIX_CACHE", "false"); }
+    unsafe {
+        std::env::set_var("BRAMHA_PREFIX_CACHE", "false");
+    }
     set_cpu_only(true);
 
     let rt = Runtime::new().unwrap();
@@ -96,7 +119,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Measure prefill (time to generate 1 token)
             let start_prefill = Instant::now();
             rt.block_on(async {
-                let _ = InferenceEngine::new(None).generate(db.clone(), "frontier-mock-model", &prompt, 1, 0.0, None, None).await.unwrap();
+                let _ = InferenceEngine::new(None)
+                    .generate(
+                        db.clone(),
+                        "frontier-mock-model",
+                        &prompt,
+                        1,
+                        0.0,
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap();
             });
             let prefill_dur = start_prefill.elapsed();
             let prefill_rate = (prefill_len as f64) / prefill_dur.as_secs_f64();
@@ -104,7 +138,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Measure generation (generate `gen_len` tokens)
             let start_gen = Instant::now();
             rt.block_on(async {
-                let _ = InferenceEngine::new(None).generate(db.clone(), "frontier-mock-model", &prompt, gen_len, 0.0, None, None).await.unwrap();
+                let _ = InferenceEngine::new(None)
+                    .generate(
+                        db.clone(),
+                        "frontier-mock-model",
+                        &prompt,
+                        gen_len,
+                        0.0,
+                        None,
+                        None,
+                    )
+                    .await
+                    .unwrap();
             });
             let gen_dur = start_gen.elapsed();
             let gen_rate = (gen_len as f64) / gen_dur.as_secs_f64();
@@ -133,7 +178,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("--------------------------------------------------------------------------------");
-    println!("✅ Frontier benchmark completed. Results saved to: {}", csv_path);
+    println!(
+        "✅ Frontier benchmark completed. Results saved to: {}",
+        csv_path
+    );
 
     let _ = std::fs::remove_dir_all(temp_dir);
     Ok(())

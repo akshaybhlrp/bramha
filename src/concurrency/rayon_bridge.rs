@@ -33,7 +33,10 @@ pub fn build_pinned_rayon_pool() -> ThreadPool {
         })
         .build()
         .unwrap_or_else(|e| {
-            eprintln!("⚠️ Failed to build pinned rayon pool: {}. Falling back to default pool.", e);
+            eprintln!(
+                "⚠️ Failed to build pinned rayon pool: {}. Falling back to default pool.",
+                e
+            );
             rayon::ThreadPoolBuilder::new().build().unwrap()
         })
 }
@@ -55,9 +58,7 @@ mod tests {
         let cores = get_physical_core_count();
         assert_eq!(pool.current_num_threads(), cores);
 
-        let sum: i32 = pool.install(|| {
-            (0..100).into_iter().sum()
-        });
+        let sum: i32 = pool.install(|| (0..100).into_iter().sum());
         assert_eq!(sum, 4950);
     }
 }

@@ -1,15 +1,15 @@
+use bramha::inference::cpu_engine::generate_cpu;
+use bramha::inference::set_cpu_only;
+use bramha::storage::Database;
 /// Minimal benchmark: Test decode-only performance (single token generation)
 /// Skip prefill, prefetcher, speculative decoding, and database setup
 use std::sync::Arc;
-use bramha::storage::Database;
-use bramha::inference::cpu_engine::generate_cpu;
-use bramha::inference::set_cpu_only;
 use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_cpu_only(true);
-    
+
     let db = if std::path::Path::new("bramha_db.bin").exists() {
         Arc::new(Database::load("bramha_db.bin").await?)
     } else {
@@ -19,7 +19,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let model_name = {
         let tensor_guard = db.tensor_db.read().await;
-        tensor_guard.models.keys().next().cloned().unwrap_or_default()
+        tensor_guard
+            .models
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_default()
     };
 
     println!("🚀 DECODE-ONLY Benchmark (no prefix cache)");
@@ -27,14 +32,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Generating 10 tokens from scratch...\n");
 
     let start = Instant::now();
-    
+
     match generate_cpu(
         db.clone(),
         &model_name,
         "Hello",
         10,  // max_new_tokens
         0.0, // temperature
-    ).await {
+    )
+    .await
+    {
         Ok(result) => {
             let elapsed = start.elapsed();
             println!("\n📊 Results:");

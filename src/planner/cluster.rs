@@ -44,7 +44,10 @@ impl ClusterPlanner {
     }
 
     pub fn get_healthy_workers(&self) -> Vec<&NodeInfo> {
-        self.nodes.values().filter(|n| n.is_healthy && n.role != NodeRole::ControlPlane).collect()
+        self.nodes
+            .values()
+            .filter(|n| n.is_healthy && n.role != NodeRole::ControlPlane)
+            .collect()
     }
 
     /// Sprint 13: Cache-aware cluster planner
@@ -52,14 +55,14 @@ impl ClusterPlanner {
         // Find the worker with the most available VRAM
         let mut best_node = None;
         let mut max_vram = 0;
-        
+
         for worker in self.get_healthy_workers() {
             if worker.available_vram > max_vram {
                 max_vram = worker.available_vram;
                 best_node = Some(worker.node_id.clone());
             }
         }
-        
+
         best_node
     }
 }

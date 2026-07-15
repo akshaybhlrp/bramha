@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum RouteProfile {
@@ -32,7 +32,7 @@ impl ModelRouter {
         }
 
         let prompt_lower = prompt.to_lowercase();
-        
+
         // Verb classification heuristics
         let complex_reasoning = prompt_lower.contains("compare")
             || prompt_lower.contains("why")
@@ -58,7 +58,10 @@ impl ModelRouter {
             };
             (RouteProfile::DeepPath, reason)
         } else {
-            (RouteProfile::FastPath, "Prompt qualifies for standard FastPath early-exits".to_string())
+            (
+                RouteProfile::FastPath,
+                "Prompt qualifies for standard FastPath early-exits".to_string(),
+            )
         }
     }
 }
@@ -76,7 +79,11 @@ mod tests {
         assert!(reason1.contains("FastPath"));
 
         // 2. Reasoning prompt -> DeepPath
-        let (r2, reason2) = ModelRouter::determine_route("Explain the core differences between IVF and HNSW indices.", 3, None);
+        let (r2, reason2) = ModelRouter::determine_route(
+            "Explain the core differences between IVF and HNSW indices.",
+            3,
+            None,
+        );
         assert_eq!(r2, RouteProfile::DeepPath);
         assert!(reason2.contains("reasoning-heavy"));
 
@@ -92,7 +99,7 @@ mod tests {
         let _ = std::fs::remove_file(db_file);
 
         let store = AnalyticsStore::new_with_path(db_file);
-        
+
         // Log a slow trace that breaches the 200ms SLA
         let slow_trace = QueryTrace {
             id: None,
@@ -108,12 +115,9 @@ mod tests {
 
         // Even though this is a complex reasoning query that would normally go to DeepPath,
         // it should be routed to FastPath to protect the latency SLA because avg latency is 300ms!
-        let (r, reason) = ModelRouter::determine_route(
-            "Explain why the universe is expanding.",
-            3,
-            Some(&store),
-        );
-        
+        let (r, reason) =
+            ModelRouter::determine_route("Explain why the universe is expanding.", 3, Some(&store));
+
         let _ = std::fs::remove_file(db_file);
 
         assert_eq!(r, RouteProfile::FastPath);

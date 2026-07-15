@@ -1,6 +1,6 @@
-use std::sync::{Mutex, OnceLock};
 use crate::planner::policy::PlannerDecision;
 use crate::storage::storage_manifest::StorageTier;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Debug)]
 pub struct CostModelParams {
@@ -149,24 +149,59 @@ mod tests {
         let max_tokens = 50;
         let complexity = 1.0;
 
-        let cache_cost = CostModel::estimate_path_cost(prompt, max_tokens, PlannerDecision::CachedAnswer, complexity, 0.0, false);
-        let exact_cost = CostModel::estimate_path_cost(prompt, max_tokens, PlannerDecision::ExactDecode, complexity, 0.0, false);
-        
+        let cache_cost = CostModel::estimate_path_cost(
+            prompt,
+            max_tokens,
+            PlannerDecision::CachedAnswer,
+            complexity,
+            0.0,
+            false,
+        );
+        let exact_cost = CostModel::estimate_path_cost(
+            prompt,
+            max_tokens,
+            PlannerDecision::ExactDecode,
+            complexity,
+            0.0,
+            false,
+        );
+
         // Cache cost must be near-zero and vastly cheaper than exact decode
         assert!(cache_cost < 1.0);
         assert!(exact_cost > cache_cost);
 
         // Speculative with low accept rate should be close to exact
-        let spec_bad = CostModel::estimate_path_cost(prompt, max_tokens, PlannerDecision::SpeculativeDecode, complexity, 0.0, false);
+        let spec_bad = CostModel::estimate_path_cost(
+            prompt,
+            max_tokens,
+            PlannerDecision::SpeculativeDecode,
+            complexity,
+            0.0,
+            false,
+        );
         assert!((spec_bad - exact_cost).abs() < 1e-4);
 
         // Speculative with high accept rate should show a major cost reduction
-        let spec_good = CostModel::estimate_path_cost(prompt, max_tokens, PlannerDecision::SpeculativeDecode, complexity, 0.8, false);
+        let spec_good = CostModel::estimate_path_cost(
+            prompt,
+            max_tokens,
+            PlannerDecision::SpeculativeDecode,
+            complexity,
+            0.8,
+            false,
+        );
         assert!(spec_good < exact_cost);
         assert!(spec_good > cache_cost);
 
         // Activation view should drastically reduce exact decode cost (simulating zero prefill)
-        let exact_cost_with_view = CostModel::estimate_path_cost(prompt, max_tokens, PlannerDecision::ExactDecode, complexity, 0.0, true);
+        let exact_cost_with_view = CostModel::estimate_path_cost(
+            prompt,
+            max_tokens,
+            PlannerDecision::ExactDecode,
+            complexity,
+            0.0,
+            true,
+        );
         assert!(exact_cost_with_view < exact_cost);
     }
 
@@ -176,19 +211,40 @@ mod tests {
         let total_layers = 24;
 
         // Hot tier for first two and last two
-        assert_eq!(CostModel::tier_preference(0, total_layers, 0, 0, current_time), StorageTier::Critical);
-        assert_eq!(CostModel::tier_preference(1, total_layers, 0, 0, current_time), StorageTier::Critical);
-        assert_eq!(CostModel::tier_preference(22, total_layers, 0, 0, current_time), StorageTier::Critical);
-        assert_eq!(CostModel::tier_preference(23, total_layers, 0, 0, current_time), StorageTier::Critical);
+        assert_eq!(
+            CostModel::tier_preference(0, total_layers, 0, 0, current_time),
+            StorageTier::Critical
+        );
+        assert_eq!(
+            CostModel::tier_preference(1, total_layers, 0, 0, current_time),
+            StorageTier::Critical
+        );
+        assert_eq!(
+            CostModel::tier_preference(22, total_layers, 0, 0, current_time),
+            StorageTier::Critical
+        );
+        assert_eq!(
+            CostModel::tier_preference(23, total_layers, 0, 0, current_time),
+            StorageTier::Critical
+        );
 
         // Middle layer default warm
-        assert_eq!(CostModel::tier_preference(10, total_layers, 1, 9900, current_time), StorageTier::Important);
+        assert_eq!(
+            CostModel::tier_preference(10, total_layers, 1, 9900, current_time),
+            StorageTier::Important
+        );
 
         // Middle layer promoted to hot on second access within 5 minutes
-        assert_eq!(CostModel::tier_preference(10, total_layers, 2, 9800, current_time), StorageTier::Critical);
+        assert_eq!(
+            CostModel::tier_preference(10, total_layers, 2, 9800, current_time),
+            StorageTier::Critical
+        );
 
         // Middle layer cold after 1 hour idle
-        assert_eq!(CostModel::tier_preference(10, total_layers, 1, 5000, current_time), StorageTier::Redundant);
+        assert_eq!(
+            CostModel::tier_preference(10, total_layers, 1, 5000, current_time),
+            StorageTier::Redundant
+        );
     }
 
     #[test]
@@ -206,9 +262,13 @@ mod tests {
         }
 
         // Log very high latency for SpeculativeDecode (e.g. 5000 ms, whereas baseline is 256.0 ms)
-        store.update_route_quality("SpeculativeDecode", 5000.0, true).unwrap();
+        store
+            .update_route_quality("SpeculativeDecode", 5000.0, true)
+            .unwrap();
         // Log low latency for ExactDecode (e.g. 100 ms)
-        store.update_route_quality("ExactDecode", 100.0, true).unwrap();
+        store
+            .update_route_quality("ExactDecode", 100.0, true)
+            .unwrap();
 
         // Perform recalibration
         CostModel::recalibrate_from_analytics(&store);
@@ -222,10 +282,29 @@ mod tests {
 
         // Verify that cost of SpeculativeDecode now exceeds ExactDecode
         let prompt = "Explain cost model recalibration.";
-        let spec_cost = CostModel::estimate_path_cost(prompt, 50, PlannerDecision::SpeculativeDecode, 1.0, 0.9, false);
-        let exact_cost = CostModel::estimate_path_cost(prompt, 50, PlannerDecision::ExactDecode, 1.0, 0.9, false);
-        
-        assert!(spec_cost > exact_cost, "Speculative cost ({} ms) should exceed exact cost ({} ms) due to high actual logged latency", spec_cost, exact_cost);
+        let spec_cost = CostModel::estimate_path_cost(
+            prompt,
+            50,
+            PlannerDecision::SpeculativeDecode,
+            1.0,
+            0.9,
+            false,
+        );
+        let exact_cost = CostModel::estimate_path_cost(
+            prompt,
+            50,
+            PlannerDecision::ExactDecode,
+            1.0,
+            0.9,
+            false,
+        );
+
+        assert!(
+            spec_cost > exact_cost,
+            "Speculative cost ({} ms) should exceed exact cost ({} ms) due to high actual logged latency",
+            spec_cost,
+            exact_cost
+        );
 
         // Cleanup
         let _ = std::fs::remove_file(db_file);

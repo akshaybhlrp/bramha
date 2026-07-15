@@ -1,11 +1,11 @@
+use crate::core::filter::Filter;
+use crate::core::vector::{Metric, Vector};
+use crate::index::{HnswIndex, IvfFlatIndex};
+use rayon::prelude::*;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use rusqlite::Connection;
-use rayon::prelude::*;
-use serde::{Serialize, Deserialize};
-use crate::core::vector::{Vector, Metric};
-use crate::core::filter::Filter;
-use crate::index::{IvfFlatIndex, HnswIndex};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchResult {
@@ -23,23 +23,23 @@ pub struct SearchResult {
 /// Helper function to estimate query lexical vs semantic complexity
 pub fn estimate_hybrid_alpha(query: &str) -> f64 {
     let lower = query.to_lowercase();
-    
+
     // Exact matching symbols or error codes
-    let is_highly_lexical = query.contains('{') 
-        || query.contains('}') 
-        || query.contains("::") 
-        || query.contains('"') 
-        || query.contains('\'') 
-        || query.contains('(') 
-        || query.contains(')') 
-        || query.contains("ERROR_") 
+    let is_highly_lexical = query.contains('{')
+        || query.contains('}')
+        || query.contains("::")
+        || query.contains('"')
+        || query.contains('\'')
+        || query.contains('(')
+        || query.contains(')')
+        || query.contains("ERROR_")
         || query.contains("ERR_")
         || query.contains("0x");
 
-    let is_semantic = lower.starts_with("how") 
-        || lower.starts_with("what") 
-        || lower.starts_with("why") 
-        || lower.starts_with("explain") 
+    let is_semantic = lower.starts_with("how")
+        || lower.starts_with("what")
+        || lower.starts_with("why")
+        || lower.starts_with("explain")
         || lower.starts_with("describe");
 
     if is_highly_lexical {
@@ -118,14 +118,20 @@ impl Collection {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS metadata_index (id TEXT PRIMARY KEY, metadata JSON)",
             [],
-        ).map_err(|e| format!("SQLite create err: {}", e))?;
+        )
+        .map_err(|e| format!("SQLite create err: {}", e))?;
 
         for (id, vector) in &self.vectors {
-            let meta_str = vector.metadata.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "{}".to_string());
+            let meta_str = vector
+                .metadata
+                .as_ref()
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "{}".to_string());
             conn.execute(
                 "INSERT INTO metadata_index (id, metadata) VALUES (?1, ?2)",
                 rusqlite::params![id, meta_str],
-            ).map_err(|e| format!("SQLite insert err: {}", e))?;
+            )
+            .map_err(|e| format!("SQLite insert err: {}", e))?;
         }
 
         self.sqlite = Some(Arc::new(Mutex::new(conn)));
@@ -161,7 +167,11 @@ impl Collection {
 
         if let Some(ref db) = self.sqlite {
             if let Ok(conn) = db.lock() {
-                let meta_str = vector.metadata.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "{}".to_string());
+                let meta_str = vector
+                    .metadata
+                    .as_ref()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
                 let _ = conn.execute(
                     "INSERT OR REPLACE INTO metadata_index (id, metadata) VALUES (?1, ?2)",
                     rusqlite::params![vector.id, meta_str],
@@ -178,7 +188,10 @@ impl Collection {
         if removed {
             if let Some(ref db) = self.sqlite {
                 if let Ok(conn) = db.lock() {
-                    let _ = conn.execute("DELETE FROM metadata_index WHERE id = ?1", rusqlite::params![id]);
+                    let _ = conn.execute(
+                        "DELETE FROM metadata_index WHERE id = ?1",
+                        rusqlite::params![id],
+                    );
                 }
             }
         }
@@ -186,9 +199,18 @@ impl Collection {
     }
 
     /// Searches for top-k similar vectors using exact search or IVF-Flat approximate search, applying optional filters.
-    pub fn search(&self, query_vec: &[f32], k: usize, filter: Option<&Filter>, use_index: bool) -> Vec<SearchResult> {
+    pub fn search(
+        &self,
+        query_vec: &[f32],
+        k: usize,
+        filter: Option<&Filter>,
+        use_index: bool,
+    ) -> Vec<SearchResult> {
         if self.status == CollectionStatus::CORRUPT {
-            println!("⚠️ Cannot search in degraded/corrupt collection '{}'", self.name);
+            println!(
+                "⚠️ Cannot search in degraded/corrupt collection '{}'",
+                self.name
+            );
             return vec![];
         }
         if query_vec.len() != self.dimension {
@@ -202,16 +224,24 @@ impl Collection {
                 if let Ok(conn) = db.lock() {
                     let (sql_where, params_json) = f.to_sql_query();
                     let sql = format!("SELECT id FROM metadata_index WHERE {}", sql_where);
-                    
-                    let params_str: Vec<String> = params_json.iter().map(|v| match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        _ => v.to_string(),
-                    }).collect();
-                    
-                    let params_dyn: Vec<&dyn rusqlite::ToSql> = params_str.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+
+                    let params_str: Vec<String> = params_json
+                        .iter()
+                        .map(|v| match v {
+                            serde_json::Value::String(s) => s.clone(),
+                            _ => v.to_string(),
+                        })
+                        .collect();
+
+                    let params_dyn: Vec<&dyn rusqlite::ToSql> = params_str
+                        .iter()
+                        .map(|s| s as &dyn rusqlite::ToSql)
+                        .collect();
 
                     if let Ok(mut stmt) = conn.prepare(&sql) {
-                        if let Ok(rows) = stmt.query_map(&params_dyn[..], |row| row.get::<_, String>(0)) {
+                        if let Ok(rows) =
+                            stmt.query_map(&params_dyn[..], |row| row.get::<_, String>(0))
+                        {
                             let mut ids = HashSet::new();
                             for r in rows.flatten() {
                                 ids.insert(r);
@@ -240,7 +270,8 @@ impl Collection {
         }
 
         // Fallback: Exact Flat Scan (Multi-threaded using Rayon)
-        let mut results: Vec<SearchResult> = self.vectors
+        let mut results: Vec<SearchResult> = self
+            .vectors
             .par_iter()
             .map(|(_, v)| v)
             .filter(|v| {
@@ -265,9 +296,17 @@ impl Collection {
 
         // Sort: L2 is ascending (smaller distance is better), Cosine/DotProduct is descending (larger similarity is better)
         if self.metric.is_ascending() {
-            results.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         } else {
-            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         results.truncate(k);
@@ -318,13 +357,25 @@ impl Collection {
         // Accumulate vector ranks
         for (rank, res) in vec_results.iter().enumerate() {
             let score = 1.0 / (rrf_k + rank as f64);
-            rrf_scores.entry(res.id.clone()).or_insert(HybridScores { vec_rrf: 0.0, bm25_rrf: 0.0 }).vec_rrf += score;
+            rrf_scores
+                .entry(res.id.clone())
+                .or_insert(HybridScores {
+                    vec_rrf: 0.0,
+                    bm25_rrf: 0.0,
+                })
+                .vec_rrf += score;
         }
 
         // Accumulate BM25 ranks
         for (rank, (doc_id, _)) in bm25_results.iter().enumerate() {
             let score = 1.0 / (rrf_k + rank as f64);
-            rrf_scores.entry(doc_id.clone()).or_insert(HybridScores { vec_rrf: 0.0, bm25_rrf: 0.0 }).bm25_rrf += score;
+            rrf_scores
+                .entry(doc_id.clone())
+                .or_insert(HybridScores {
+                    vec_rrf: 0.0,
+                    bm25_rrf: 0.0,
+                })
+                .bm25_rrf += score;
         }
 
         // 4. Map back to SearchResult format
@@ -333,9 +384,9 @@ impl Collection {
             .map(|(id, scores)| {
                 // Find original metadata if available in self.vectors
                 let metadata = self.vectors.get(&id).and_then(|v| v.metadata.clone());
-                
+
                 let final_score = (alpha * scores.vec_rrf) + ((1.0 - alpha) * scores.bm25_rrf);
-                
+
                 SearchResult {
                     id,
                     score: final_score as f32,
@@ -348,7 +399,11 @@ impl Collection {
             .collect();
 
         // Sort descending by RRF score (larger score is better)
-        hybrid_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hybrid_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         hybrid_results.truncate(k);
         hybrid_results
     }

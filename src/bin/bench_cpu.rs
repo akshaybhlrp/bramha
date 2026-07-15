@@ -1,13 +1,13 @@
-/// Simple benchmarking script to test profiling and measure token speed
-use std::sync::Arc;
-use bramha::storage::Database;
 use bramha::inference::cpu_engine::generate_cpu;
 use bramha::inference::set_cpu_only;
+use bramha::storage::Database;
+/// Simple benchmarking script to test profiling and measure token speed
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_cpu_only(true);
-    
+
     // Try to load existing database
     let db = if std::path::Path::new("bramha_db.bin").exists() {
         Arc::new(Database::load("bramha_db.bin").await?)
@@ -21,19 +21,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let tensor_guard = db.tensor_db.read().await;
         let models: Vec<_> = tensor_guard.models.keys().cloned().collect();
-        
+
         if models.is_empty() {
             println!("⚠️ No models found in database. Please ingest a model first.");
             return Ok(());
         }
-        
+
         println!("📦 Available models: {:?}", models);
     }
 
     // Test with the first available model
     let model_name = {
         let tensor_guard = db.tensor_db.read().await;
-        tensor_guard.models.keys().next().cloned().unwrap_or_default()
+        tensor_guard
+            .models
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_default()
     };
 
     if model_name.is_empty() {
@@ -57,7 +62,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         prompt,
         20,  // max_new_tokens
         0.0, // temperature (greedy)
-    ).await {
+    )
+    .await
+    {
         Ok(result) => {
             println!("\n✅ Inference Complete!");
             println!("───────────────────────────────────────────────────────────");
@@ -66,13 +73,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Tokens/Second: {:.2} tps", result.tokens_per_second);
             println!("───────────────────────────────────────────────────────────");
             println!("\n📄 Completion:\n{}\n", result.completion);
-            
+
             if result.tokens_per_second >= 50.0 {
-                println!("🎉 CPU TARGET MET! {:.2} tps >= 50.0 tps", result.tokens_per_second);
+                println!(
+                    "🎉 CPU TARGET MET! {:.2} tps >= 50.0 tps",
+                    result.tokens_per_second
+                );
             } else if result.tokens_per_second >= 25.0 {
-                println!("✓ Good performance: {:.2} tps (target: 50+ tps)", result.tokens_per_second);
+                println!(
+                    "✓ Good performance: {:.2} tps (target: 50+ tps)",
+                    result.tokens_per_second
+                );
             } else {
-                println!("⚠️ Below target: {:.2} tps (target: 50+ tps)", result.tokens_per_second);
+                println!(
+                    "⚠️ Below target: {:.2} tps (target: 50+ tps)",
+                    result.tokens_per_second
+                );
             }
         }
         Err(e) => {

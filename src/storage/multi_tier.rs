@@ -1,3 +1,5 @@
+use crate::storage::storage_manifest::StorageTier;
+use serde::{Deserialize, Serialize};
 /// Multi-Tier Storage: DRAM/SSD/HDD routing and promotion/demotion
 ///
 /// This module implements database buffer pool patterns for neural network models:
@@ -10,11 +12,8 @@
 /// - Rarely accessed layers demoted to cold tier
 /// - Prefetching: load layer N+1 while GPU/CPU processes layer N
 /// - LRU eviction: when hot tier is full, evict least recently used
-
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use crate::storage::storage_manifest::StorageTier;
 
 const HOT_TIER_MAX_BYTES: u64 = 200 * 1024 * 1024; // 200 MB DRAM
 const WARM_TIER_MAX_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5 GB SSD
@@ -38,7 +37,7 @@ impl Default for TierConfig {
         TierConfig {
             hot_max_bytes: HOT_TIER_MAX_BYTES,
             warm_max_bytes: WARM_TIER_MAX_BYTES,
-            promotion_threshold: 2, // promoted on second access
+            promotion_threshold: 2,        // promoted on second access
             demotion_threshold_secs: 3600, // 1 hour of inactivity
             prefetch_distance: 2,
         }
@@ -283,10 +282,7 @@ impl MultiTierStorage {
     pub fn prefetch_layers(&mut self, next_layer_ids: &[String]) -> Vec<String> {
         let mut prefetched = Vec::new();
 
-        for layer_id in next_layer_ids
-            .iter()
-            .take(self.config.prefetch_distance)
-        {
+        for layer_id in next_layer_ids.iter().take(self.config.prefetch_distance) {
             if self.find_layer(layer_id).is_none() {
                 // Layer not currently loaded
                 prefetched.push(layer_id.clone());
@@ -346,7 +342,11 @@ impl MultiTierStorage {
         if self.stats.total_accessed > 0 {
             let hot_ratio = self.stats.hot_hits as f64 / self.stats.total_accessed as f64;
             let warm_ratio = self.stats.warm_hits as f64 / self.stats.total_accessed as f64;
-            println!("  Hit rate: Hot {:.1}%, Warm {:.1}%", hot_ratio * 100.0, warm_ratio * 100.0);
+            println!(
+                "  Hit rate: Hot {:.1}%, Warm {:.1}%",
+                hot_ratio * 100.0,
+                warm_ratio * 100.0
+            );
         }
 
         println!("\n🔄 Migration Statistics");
@@ -447,12 +447,14 @@ mod tests {
         .unwrap();
 
         // Register layer in warm tier (SSD)
-        storage.register_layer(
-            "layer_warm".to_string(),
-            40 * 1024, // 40 KB
-            StorageTier::Important,
-            temp_dir.path().join("warm.bin"),
-        ).unwrap();
+        storage
+            .register_layer(
+                "layer_warm".to_string(),
+                40 * 1024, // 40 KB
+                StorageTier::Important,
+                temp_dir.path().join("warm.bin"),
+            )
+            .unwrap();
 
         // Verify initial state
         assert!(storage.warm_tier.contains_key("layer_warm"));
@@ -472,26 +474,30 @@ mod tests {
         assert_eq!(storage.hot_used_bytes, 40 * 1024);
 
         // Try to register another layer directly in Hot tier that overflows it
-        storage.register_layer(
-            "layer_hot_new".to_string(),
-            70 * 1024, // 70 KB. Hot tier total capacity = 100 KB. 40 + 70 = 110 KB.
-            StorageTier::Critical,
-            temp_dir.path().join("hot_new.bin"),
-        ).unwrap_err(); // Initial placement overflow is an error
+        storage
+            .register_layer(
+                "layer_hot_new".to_string(),
+                70 * 1024, // 70 KB. Hot tier total capacity = 100 KB. 40 + 70 = 110 KB.
+                StorageTier::Critical,
+                temp_dir.path().join("hot_new.bin"),
+            )
+            .unwrap_err(); // Initial placement overflow is an error
 
         // But promotion can trigger eviction. Let's register "layer_lru" in Warm, promote it, and show eviction.
-        storage.register_layer(
-            "layer_lru".to_string(),
-            70 * 1024, // 70 KB
-            StorageTier::Important,
-            temp_dir.path().join("lru.bin"),
-        ).unwrap();
+        storage
+            .register_layer(
+                "layer_lru".to_string(),
+                70 * 1024, // 70 KB
+                StorageTier::Important,
+                temp_dir.path().join("lru.bin"),
+            )
+            .unwrap();
 
         // We want to promote "layer_lru" to Hot tier.
         // Hot tier currently has: "layer_warm" (40 KB).
         // Promoting "layer_lru" (70 KB) would result in 40 + 70 = 110 KB (overflow).
         // This should evict the LRU ("layer_warm") from Hot back to Warm.
-        
+
         // Wait, to make sure "layer_warm" is indeed LRU, we update its last_accessed to be older.
         if let Some(entry) = storage.hot_tier.get_mut("layer_warm") {
             entry.last_accessed -= 100;
@@ -524,12 +530,14 @@ mod tests {
         )
         .unwrap();
 
-        storage.register_layer(
-            "layer_ssd".to_string(),
-            1024,
-            StorageTier::Important,
-            temp_dir.path().join("ssd.bin"),
-        ).unwrap();
+        storage
+            .register_layer(
+                "layer_ssd".to_string(),
+                1024,
+                StorageTier::Important,
+                temp_dir.path().join("ssd.bin"),
+            )
+            .unwrap();
 
         // Artificially age the entry
         if let Some(entry) = storage.warm_tier.get_mut("layer_ssd") {
@@ -559,9 +567,13 @@ mod tests {
         .unwrap();
 
         // Prefetching non-existent layers should return them as candidate files to load
-        let next_layers = vec!["layer_1".to_string(), "layer_2".to_string(), "layer_3".to_string()];
+        let next_layers = vec![
+            "layer_1".to_string(),
+            "layer_2".to_string(),
+            "layer_3".to_string(),
+        ];
         let prefetch_reqs = storage.prefetch_layers(&next_layers);
-        
+
         assert_eq!(prefetch_reqs.len(), 2); // limited by prefetch_distance
         assert_eq!(prefetch_reqs[0], "layer_1");
         assert_eq!(prefetch_reqs[1], "layer_2");

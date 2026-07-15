@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
@@ -53,8 +53,10 @@ impl OnboardManager {
         OnboardStep {
             name: "Security Configuration".to_string(),
             completed,
-            description: "Verifies that API keys are initialized to protect mutating endpoints.".to_string(),
-            action_hint: "Copy default keys from boot template to protect the REST endpoints.".to_string(),
+            description: "Verifies that API keys are initialized to protect mutating endpoints."
+                .to_string(),
+            action_hint: "Copy default keys from boot template to protect the REST endpoints."
+                .to_string(),
         }
     }
 

@@ -1,8 +1,8 @@
 use crate::core::collection::SearchResult;
 use crate::inference::engine::InferenceEngine;
 use crate::storage::Database;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Implementation of high-precision retrieval strategies (Multi-Query Expansion, HyDE)
 pub struct RetrievalStrategies;
@@ -27,22 +27,27 @@ impl RetrievalStrategies {
             raw_query
         );
 
-        let gen_result = InferenceEngine::new(None).generate(
-            db.clone(),
-            model_name,
-            &prompt,
-            40, // 40 tokens is perfect for 3 queries
-            0.3,
-            None,
-            None,
-        ).await?;
+        let gen_result = InferenceEngine::new(None)
+            .generate(
+                db.clone(),
+                model_name,
+                &prompt,
+                40, // 40 tokens is perfect for 3 queries
+                0.3,
+                None,
+                None,
+            )
+            .await?;
 
         let mut queries = Vec::new();
         queries.push(raw_query.to_string()); // Include the original query
 
         for line in gen_result.completion.lines() {
-            let clean = line.trim()
-                .trim_start_matches(|c: char| c.is_numeric() || c == '.' || c == '-' || c == '*' || c == ')')
+            let clean = line
+                .trim()
+                .trim_start_matches(|c: char| {
+                    c.is_numeric() || c == '.' || c == '-' || c == '*' || c == ')'
+                })
                 .trim()
                 .to_string();
             if !clean.is_empty() && queries.len() < 4 {
@@ -50,12 +55,16 @@ impl RetrievalStrategies {
             }
         }
 
-        println!("🔍 Multi-Query Expansion Formulations generated: {:?}", queries);
+        println!(
+            "🔍 Multi-Query Expansion Formulations generated: {:?}",
+            queries
+        );
 
         // 2. Fetch embeddings for all 4 queries using the native Rust WGPU embedder
-        let embedder = crate::inference::embedder::Embedder::get_global().await
+        let embedder = crate::inference::embedder::Embedder::get_global()
+            .await
             .map_err(|e| format!("Failed to initialize native embedder: {}", e))?;
-        
+
         let mut embeddings = Vec::new();
         for query in &queries {
             match embedder.embed(query) {
@@ -70,7 +79,9 @@ impl RetrievalStrategies {
 
         // 3. Search collection with all queries and fuse via RRF
         let state = db.state.read().await;
-        let collection = state.collections.get(collection_name)
+        let collection = state
+            .collections
+            .get(collection_name)
             .ok_or_else(|| format!("Collection '{}' not found", collection_name))?;
 
         let mut all_search_results = Vec::new();
@@ -104,7 +115,11 @@ impl RetrievalStrategies {
             .collect();
 
         // Sort descending by RRF score
-        fused_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        fused_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         fused_results.truncate(k);
 
         Ok(fused_results)
@@ -128,28 +143,29 @@ impl RetrievalStrategies {
             raw_query
         );
 
-        let gen_result = InferenceEngine::new(None).generate(
-            db.clone(),
-            model_name,
-            &prompt,
-            60,
-            0.5,
-            None,
-            None,
-        ).await?;
+        let gen_result = InferenceEngine::new(None)
+            .generate(db.clone(), model_name, &prompt, 60, 0.5, None, None)
+            .await?;
 
         let hypothetical_doc = gen_result.completion;
-        println!("✨ HyDE Hypothetical Document generated:\n{}", hypothetical_doc);
+        println!(
+            "✨ HyDE Hypothetical Document generated:\n{}",
+            hypothetical_doc
+        );
 
         // 2. Fetch embedding of the hypothetical document using the native Rust WGPU embedder
-        let embedder = crate::inference::embedder::Embedder::get_global().await
+        let embedder = crate::inference::embedder::Embedder::get_global()
+            .await
             .map_err(|e| format!("Failed to initialize native embedder: {}", e))?;
-        let embedding = embedder.embed(&hypothetical_doc)
+        let embedding = embedder
+            .embed(&hypothetical_doc)
             .map_err(|e| format!("Embedding failed: {}", e))?;
 
         // 3. Search collection with the hypothetical document embedding
         let state = db.state.read().await;
-        let collection = state.collections.get(collection_name)
+        let collection = state
+            .collections
+            .get(collection_name)
             .ok_or_else(|| format!("Collection '{}' not found", collection_name))?;
 
         let results = collection.search(&embedding, k, None, use_index);

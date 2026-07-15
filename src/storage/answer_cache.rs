@@ -1,11 +1,11 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedResponse {
@@ -49,7 +49,9 @@ impl DeterministicAnswerCache {
         let mut entries = HashMap::new();
         if path.exists() {
             if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(loaded) = serde_json::from_str::<HashMap<String, CachedResponse>>(&content) {
+                if let Ok(loaded) =
+                    serde_json::from_str::<HashMap<String, CachedResponse>>(&content)
+                {
                     entries = loaded;
                 }
             }
@@ -127,8 +129,7 @@ impl DeterministicAnswerCache {
         }
         let serialized = serde_json::to_string_pretty(guard)
             .map_err(|e| format!("Failed to serialize cache: {}", e))?;
-        fs::write(path, serialized)
-            .map_err(|e| format!("Failed to write cache file: {}", e))?;
+        fs::write(path, serialized).map_err(|e| format!("Failed to write cache file: {}", e))?;
         Ok(())
     }
 }
@@ -143,23 +144,31 @@ mod tests {
         let _ = fs::create_dir_all(&temp_dir);
         let test_file = temp_dir.join("test_deterministic_answers.json");
         let _ = fs::remove_file(&test_file);
-        
+
         let cache = DeterministicAnswerCache::load_from_path(&test_file);
 
         let prompt = "Explain prefixed attention";
         let model = "llama-test";
-        let context = vec![("chunk1".to_string(), "Bramha runs local intelligence".to_string())];
+        let context = vec![(
+            "chunk1".to_string(),
+            "Bramha runs local intelligence".to_string(),
+        )];
 
         // 1. Initially empty
         assert!(cache.get(prompt, model, &context, 10).is_none());
 
         // 2. Insert and check retrieval
-        cache.insert(prompt, model, &context, "cached reply".to_string()).unwrap();
+        cache
+            .insert(prompt, model, &context, "cached reply".to_string())
+            .unwrap();
         let hit = cache.get(prompt, model, &context, 10);
         assert_eq!(hit.unwrap(), "cached reply");
 
         // 3. Check cache mismatch on changed context
-        let new_context = vec![("chunk1".to_string(), "Bramha is accelerated via GPU".to_string())];
+        let new_context = vec![(
+            "chunk1".to_string(),
+            "Bramha is accelerated via GPU".to_string(),
+        )];
         assert!(cache.get(prompt, model, &new_context, 10).is_none());
 
         // 4. Check cache expiry (max_age = 2 seconds, but we manually subtract 5 seconds from timestamp)

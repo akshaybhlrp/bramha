@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use std::path::Path;
-use std::io::Write;
-use bramha::storage::Database;
-use bramha::storage::storage_manifest::{ModelManifest, LayerMetadata, CompressionFormat};
 use bramha::models::quantization::quantize_to_int4;
+use bramha::storage::Database;
+use bramha::storage::storage_manifest::{CompressionFormat, LayerMetadata, ModelManifest};
 use nalgebra::DMatrix;
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,7 +37,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target_name = "tinyllama-q4";
 
     let db = if std::path::Path::new("bramha_db.bin").exists() {
-        Arc::new(Database::load("bramha_db.bin").await.unwrap_or_else(|_| Database::new(None, 1536)))
+        Arc::new(
+            Database::load("bramha_db.bin")
+                .await
+                .unwrap_or_else(|_| Database::new(None, 1536)),
+        )
     } else {
         Arc::new(Database::new(None, 1536))
     };
@@ -51,7 +55,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_data = std::fs::read_to_string(&manifest_path)?;
     let source_manifest: ModelManifest = serde_json::from_str(&manifest_data)?;
 
-    println!("Found {} layers in source model.", source_manifest.layers.len());
+    println!(
+        "Found {} layers in source model.",
+        source_manifest.layers.len()
+    );
 
     // Register source model so layers are mapped in memory
     {
@@ -61,7 +68,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let tensor_db_guard = db.tensor_db.read().await;
-    let model = tensor_db_guard.models.get(source_name)
+    let model = tensor_db_guard
+        .models
+        .get(source_name)
         .ok_or_else(|| "Source model not loaded".to_string())?;
 
     let mut target_manifest = ModelManifest::new(
@@ -78,26 +87,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nQuantizing layers to INT4 (packed)...");
     for (i, layer) in source_manifest.layers.values().enumerate() {
         let name = &layer.layer_id;
-        
+
         // We only quantize layers that are 2D weights for self_attn or mlp projections
-        let should_quantize = layer.shape.len() == 2 
-            && (name.contains("self_attn") || name.contains("mlp")) 
+        let should_quantize = layer.shape.len() == 2
+            && (name.contains("self_attn") || name.contains("mlp"))
             && !name.contains("embed_tokens")
             && !name.contains("lm_head");
 
         if should_quantize {
             let out_features = layer.shape[0];
             let in_features = layer.shape[1];
-            
+
             // Read layer F32 weight bytes
-            let page = model.layers.get(name)
+            let page = model
+                .layers
+                .get(name)
                 .ok_or_else(|| format!("Weight not found: {}", name))?;
             let f32_data: &[f32] = bytemuck::cast_slice(page.as_bytes());
 
             if use_columnar {
-                print!("\r[{}/{}] Columnar Dict Encoding: '{}'...", i + 1, source_manifest.layers.len(), name);
+                print!(
+                    "\r[{}/{}] Columnar Dict Encoding: '{}'...",
+                    i + 1,
+                    source_manifest.layers.len(),
+                    name
+                );
                 std::io::stdout().flush().unwrap_or_default();
-                
+
                 // Transpose to Column-Major: n_in columns, n_out rows
                 // Normally W is row-major: size (out_features x in_features)
                 // We want to store it as (in_features x out_features) where each column (size out_features) is contiguous.
@@ -107,29 +123,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         transposed[col * out_features + row] = f32_data[row * in_features + col];
                     }
                 }
-                
+
                 // Dictionary encoding: 256 evenly spaced percentiles
                 let mut sorted = transposed.clone();
-                sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                sorted
+                    .sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let mut dict = vec![0.0f32; 256];
                 for j in 0..256 {
                     let idx = (j * (sorted.len() - 1)) / 255;
                     dict[j] = sorted[idx];
                 }
-                
+
                 // Quantize to indices
                 let mut indices = vec![0u8; in_features * out_features];
                 for (idx, &val) in transposed.iter().enumerate() {
                     // Binary search or simple linear scan for closest dict value
                     // Since dict is sorted, binary search works well
-                    let pos = dict.binary_search_by(|v| v.partial_cmp(&val).unwrap_or(std::cmp::Ordering::Equal));
+                    let pos = dict.binary_search_by(|v| {
+                        v.partial_cmp(&val).unwrap_or(std::cmp::Ordering::Equal)
+                    });
                     let closest = match pos {
                         Ok(p) => p,
                         Err(p) => {
-                            if p == 0 { 0 }
-                            else if p >= 256 { 255 }
-                            else {
-                                let d1 = (dict[p-1] - val).abs();
+                            if p == 0 {
+                                0
+                            } else if p >= 256 {
+                                255
+                            } else {
+                                let d1 = (dict[p - 1] - val).abs();
                                 let d2 = (dict[p] - val).abs();
                                 if d1 < d2 { p - 1 } else { p }
                             }
@@ -137,16 +158,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     indices[idx] = closest as u8;
                 }
-                
+
                 // Combine dict + indices
                 let mut combined = Vec::with_capacity(256 * 4 + indices.len());
                 combined.extend_from_slice(bytemuck::cast_slice(&dict));
                 combined.extend_from_slice(&indices);
-                
+
                 let file_name = format!("{}_columnar.bin", name.replace(".", "_"));
                 let file_path = target_path.join(&file_name);
                 std::fs::write(&file_path, &combined)?;
-                
+
                 let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
                 l_meta.quantization_bits = Some(8);
                 l_meta.compression_format = CompressionFormat::ColumnarDict;
@@ -162,84 +183,102 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else if name.contains("self_attn") {
                     svd_rank = Some(128);
                 }
-                
+
                 if let Some(k) = svd_rank {
                     if out_features > k && in_features > k {
-                        print!("\r[{}/{}] SVD Factorizing to rank {}: '{}'...", i + 1, source_manifest.layers.len(), k, name);
-                    std::io::stdout().flush().unwrap_or_default();
-                    
-                    let w_matrix = DMatrix::from_row_slice(out_features, in_features, f32_data);
-                    let svd = w_matrix.svd(true, true);
-                    let u = svd.u.unwrap();
-                    let vt = svd.v_t.unwrap();
-                    let s = svd.singular_values;
-                    
-                    let u_k = u.columns(0, k);
-                    let vt_k = vt.rows(0, k);
-                    let s_k = s.rows(0, k);
-                    
-                    let sqrt_s = s_k.map(|x| x.sqrt());
-                    let mut a = DMatrix::<f32>::zeros(out_features, k);
-                    for r in 0..out_features {
-                        for c in 0..k {
-                            a[(r, c)] = u_k[(r, c)] * sqrt_s[c];
+                        print!(
+                            "\r[{}/{}] SVD Factorizing to rank {}: '{}'...",
+                            i + 1,
+                            source_manifest.layers.len(),
+                            k,
+                            name
+                        );
+                        std::io::stdout().flush().unwrap_or_default();
+
+                        let w_matrix = DMatrix::from_row_slice(out_features, in_features, f32_data);
+                        let svd = w_matrix.svd(true, true);
+                        let u = svd.u.unwrap();
+                        let vt = svd.v_t.unwrap();
+                        let s = svd.singular_values;
+
+                        let u_k = u.columns(0, k);
+                        let vt_k = vt.rows(0, k);
+                        let s_k = s.rows(0, k);
+
+                        let sqrt_s = s_k.map(|x| x.sqrt());
+                        let mut a = DMatrix::<f32>::zeros(out_features, k);
+                        for r in 0..out_features {
+                            for c in 0..k {
+                                a[(r, c)] = u_k[(r, c)] * sqrt_s[c];
+                            }
                         }
-                    }
-                    
-                    let mut b = DMatrix::<f32>::zeros(k, in_features);
-                    for r in 0..k {
-                        for c in 0..in_features {
-                            b[(r, c)] = vt_k[(r, c)] * sqrt_s[r];
+
+                        let mut b = DMatrix::<f32>::zeros(k, in_features);
+                        for r in 0..k {
+                            for c in 0..in_features {
+                                b[(r, c)] = vt_k[(r, c)] * sqrt_s[r];
+                            }
                         }
+
+                        let mut combined =
+                            Vec::with_capacity((out_features * k + k * in_features) * 4);
+
+                        let a_slice = a.as_slice();
+                        let b_slice = b.as_slice();
+                        combined.extend_from_slice(bytemuck::cast_slice(a_slice));
+                        combined.extend_from_slice(bytemuck::cast_slice(b_slice));
+
+                        let file_name = format!("{}_svd.bin", name.replace(".", "_"));
+                        let file_path = target_path.join(&file_name);
+                        std::fs::write(&file_path, &combined)?;
+
+                        let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
+                        l_meta.quantization_bits = None;
+                        l_meta.compression_format = CompressionFormat::Svd;
+                        l_meta.svd_rank = Some(k);
+                        l_meta.stored_bytes = combined.len() as u64;
+                        target_manifest.add_layer(l_meta);
+                        continue;
                     }
-                    
-                    let mut combined = Vec::with_capacity((out_features * k + k * in_features) * 4);
-                    
-                    let a_slice = a.as_slice();
-                    let b_slice = b.as_slice();
-                    combined.extend_from_slice(bytemuck::cast_slice(a_slice));
-                    combined.extend_from_slice(bytemuck::cast_slice(b_slice));
-                    
-                    let file_name = format!("{}_svd.bin", name.replace(".", "_"));
-                    let file_path = target_path.join(&file_name);
-                    std::fs::write(&file_path, &combined)?;
-                    
-                    let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
-                    l_meta.quantization_bits = None;
-                    l_meta.compression_format = CompressionFormat::Svd;
-                    l_meta.svd_rank = Some(k);
-                    l_meta.stored_bytes = combined.len() as u64;
-                    target_manifest.add_layer(l_meta);
-                    continue;
                 }
             }
-        }
 
-        if use_differential {
+            if use_differential {
                 // Parse layer index from name: "model.layers.1.mlp.down_proj.weight"
                 if let Some(rest) = name.strip_prefix("model.layers.") {
                     let parts: Vec<&str> = rest.split('.').collect();
                     if let Some(idx_str) = parts.first() {
                         if let Ok(idx) = idx_str.parse::<usize>() {
                             if idx > 0 {
-                                let prev_name = name.replace(&format!("model.layers.{}", idx), &format!("model.layers.{}", idx - 1));
+                                let prev_name = name.replace(
+                                    &format!("model.layers.{}", idx),
+                                    &format!("model.layers.{}", idx - 1),
+                                );
                                 if let Some(prev_page) = model.layers.get(&prev_name) {
-                                    let prev_f32_data: &[f32] = bytemuck::cast_slice(prev_page.as_bytes());
-                                    
+                                    let prev_f32_data: &[f32] =
+                                        bytemuck::cast_slice(prev_page.as_bytes());
+
                                     // Calculate delta
                                     let mut delta = vec![0.0f32; f32_data.len()];
                                     for j in 0..f32_data.len() {
                                         delta[j] = f32_data[j] - prev_f32_data[j];
                                     }
-                                    
-                                    print!("\r[{}/{}] Differential compress '{}' from '{}'...", i + 1, source_manifest.layers.len(), name, prev_name);
+
+                                    print!(
+                                        "\r[{}/{}] Differential compress '{}' from '{}'...",
+                                        i + 1,
+                                        source_manifest.layers.len(),
+                                        name,
+                                        prev_name
+                                    );
                                     std::io::stdout().flush().unwrap_or_default();
-                                    
+
                                     let file_name = format!("{}_diff.bin", name.replace(".", "_"));
                                     let file_path = target_path.join(&file_name);
                                     std::fs::write(&file_path, bytemuck::cast_slice(&delta))?;
-                                    
-                                    let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
+
+                                    let mut l_meta =
+                                        LayerMetadata::new(name.clone(), layer.shape.clone());
                                     l_meta.quantization_bits = None;
                                     l_meta.compression_format = CompressionFormat::Differential {
                                         delta_format: Box::new(CompressionFormat::None),
@@ -255,7 +294,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            print!("\r[{}/{}] Quantizing 2D weight layer: '{}' (Shape: {:?})...", i + 1, source_manifest.layers.len(), name, layer.shape);
+            print!(
+                "\r[{}/{}] Quantizing 2D weight layer: '{}' (Shape: {:?})...",
+                i + 1,
+                source_manifest.layers.len(),
+                name,
+                layer.shape
+            );
             std::io::stdout().flush().unwrap_or_default();
 
             // Perform scale-and-zero-point INT4 quantization
@@ -283,7 +328,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             target_manifest.add_layer(scale_meta);
         } else {
             // Copy float layers directly (embedding, norms, lm_head)
-            println!("\nCopying float layer directly: '{}' (Shape: {:?})...", name, layer.shape);
+            println!(
+                "\nCopying float layer directly: '{}' (Shape: {:?})...",
+                name, layer.shape
+            );
             let safe_name = layer.layer_id.replace(".", "_");
             let file_name = format!("{}.bin", safe_name);
             let src_file = source_path.join(&file_name);
@@ -297,10 +345,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nWriting target model manifest...");
     target_manifest.update_statistics();
-    
+
     let target_manifest_json = serde_json::to_string_pretty(&target_manifest)?;
     std::fs::write(target_path.join("manifest.json"), target_manifest_json)?;
 
-    println!("\n🎉 SUCCESS! Quantized 4-bit model created successfully at: {:?}", target_path);
+    println!(
+        "\n🎉 SUCCESS! Quantized 4-bit model created successfully at: {:?}",
+        target_path
+    );
     Ok(())
 }

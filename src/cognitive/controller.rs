@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RuntimeProfile {
@@ -62,30 +62,42 @@ impl AdaptiveController {
 
         // If system runs too slowly, dial down search parameters to speed up execution
         if average_latency_ms > self.latency_target_ms {
-            println!("⚠️ Latency target exceeded ({:.1} ms > {:.1} ms). Down-tuning parameters for maximum throughput...", average_latency_ms, self.latency_target_ms);
-            
+            println!(
+                "⚠️ Latency target exceeded ({:.1} ms > {:.1} ms). Down-tuning parameters for maximum throughput...",
+                average_latency_ms, self.latency_target_ms
+            );
+
             if self.current_profile.nprobe > self.min_bounds.nprobe {
-                self.current_profile.nprobe = (self.current_profile.nprobe - 2).max(self.min_bounds.nprobe);
+                self.current_profile.nprobe =
+                    (self.current_profile.nprobe - 2).max(self.min_bounds.nprobe);
             }
             if self.current_profile.rerank_depth > self.min_bounds.rerank_depth {
-                self.current_profile.rerank_depth = (self.current_profile.rerank_depth - 1).max(self.min_bounds.rerank_depth);
+                self.current_profile.rerank_depth =
+                    (self.current_profile.rerank_depth - 1).max(self.min_bounds.rerank_depth);
             }
             if self.current_profile.top_k > self.min_bounds.top_k {
-                self.current_profile.top_k = (self.current_profile.top_k - 1).max(self.min_bounds.top_k);
+                self.current_profile.top_k =
+                    (self.current_profile.top_k - 1).max(self.min_bounds.top_k);
             }
-        } 
+        }
         // If we are well within budget, dial up retrieval settings to maximize grounding quality
         else if average_latency_ms < self.latency_target_ms * 0.7 {
-            println!("🚀 Latency budget is highly healthy ({:.1} ms < {:.1} ms). Up-tuning parameters to optimize grounding quality...", average_latency_ms, self.latency_target_ms);
-            
+            println!(
+                "🚀 Latency budget is highly healthy ({:.1} ms < {:.1} ms). Up-tuning parameters to optimize grounding quality...",
+                average_latency_ms, self.latency_target_ms
+            );
+
             if self.current_profile.nprobe < self.max_bounds.nprobe {
-                self.current_profile.nprobe = (self.current_profile.nprobe + 2).min(self.max_bounds.nprobe);
+                self.current_profile.nprobe =
+                    (self.current_profile.nprobe + 2).min(self.max_bounds.nprobe);
             }
             if self.current_profile.rerank_depth < self.max_bounds.rerank_depth {
-                self.current_profile.rerank_depth = (self.current_profile.rerank_depth + 1).min(self.max_bounds.rerank_depth);
+                self.current_profile.rerank_depth =
+                    (self.current_profile.rerank_depth + 1).min(self.max_bounds.rerank_depth);
             }
             if self.current_profile.top_k < self.max_bounds.top_k {
-                self.current_profile.top_k = (self.current_profile.top_k + 1).min(self.max_bounds.top_k);
+                self.current_profile.top_k =
+                    (self.current_profile.top_k + 1).min(self.max_bounds.top_k);
             }
         }
     }
@@ -93,12 +105,25 @@ impl AdaptiveController {
     /// Safely apply manual profiles while enforcing strictly configured boundaries
     pub fn force_profile(&mut self, custom: RuntimeProfile) {
         self.current_profile = RuntimeProfile {
-            nprobe: custom.nprobe.clamp(self.min_bounds.nprobe, self.max_bounds.nprobe),
-            top_k: custom.top_k.clamp(self.min_bounds.top_k, self.max_bounds.top_k),
-            rerank_depth: custom.rerank_depth.clamp(self.min_bounds.rerank_depth, self.max_bounds.rerank_depth),
-            hybrid_alpha: custom.hybrid_alpha.clamp(self.min_bounds.hybrid_alpha, self.max_bounds.hybrid_alpha),
-            cache_ttl_sec: custom.cache_ttl_sec.clamp(self.min_bounds.cache_ttl_sec, self.max_bounds.cache_ttl_sec),
-            prefetch_depth: custom.prefetch_depth.clamp(self.min_bounds.prefetch_depth, self.max_bounds.prefetch_depth),
+            nprobe: custom
+                .nprobe
+                .clamp(self.min_bounds.nprobe, self.max_bounds.nprobe),
+            top_k: custom
+                .top_k
+                .clamp(self.min_bounds.top_k, self.max_bounds.top_k),
+            rerank_depth: custom
+                .rerank_depth
+                .clamp(self.min_bounds.rerank_depth, self.max_bounds.rerank_depth),
+            hybrid_alpha: custom
+                .hybrid_alpha
+                .clamp(self.min_bounds.hybrid_alpha, self.max_bounds.hybrid_alpha),
+            cache_ttl_sec: custom
+                .cache_ttl_sec
+                .clamp(self.min_bounds.cache_ttl_sec, self.max_bounds.cache_ttl_sec),
+            prefetch_depth: custom.prefetch_depth.clamp(
+                self.min_bounds.prefetch_depth,
+                self.max_bounds.prefetch_depth,
+            ),
         };
     }
 }

@@ -1,9 +1,9 @@
-use std::path::Path;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
 
-use crate::storage::activation_view::ActivationMaterializedView;
 use super::prefix_cache::{PrefixCacheEntry, compute_tokens_hash};
+use crate::storage::activation_view::ActivationMaterializedView;
 
 pub struct ReplayResult {
     pub valid_length: usize,
@@ -23,15 +23,17 @@ pub fn load_and_validate_branch(
 
     let mut file = File::open(path).map_err(|e| format!("Failed to open view file: {}", e))?;
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).map_err(|e| format!("Failed to read view file: {}", e))?;
-    
+    file.read_to_end(&mut buffer)
+        .map_err(|e| format!("Failed to read view file: {}", e))?;
+
     let config = bincode::config::standard();
     let mut entry: PrefixCacheEntry = bincode::serde::decode_from_slice(&buffer, config)
-        .map_err(|e| format!("Failed to decode view file: {}", e))?.0;
+        .map_err(|e| format!("Failed to decode view file: {}", e))?
+        .0;
 
     // Activation Replay Validation: Verify hash matches
     let cached_tokens = &entry.tokens;
-    
+
     // Find where the branch diverges
     let mut valid_len = 0;
     for (i, &t) in requested_tokens.iter().enumerate() {
@@ -48,22 +50,24 @@ pub fn load_and_validate_branch(
     // Verify rolling SHA-256 of the validated subset
     let subset_hash = compute_tokens_hash(&requested_tokens[..valid_len]);
     let cached_subset_hash = compute_tokens_hash(&cached_tokens[..valid_len]);
-    
+
     if subset_hash != cached_subset_hash {
-        return Err("Activation Replay Validation failed: SHA-256 mismatch! Cache may be corrupted.".into());
+        return Err(
+            "Activation Replay Validation failed: SHA-256 mismatch! Cache may be corrupted.".into(),
+        );
     }
 
     let original_len = entry.tokens.len();
 
     // Truncate the KV cache down to the valid divergence point (page boundaries ideally, but exact for branching)
     entry.tokens.truncate(valid_len);
-    
-    // Truncate keys and values layer by layer. 
+
+    // Truncate keys and values layer by layer.
     // Assuming dim = keys[0].len() / original_token_len
     if original_len > 0 {
         let dim = entry.keys[0].len() / original_len;
         let valid_slice_len = valid_len * dim;
-        
+
         for layer_idx in 0..entry.keys.len() {
             entry.keys[layer_idx].truncate(valid_slice_len);
             entry.values[layer_idx].truncate(valid_slice_len);
@@ -79,9 +83,9 @@ pub fn load_and_validate_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use crate::storage::activation_view::ActivationMaterializedView;
     use crate::inference::paged_kv::prefix_cache::{PrefixCacheEntry, compute_tokens_hash};
+    use crate::storage::activation_view::ActivationMaterializedView;
+    use std::fs;
 
     #[test]
     fn test_branch_replay_validation_success() {
@@ -90,7 +94,7 @@ mod tests {
         fs::create_dir_all(&temp_dir).unwrap();
 
         let path = temp_dir.join("test_view.bin");
-        
+
         let tokens = vec![100, 200, 300, 400, 500];
         let keys = vec![vec![0.1; 10], vec![0.2; 10]]; // dim=2
         let values = vec![vec![0.3; 10], vec![0.4; 10]];

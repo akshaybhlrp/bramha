@@ -9,9 +9,9 @@
 
 use std::fs;
 
-use bramha::storage::storage_manifest::{ModelManifest, LayerMetadata, StorageTier};
 use bramha::storage::content_addressing::ContentAddressedStorage;
 use bramha::storage::multi_tier::{MultiTierStorage, TierConfig};
+use bramha::storage::storage_manifest::{LayerMetadata, ModelManifest, StorageTier};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 Starting Bramha Storage Orchestration Walkthrough...");
@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Setup Temporary Directories for the Simulation
     let base_dir = std::env::current_dir()?.join("storage_simulation");
     fs::create_dir_all(&base_dir)?;
-    
+
     let cas_dir = base_dir.join("cas");
     let hot_dir = base_dir.join("hot_tier");
     let warm_dir = base_dir.join("warm_tier");
@@ -32,16 +32,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize Multi-Tier Storage with custom small sizes for simulation
     println!("🟡 Initializing Multi-Tier Storage Manager...");
     let mut config = TierConfig::default();
-    config.hot_max_bytes = 10 * 1024 * 1024;  // 10 MB limit for DRAM simulation
+    config.hot_max_bytes = 10 * 1024 * 1024; // 10 MB limit for DRAM simulation
     config.warm_max_bytes = 50 * 1024 * 1024; // 50 MB limit for SSD simulation
-    config.promotion_threshold = 2;          // Promote on second access
+    config.promotion_threshold = 2; // Promote on second access
 
-    let mut multi_tier = MultiTierStorage::new(
-        config,
-        hot_dir.clone(),
-        warm_dir.clone(),
-        cold_dir.clone(),
-    )?;
+    let mut multi_tier =
+        MultiTierStorage::new(config, hot_dir.clone(), warm_dir.clone(), cold_dir.clone())?;
 
     // 2. Simulate Ingesting Model A (Base LLaMA Model)
     println!("\n📥 Step 1: Ingesting Model A (Base Model - 3 layers)...");
@@ -63,19 +59,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mock_weights_layer2 = vec![0.456f32; weight_size_elements];
 
     let layers_a = vec![
-        ("model.embed_tokens.weight", &mock_weights_shared, StorageTier::Critical),
-        ("model.layers.0.self_attn.q_proj.weight", &mock_weights_layer1, StorageTier::Important),
-        ("model.layers.1.self_attn.q_proj.weight", &mock_weights_layer2, StorageTier::Robust),
+        (
+            "model.embed_tokens.weight",
+            &mock_weights_shared,
+            StorageTier::Critical,
+        ),
+        (
+            "model.layers.0.self_attn.q_proj.weight",
+            &mock_weights_layer1,
+            StorageTier::Important,
+        ),
+        (
+            "model.layers.1.self_attn.q_proj.weight",
+            &mock_weights_layer2,
+            StorageTier::Robust,
+        ),
     ];
 
     for (layer_name, data, tier) in layers_a {
         // Store layer in CAS (dedup)
         let (stored, savings) = cas.store_tensor("llama-7b-base", layer_name, data)?;
-        println!("   Saved layer {} to CAS (stored: {} bytes, savings: {} bytes)", layer_name, stored, savings);
+        println!(
+            "   Saved layer {} to CAS (stored: {} bytes, savings: {} bytes)",
+            layer_name, stored, savings
+        );
 
         // Register in Multi-Tier Storage
         let layer_path = cas.data_dir.join("chunk_store.bin");
-        multi_tier.register_layer(layer_name.to_string(), (data.len() * 4) as u64, tier, layer_path)?;
+        multi_tier.register_layer(
+            layer_name.to_string(),
+            (data.len() * 4) as u64,
+            tier,
+            layer_path,
+        )?;
 
         // Add to Manifest
         let mut layer_meta = LayerMetadata::new(layer_name.to_string(), vec![weight_size_elements]);
@@ -106,15 +122,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mock_weights_layer2_tuned = vec![0.987f32; weight_size_elements];
 
     let layers_b = vec![
-        ("model.embed_tokens.weight", &mock_weights_shared, StorageTier::Critical), // Identical to A!
-        ("model.layers.0.self_attn.q_proj.weight", &mock_weights_layer1_tuned, StorageTier::Important),
-        ("model.layers.1.self_attn.q_proj.weight", &mock_weights_layer2_tuned, StorageTier::Robust),
+        (
+            "model.embed_tokens.weight",
+            &mock_weights_shared,
+            StorageTier::Critical,
+        ), // Identical to A!
+        (
+            "model.layers.0.self_attn.q_proj.weight",
+            &mock_weights_layer1_tuned,
+            StorageTier::Important,
+        ),
+        (
+            "model.layers.1.self_attn.q_proj.weight",
+            &mock_weights_layer2_tuned,
+            StorageTier::Robust,
+        ),
     ];
 
     for (layer_name, data, tier) in layers_b {
         // Store layer in CAS (dedup should kick in for model.embed_tokens.weight)
         let (stored, savings) = cas.store_tensor("llama-7b-tuned", layer_name, data)?;
-        println!("   Saved layer {} to CAS (stored: {} bytes, savings: {} bytes)", layer_name, stored, savings);
+        println!(
+            "   Saved layer {} to CAS (stored: {} bytes, savings: {} bytes)",
+            layer_name, stored, savings
+        );
 
         // Register in Multi-Tier Storage
         let layer_path = cas.data_dir.join("chunk_store.bin");
@@ -139,12 +170,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Simulate Inference Access Patterns & Tier Promotions
     println!("\n⚡ Step 3: Simulating Inference Access & Dynamic Tiering...");
-    
+
     // Layer 1 of Model A starts in SSD (Important). Let's access it.
     let target_layer = "model.layers.0.self_attn.q_proj.weight";
     println!("   Access 1: Loading {}...", target_layer);
     multi_tier.access_layer(target_layer)?;
-    
+
     // Let's access it a second time. This should trigger a promotion to DRAM (Critical / Hot).
     println!("   Access 2: Loading {}...", target_layer);
     multi_tier.access_layer(target_layer)?;

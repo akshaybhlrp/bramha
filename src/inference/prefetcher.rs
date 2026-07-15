@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::compute::wgpu_backend::{DegradationState, WgpuComputePlane};
 use crate::storage::Database;
-use crate::compute::wgpu_backend::{WgpuComputePlane, DegradationState};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(feature = "prefetch")]
 pub struct Prefetcher {
@@ -105,7 +105,15 @@ impl Prefetcher {
         }
     }
 
-    pub async fn prefetch_components(&self, model_name: &str, db: &std::sync::Arc<Database>, current_layer: usize, num_layers: usize, prefetch_depth: usize, components: &[&str]) {
+    pub async fn prefetch_components(
+        &self,
+        model_name: &str,
+        db: &std::sync::Arc<Database>,
+        current_layer: usize,
+        num_layers: usize,
+        prefetch_depth: usize,
+        components: &[&str],
+    ) {
         #[cfg(feature = "prefetch")]
         {
             let tlb_miss_cost_us = 45.0f32;
@@ -116,11 +124,11 @@ impl Prefetcher {
                 lp.clone()
             };
 
-            let predicted = self.predict_next_pages(&last_pages, tlb_miss_cost_us, attention_entropy);
+            let predicted =
+                self.predict_next_pages(&last_pages, tlb_miss_cost_us, attention_entropy);
 
-            let actual_pages: Vec<usize> = (current_layer..num_layers)
-                .take(prefetch_depth)
-                .collect();
+            let actual_pages: Vec<usize> =
+                (current_layer..num_layers).take(prefetch_depth).collect();
 
             self.record_access(&last_pages, &actual_pages);
 
@@ -158,7 +166,14 @@ impl Prefetcher {
         }
     }
 
-    pub async fn prefetch_layers(&self, model_name: &str, db: &std::sync::Arc<Database>, current_layer: usize, num_layers: usize, prefetch_depth: usize) {
+    pub async fn prefetch_layers(
+        &self,
+        model_name: &str,
+        db: &std::sync::Arc<Database>,
+        current_layer: usize,
+        num_layers: usize,
+        prefetch_depth: usize,
+    ) {
         let components = [
             "input_layernorm.weight",
             "self_attn.q_proj.weight",
@@ -170,7 +185,15 @@ impl Prefetcher {
             "mlp.up_proj.weight",
             "mlp.down_proj.weight",
         ];
-        self.prefetch_components(model_name, db, current_layer, num_layers, prefetch_depth, &components).await;
+        self.prefetch_components(
+            model_name,
+            db,
+            current_layer,
+            num_layers,
+            prefetch_depth,
+            &components,
+        )
+        .await;
     }
 
     pub fn hit_rate(&self) -> f32 {
@@ -200,13 +223,19 @@ impl Prefetcher {
         }
     }
 
-    pub fn get_session_prefetch_depth(&self, session_id: Option<&str>, compute_plane: Option<&WgpuComputePlane>) -> usize {
+    pub fn get_session_prefetch_depth(
+        &self,
+        session_id: Option<&str>,
+        compute_plane: Option<&WgpuComputePlane>,
+    ) -> usize {
         #[cfg(feature = "prefetch")]
         {
             if let (Some(sess), Some(plane)) = (session_id, compute_plane) {
                 let states = plane.session_states.lock().unwrap();
                 if let Some(stats) = states.get(sess) {
-                    if stats.state == DegradationState::Orange || stats.state == DegradationState::Red {
+                    if stats.state == DegradationState::Orange
+                        || stats.state == DegradationState::Red
+                    {
                         return 0;
                     }
                 }

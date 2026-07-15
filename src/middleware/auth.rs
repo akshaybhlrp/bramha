@@ -1,13 +1,13 @@
+use axum::{
+    async_trait,
+    extract::FromRequestParts,
+    http::{StatusCode, request::Parts},
+};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use axum::{
-    async_trait,
-    extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
-};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Role {
@@ -55,7 +55,8 @@ impl AuthManager {
         let temp_path = Path::new(self.keys_file).with_extension("tmp");
         {
             let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
-            file.write_all(serialized.as_bytes()).map_err(|e| e.to_string())?;
+            file.write_all(serialized.as_bytes())
+                .map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| e.to_string())?;
         }
         std::fs::rename(temp_path, self.keys_file).map_err(|e| e.to_string())?;
@@ -72,7 +73,10 @@ impl AuthManager {
                     role,
                 })
             } else {
-                Err(format!("Forbidden: Insufficient privileges. Required role: {:?}", required))
+                Err(format!(
+                    "Forbidden: Insufficient privileges. Required role: {:?}",
+                    required
+                ))
             }
         } else {
             Err("Unauthorized: Invalid API Key".to_string())
@@ -93,14 +97,13 @@ where
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let key = extract_token_from_header(parts)?;
         let manager = AuthManager::new();
-        let info = manager.authorize(&key, Role::ReadOnly)
-            .map_err(|e| {
-                if e.starts_with("Forbidden") {
-                    (StatusCode::FORBIDDEN, e)
-                } else {
-                    (StatusCode::UNAUTHORIZED, e)
-                }
-            })?;
+        let info = manager.authorize(&key, Role::ReadOnly).map_err(|e| {
+            if e.starts_with("Forbidden") {
+                (StatusCode::FORBIDDEN, e)
+            } else {
+                (StatusCode::UNAUTHORIZED, e)
+            }
+        })?;
         Ok(RequireReadOnly(info))
     }
 }
@@ -118,14 +121,13 @@ where
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let key = extract_token_from_header(parts)?;
         let manager = AuthManager::new();
-        let info = manager.authorize(&key, Role::Write)
-            .map_err(|e| {
-                if e.starts_with("Forbidden") {
-                    (StatusCode::FORBIDDEN, e)
-                } else {
-                    (StatusCode::UNAUTHORIZED, e)
-                }
-            })?;
+        let info = manager.authorize(&key, Role::Write).map_err(|e| {
+            if e.starts_with("Forbidden") {
+                (StatusCode::FORBIDDEN, e)
+            } else {
+                (StatusCode::UNAUTHORIZED, e)
+            }
+        })?;
         Ok(RequireWrite(info))
     }
 }
@@ -143,14 +145,13 @@ where
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let key = extract_token_from_header(parts)?;
         let manager = AuthManager::new();
-        let info = manager.authorize(&key, Role::Admin)
-            .map_err(|e| {
-                if e.starts_with("Forbidden") {
-                    (StatusCode::FORBIDDEN, e)
-                } else {
-                    (StatusCode::UNAUTHORIZED, e)
-                }
-            })?;
+        let info = manager.authorize(&key, Role::Admin).map_err(|e| {
+            if e.starts_with("Forbidden") {
+                (StatusCode::FORBIDDEN, e)
+            } else {
+                (StatusCode::UNAUTHORIZED, e)
+            }
+        })?;
         Ok(RequireAdmin(info))
     }
 }
@@ -163,7 +164,10 @@ fn extract_token_from_header(parts: &Parts) -> Result<String, (StatusCode, Strin
             }
         }
     }
-    Err((StatusCode::UNAUTHORIZED, "Unauthorized: Missing Authorization Bearer token header".to_string()))
+    Err((
+        StatusCode::UNAUTHORIZED,
+        "Unauthorized: Missing Authorization Bearer token header".to_string(),
+    ))
 }
 
 #[cfg(test)]

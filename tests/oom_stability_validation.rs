@@ -1,10 +1,10 @@
+use bramha::api::create_router;
+use bramha::storage::Database;
+use http_body_util::BodyExt;
+use hyper_util::rt::TokioIo;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UnixStream;
-use hyper_util::rt::TokioIo;
-use http_body_util::BodyExt;
-use bramha::storage::Database;
-use bramha::api::create_router;
 
 #[cfg(test)]
 mod tests {
@@ -14,7 +14,7 @@ mod tests {
     async fn test_uds_and_concurrency_oom_stability() {
         let socket_path = "storage/test_oom_stability.sock";
         let db_path = "storage/test_oom_stability.db";
-        
+
         let _ = std::fs::remove_file(socket_path);
         let _ = std::fs::remove_file(db_path);
 
@@ -27,7 +27,7 @@ mod tests {
 
         // 2. Start UDS HTTP Server
         let listener = tokio::net::UnixListener::bind(socket_path).expect("Failed to bind UDS");
-        
+
         let server_app = app.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -65,10 +65,14 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // 3. Perform a UDS Request using Hyper client to verify connection
-        let stream = UnixStream::connect(socket_path).await.expect("Failed to connect to UDS");
+        let stream = UnixStream::connect(socket_path)
+            .await
+            .expect("Failed to connect to UDS");
         let io = TokioIo::new(stream);
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.expect("Handshake failed");
-        
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+            .await
+            .expect("Handshake failed");
+
         tokio::spawn(async move {
             let _ = conn.await;
         });
@@ -84,7 +88,13 @@ mod tests {
 
         let body_bytes = res.collect().await.expect("Failed to read body").to_bytes();
         let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
-        assert!(body_str.contains("uptime") || body_str.contains("collections") || body_str.contains("memory_allocated_bytes"), "Response body was: {}", body_str);
+        assert!(
+            body_str.contains("uptime")
+                || body_str.contains("collections")
+                || body_str.contains("memory_allocated_bytes"),
+            "Response body was: {}",
+            body_str
+        );
 
         // 4. Test Queue Concurrent Submissions (OOM stability test)
         // Submitting multiple requests simultaneously to confirm they queue correctly under bounds
@@ -94,14 +104,10 @@ mod tests {
             client_futs.push(tokio::spawn(async move {
                 let prompt = format!("Verify OOM stability request {}", i);
                 // Submitting tasks directly to inference queue should succeed or fail cleanly with 429
-                let _ = db_clone.inference_queue.submit(
-                    "tinyllama".to_string(),
-                    prompt,
-                    10,
-                    0.0,
-                    None,
-                    None,
-                ).await;
+                let _ = db_clone
+                    .inference_queue
+                    .submit("tinyllama".to_string(), prompt, 10, 0.0, None, None)
+                    .await;
             }));
         }
 

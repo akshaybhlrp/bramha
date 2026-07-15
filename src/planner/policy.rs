@@ -1,16 +1,15 @@
+use serde::{Deserialize, Serialize};
 /// Planner v1 — selects between exact, speculative, and cached-answer paths
 /// Status: COMPLETE
-/// 
+///
 /// ACTIVE PATHS:
 ///   [x] exact decode
 ///   [x] speculative decode  
 ///   [x] cached-answer
 ///   [x] activation replay
-/// 
-
+///
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlannerDecision {
@@ -33,7 +32,7 @@ impl std::fmt::Display for PlannerDecision {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlannerPolicy {
-    pub planner_mode: String,            // "auto" | "exact_only"
+    pub planner_mode: String,             // "auto" | "exact_only"
     pub min_speculative_accept_rate: f32, // minimum threshold to allow speculative decoding
     pub max_cached_age_seconds: u64,      // maximum age of cache entries
 }
@@ -75,8 +74,7 @@ impl PlannerPolicy {
         }
         let serialized = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize policy: {}", e))?;
-        fs::write(&path, serialized)
-            .map_err(|e| format!("Failed to write policy file: {}", e))?;
+        fs::write(&path, serialized).map_err(|e| format!("Failed to write policy file: {}", e))?;
         Ok(())
     }
 }

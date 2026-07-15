@@ -9,8 +9,8 @@
 //!
 //! All indexes are thread-safe, serializable, and designed for zero-copy reads.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use serde::{Serialize, Deserialize};
 
 // ─── B-Tree Index ───────────────────────────────────────────────────────────
 
@@ -588,12 +588,7 @@ impl IndexManager {
 
     // ── Composite Index Operations ──
 
-    pub fn create_composite(
-        &mut self,
-        name: impl Into<String>,
-        fields: Vec<String>,
-        unique: bool,
-    ) {
+    pub fn create_composite(&mut self, name: impl Into<String>, fields: Vec<String>, unique: bool) {
         let name_s = name.into();
         self.composite_indexes
             .insert(name_s.clone(), CompositeIndex::new(name_s, fields, unique));
@@ -674,7 +669,11 @@ impl IndexManager {
                     name: n.clone(),
                     index_type: "Covering".into(),
                     entry_count: idx.len(),
-                    key_field: format!("{} | covered: {}", idx.key_fields().join(", "), idx.covered_fields().join(", ")),
+                    key_field: format!(
+                        "{} | covered: {}",
+                        idx.key_fields().join(", "),
+                        idx.covered_fields().join(", ")
+                    ),
                 })
                 .collect(),
         }
@@ -738,12 +737,22 @@ pub fn setup_default_indexes(manager: &mut IndexManager) {
     manager.create_covering(
         "cov_tensor_metadata",
         vec!["tensor_id".into()],
-        vec!["shape".into(), "dtype".into(), "size_bytes".into(), "storage_tier".into()],
+        vec![
+            "shape".into(),
+            "dtype".into(),
+            "size_bytes".into(),
+            "storage_tier".into(),
+        ],
     );
     manager.create_covering(
         "cov_model_summary",
         vec!["model_name".into()],
-        vec!["layer_count".into(), "total_params".into(), "quantization".into(), "device".into()],
+        vec![
+            "layer_count".into(),
+            "total_params".into(),
+            "quantization".into(),
+            "device".into(),
+        ],
     );
 }
 
@@ -818,10 +827,7 @@ mod tests {
         idx.insert(
             CompositeKey::new(vec![BTreeKey::String("t_001".into())]),
             "rec_1".into(),
-            vec![
-                serde_json::json!([2048, 2048]),
-                serde_json::json!("f32"),
-            ],
+            vec![serde_json::json!([2048, 2048]), serde_json::json!("f32")],
         )
         .unwrap();
 

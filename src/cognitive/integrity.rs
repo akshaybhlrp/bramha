@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
-use sha2::{Sha256, Digest};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IntegrityReport {
@@ -58,13 +58,14 @@ impl IntegrityCenter {
                                 hasher.update(&data);
                                 let checksum = format!("{:x}", hasher.finalize());
                                 shard_checksums.insert(filename.clone(), checksum);
-                                
+
                                 // Check if corrupted/empty
                                 if data.is_empty() {
                                     degraded_collections.push(filename.clone());
                                 }
                             } else {
-                                system_errors.push(format!("Failed to read shard file: {}", filename));
+                                system_errors
+                                    .push(format!("Failed to read shard file: {}", filename));
                                 degraded_collections.push(filename);
                             }
                         }
@@ -76,7 +77,9 @@ impl IntegrityCenter {
         // WAL replay health check
         let wal_path = self.storage_dir.join("wal.log");
         let wal_replay_healthy = if wal_path.exists() {
-            fs::metadata(&wal_path).map(|m| m.len() > 0).unwrap_or(false)
+            fs::metadata(&wal_path)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false)
         } else {
             true // healthy if no active WAL file remains uncommitted
         };
@@ -91,7 +94,7 @@ impl IntegrityCenter {
                         if path.extension().and_then(|s| s.to_str()) == Some("index") {
                             let filename = dir_entry.file_name().to_string_lossy().to_string();
                             let base_name = path.file_stem().unwrap().to_string_lossy().to_string();
-                            
+
                             // If index exists but no matching database file is in collections, it is an orphan!
                             let db_path = collections_dir.join(format!("{}.db", base_name));
                             if !db_path.exists() {
@@ -160,13 +163,23 @@ mod tests {
         fs::write(format!("{}/collections/corrupt_col.db", test_dir), b"").unwrap();
 
         // 2. Create an orphaned index (no matching collections file)
-        fs::write(format!("{}/indices/orphan_col.index", test_dir), b"INDEX_DATA").unwrap();
+        fs::write(
+            format!("{}/indices/orphan_col.index", test_dir),
+            b"INDEX_DATA",
+        )
+        .unwrap();
 
         // 3. Perform Audit
         let report = center.perform_audit();
         assert_eq!(report.total_shards_scanned, 1);
-        assert_eq!(report.degraded_collections, vec!["corrupt_col.db".to_string()]);
-        assert_eq!(report.orphaned_indices, vec!["orphan_col.index".to_string()]);
+        assert_eq!(
+            report.degraded_collections,
+            vec!["corrupt_col.db".to_string()]
+        );
+        assert_eq!(
+            report.orphaned_indices,
+            vec!["orphan_col.index".to_string()]
+        );
 
         // 4. Trigger Repair
         let repaired = center.trigger_auto_repair().unwrap();

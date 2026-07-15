@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet, BinaryHeap};
-use std::cmp::Ordering;
-use serde::{Serialize, Deserialize};
 use crate::core::collection::{Collection, SearchResult};
+use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 struct CompareDistDesc {
@@ -19,7 +19,9 @@ impl PartialEq for CompareDistDesc {
 impl Ord for CompareDistDesc {
     fn cmp(&self, other: &Self) -> Ordering {
         // Normal ordering: largest distance is at the top (Max-Heap)
-        self.dist.partial_cmp(&other.dist).unwrap_or(Ordering::Equal)
+        self.dist
+            .partial_cmp(&other.dist)
+            .unwrap_or(Ordering::Equal)
     }
 }
 
@@ -45,7 +47,10 @@ impl PartialEq for CompareDistAsc {
 impl Ord for CompareDistAsc {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reversed ordering: smallest distance is at the top (Min-Heap)
-        other.dist.partial_cmp(&self.dist).unwrap_or(Ordering::Equal)
+        other
+            .dist
+            .partial_cmp(&self.dist)
+            .unwrap_or(Ordering::Equal)
     }
 }
 
@@ -84,9 +89,14 @@ impl HnswIndex {
     }
 
     /// Rebuilds the HNSW index from all vectors currently in the collection.
-    pub fn build(collection: &Collection, m: usize, ef_construction: usize, ef_search: usize) -> Self {
+    pub fn build(
+        collection: &Collection,
+        m: usize,
+        ef_construction: usize,
+        ef_search: usize,
+    ) -> Self {
         let mut index = HnswIndex::new(m, ef_construction, ef_search);
-        
+
         for (id, _) in &collection.vectors {
             // Generate exponential level assignment
             let r: f64 = rand::random();
@@ -122,7 +132,10 @@ impl HnswIndex {
         };
 
         let mut curr_node = curr_enter_node;
-        let mut curr_dist = collection.metric.distance(&target_vec.values, &collection.vectors.get(&curr_node).unwrap().values);
+        let mut curr_dist = collection.metric.distance(
+            &target_vec.values,
+            &collection.vectors.get(&curr_node).unwrap().values,
+        );
 
         // 1. Greedy routing down to target insertion level + 1
         let start_level = self.max_level;
@@ -132,7 +145,10 @@ impl HnswIndex {
                 changed = false;
                 if let Some(neighbors) = self.levels[l].get(&curr_node) {
                     for neighbor in neighbors {
-                        let d = collection.metric.distance(&target_vec.values, &collection.vectors.get(neighbor).unwrap().values);
+                        let d = collection.metric.distance(
+                            &target_vec.values,
+                            &collection.vectors.get(neighbor).unwrap().values,
+                        );
                         if d < curr_dist {
                             curr_dist = d;
                             curr_node = neighbor.clone();
@@ -146,8 +162,14 @@ impl HnswIndex {
         // 2. Multi-layer beam search insertion down to Layer 0
         let mut enter_nodes = vec![curr_node];
         for l in (0..=std::cmp::min(level, start_level)).rev() {
-            let candidates = self.search_layer(collection, &target_vec.values, &enter_nodes, self.ef_construction, l);
-            
+            let candidates = self.search_layer(
+                collection,
+                &target_vec.values,
+                &enter_nodes,
+                self.ef_construction,
+                l,
+            );
+
             // Connect the new node to the best neighbors
             let m_limit = if l == 0 { self.m0 } else { self.m };
             let neighbors = self.select_neighbors(&candidates, m_limit);
@@ -158,14 +180,19 @@ impl HnswIndex {
             for neighbor in &neighbors {
                 if let Some(links) = self.levels[l].get_mut(neighbor) {
                     links.push(id.clone());
-                    
+
                     // Shrink neighbor links if they exceed limits
                     if links.len() > m_limit {
                         let mut temp_candidates = Vec::new();
                         let n_vec = &collection.vectors.get(neighbor).unwrap().values;
                         for link in links.iter() {
-                            let d = collection.metric.distance(n_vec, &collection.vectors.get(link).unwrap().values);
-                            temp_candidates.push(CompareDistAsc { id: link.clone(), dist: d });
+                            let d = collection
+                                .metric
+                                .distance(n_vec, &collection.vectors.get(link).unwrap().values);
+                            temp_candidates.push(CompareDistAsc {
+                                id: link.clone(),
+                                dist: d,
+                            });
                         }
                         temp_candidates.sort_by(|a, b| a.dist.partial_cmp(&b.dist).unwrap());
                         temp_candidates.truncate(m_limit);
@@ -195,13 +222,21 @@ impl HnswIndex {
     ) -> Vec<CompareDistAsc> {
         let mut visited = HashSet::new();
         let mut candidates = BinaryHeap::new(); // Min-Heap
-        let mut results = BinaryHeap::new();    // Max-Heap
+        let mut results = BinaryHeap::new(); // Max-Heap
 
         for node in enter_nodes {
             visited.insert(node.clone());
-            let d = collection.metric.distance(query, &collection.vectors.get(node).unwrap().values);
-            candidates.push(CompareDistAsc { id: node.clone(), dist: d });
-            results.push(CompareDistDesc { id: node.clone(), dist: d });
+            let d = collection
+                .metric
+                .distance(query, &collection.vectors.get(node).unwrap().values);
+            candidates.push(CompareDistAsc {
+                id: node.clone(),
+                dist: d,
+            });
+            results.push(CompareDistDesc {
+                id: node.clone(),
+                dist: d,
+            });
         }
 
         while let Some(curr) = candidates.pop() {
@@ -213,13 +248,21 @@ impl HnswIndex {
             if let Some(neighbors) = self.levels[level].get(&curr.id) {
                 for neighbor in neighbors {
                     if visited.insert(neighbor.clone()) {
-                        let d = collection.metric.distance(query, &collection.vectors.get(neighbor).unwrap().values);
+                        let d = collection
+                            .metric
+                            .distance(query, &collection.vectors.get(neighbor).unwrap().values);
                         let worst = results.peek().unwrap();
-                        
+
                         if d < worst.dist || results.len() < ef {
-                            candidates.push(CompareDistAsc { id: neighbor.clone(), dist: d });
-                            results.push(CompareDistDesc { id: neighbor.clone(), dist: d });
-                            
+                            candidates.push(CompareDistAsc {
+                                id: neighbor.clone(),
+                                dist: d,
+                            });
+                            results.push(CompareDistDesc {
+                                id: neighbor.clone(),
+                                dist: d,
+                            });
+
                             if results.len() > ef {
                                 results.pop();
                             }
@@ -231,7 +274,10 @@ impl HnswIndex {
 
         let mut sorted_results = Vec::new();
         while let Some(node) = results.pop() {
-            sorted_results.push(CompareDistAsc { id: node.id, dist: node.dist });
+            sorted_results.push(CompareDistAsc {
+                id: node.id,
+                dist: node.dist,
+            });
         }
         sorted_results.reverse();
         sorted_results
@@ -239,7 +285,11 @@ impl HnswIndex {
 
     /// Heuristic to select neighbors. Currently grabs the top closest elements.
     fn select_neighbors(&self, candidates: &[CompareDistAsc], limit: usize) -> Vec<String> {
-        candidates.iter().take(limit).map(|c| c.id.clone()).collect()
+        candidates
+            .iter()
+            .take(limit)
+            .map(|c| c.id.clone())
+            .collect()
     }
 
     /// Entry point for HNSW retrieval.
@@ -256,7 +306,9 @@ impl HnswIndex {
         };
 
         let mut curr_node = enter_node;
-        let mut curr_dist = collection.metric.distance(query, &collection.vectors.get(&curr_node).unwrap().values);
+        let mut curr_dist = collection
+            .metric
+            .distance(query, &collection.vectors.get(&curr_node).unwrap().values);
 
         // 1. Route greedily down to Level 1
         for l in (1..=self.max_level).rev() {
@@ -265,7 +317,9 @@ impl HnswIndex {
                 changed = false;
                 if let Some(neighbors) = self.levels[l].get(&curr_node) {
                     for neighbor in neighbors {
-                        let d = collection.metric.distance(query, &collection.vectors.get(neighbor).unwrap().values);
+                        let d = collection
+                            .metric
+                            .distance(query, &collection.vectors.get(neighbor).unwrap().values);
                         if d < curr_dist {
                             curr_dist = d;
                             curr_node = neighbor.clone();
@@ -306,12 +360,12 @@ impl HnswIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vector::{Vector, Metric};
+    use crate::core::vector::{Metric, Vector};
 
     #[test]
     fn test_hnsw_correctness() {
         let mut collection = Collection::new("test_hnsw".to_string(), 4, Metric::L2);
-        
+
         // Add 20 deterministic vectors
         for i in 0..20 {
             let val = i as f32;

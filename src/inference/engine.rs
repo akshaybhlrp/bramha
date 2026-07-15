@@ -1,13 +1,13 @@
-use std::sync::Arc;
-use std::time::Instant;
-use std::io::Write;
-use std::sync::{Mutex, OnceLock};
-use burn::tensor::{Tensor, Shape, Data, activation::softmax};
-use burn::tensor::backend::Backend;
-use burn::backend::Wgpu;
-use burn::backend::wgpu::WgpuDevice;
 use crate::inference::tokenizer::BramhaTokenizer;
 use crate::storage::Database;
+use burn::backend::Wgpu;
+use burn::backend::wgpu::WgpuDevice;
+use burn::tensor::backend::Backend;
+use burn::tensor::{Data, Shape, Tensor, activation::softmax};
+use std::io::Write;
+use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct LogEntry {
@@ -33,16 +33,18 @@ pub struct VramCache {
 impl VramCache {
     pub fn global() -> &'static Mutex<Self> {
         static INSTANCE: OnceLock<Mutex<VramCache>> = OnceLock::new();
-        INSTANCE.get_or_init(|| Mutex::new(VramCache {
-            layers_1d: std::collections::HashMap::new(),
-            layers_2d: std::collections::HashMap::new(),
-            max_cached_tensors: 300,
-            max_vram_bytes: Some(600_000_000), // Enforce strict 600 MB VRAM limit to leave headroom for wgpu allocator pools
-            suppress_eviction_logs: true, // Avoid noisy per-tensor log spam during steady-state inference
-            current_vram_bytes: 0,
-            access_order: Vec::new(),
-            tensor_sizes: std::collections::HashMap::new(),
-        }))
+        INSTANCE.get_or_init(|| {
+            Mutex::new(VramCache {
+                layers_1d: std::collections::HashMap::new(),
+                layers_2d: std::collections::HashMap::new(),
+                max_cached_tensors: 300,
+                max_vram_bytes: Some(600_000_000), // Enforce strict 600 MB VRAM limit to leave headroom for wgpu allocator pools
+                suppress_eviction_logs: true, // Avoid noisy per-tensor log spam during steady-state inference
+                current_vram_bytes: 0,
+                access_order: Vec::new(),
+                tensor_sizes: std::collections::HashMap::new(),
+            })
+        })
     }
 
     pub fn set_limit(&mut self, limit_percentage: f32) {
@@ -50,7 +52,7 @@ impl VramCache {
         let total_gpu_bytes = 4_000_000_000usize;
         let cap_bytes = (total_gpu_bytes as f32 * limit_percentage) as usize;
         self.max_vram_bytes = Some(cap_bytes);
-        
+
         let logger = InferenceLogger::global();
         logger.record_log(format!(
             "⚙️ VRAM Cache cap configured: {:.1}% ({:.2} GB limit)",
@@ -69,7 +71,9 @@ impl VramCache {
             None => return, // Unlimited
         };
 
-        while self.current_vram_bytes + new_tensor_bytes > max_bytes && !self.access_order.is_empty() {
+        while self.current_vram_bytes + new_tensor_bytes > max_bytes
+            && !self.access_order.is_empty()
+        {
             let mut evicted = false;
             for i in 0..self.access_order.len() {
                 let name = &self.access_order[i];
@@ -79,7 +83,7 @@ impl VramCache {
                     self.layers_1d.remove(&name);
                     self.layers_2d.remove(&name);
                     self.current_vram_bytes = self.current_vram_bytes.saturating_sub(size);
-                    
+
                     if !self.suppress_eviction_logs {
                         let logger = InferenceLogger::global();
                         logger.record_log(format!(
@@ -141,17 +145,16 @@ impl InferenceLogger {
     }
 }
 
-
 pub(crate) fn estimate_query_complexity(prompt: &str) -> f32 {
     let word_count = prompt.split_whitespace().count();
-    let has_technical_terms = prompt.contains("code") 
-        || prompt.contains("rust") 
-        || prompt.contains("compile") 
-        || prompt.contains("error") 
-        || prompt.contains("implement") 
-        || prompt.contains("bramha") 
+    let has_technical_terms = prompt.contains("code")
+        || prompt.contains("rust")
+        || prompt.contains("compile")
+        || prompt.contains("error")
+        || prompt.contains("implement")
+        || prompt.contains("bramha")
         || prompt.contains("database");
-    
+
     let mut score: f32 = 0.5;
     if word_count > 15 {
         score += 0.2;
@@ -170,7 +173,7 @@ pub(crate) fn rms_norm<B: Backend, const D: usize>(
 ) -> Tensor<B, D> {
     let variance = x.clone().powf_scalar(2.0).mean_dim(D - 1);
     let norm = x.div(variance.add_scalar(eps).sqrt());
-    
+
     // Broadcast multiply by 1D weight along the last dimension
     norm.mul(weight.unsqueeze_dim(0))
 }
@@ -187,24 +190,26 @@ pub(crate) fn precompute_rope_freqs<B: Backend>(
     for i in 0..half_dim {
         freqs.push(1.0 / theta.powf((2 * i) as f32 / head_dim as f32));
     }
-    
+
     let t: Vec<f32> = (0..seq_len).map(|i| i as f32).collect();
-    
+
     let freqs_data = Data::new(freqs, Shape::from([half_dim])).convert();
     let freqs_t = Tensor::<B, 1>::from_data(freqs_data, device);
-    
+
     let t_data = Data::new(t, Shape::from([seq_len])).convert();
     let t_t = Tensor::<B, 1>::from_data(t_data, device);
-    
+
     // Outer product: [seq_len, half_dim]
-    let freqs_outer = t_t.unsqueeze_dim::<2>(1).matmul(freqs_t.unsqueeze_dim::<2>(0));
-    
+    let freqs_outer = t_t
+        .unsqueeze_dim::<2>(1)
+        .matmul(freqs_t.unsqueeze_dim::<2>(0));
+
     // Cat along dim 1 to get [seq_len, head_dim]
     let freqs_cat = Tensor::cat(vec![freqs_outer.clone(), freqs_outer], 1);
-    
+
     let cos = freqs_cat.clone().cos().unsqueeze_dim::<3>(1);
     let sin = freqs_cat.sin().unsqueeze_dim::<3>(1);
-    
+
     (cos, sin)
 }
 
@@ -216,27 +221,30 @@ pub(crate) fn apply_rope<B: Backend>(
 ) -> Tensor<B, 3> {
     let head_dim = x.shape().dims[2];
     let half_dim = head_dim / 2;
-    
-    let x1 = x.clone().slice([0..x.shape().dims[0], 0..x.shape().dims[1], 0..half_dim]);
-    let x2 = x.clone().slice([0..x.shape().dims[0], 0..x.shape().dims[1], half_dim..head_dim]);
-    
+
+    let x1 = x
+        .clone()
+        .slice([0..x.shape().dims[0], 0..x.shape().dims[1], 0..half_dim]);
+    let x2 = x.clone().slice([
+        0..x.shape().dims[0],
+        0..x.shape().dims[1],
+        half_dim..head_dim,
+    ]);
+
     let rotated_x = Tensor::cat(vec![x2.neg(), x1], 2);
-    
+
     x.mul(cos).add(rotated_x.mul(sin))
 }
 
 /// GQA head repeating helper in Burn
-pub(crate) fn repeat_kv<B: Backend>(
-    x: Tensor<B, 3>,
-    num_repeats: usize,
-) -> Tensor<B, 3> {
+pub(crate) fn repeat_kv<B: Backend>(x: Tensor<B, 3>, num_repeats: usize) -> Tensor<B, 3> {
     if num_repeats == 1 {
         return x;
     }
     let seq_len = x.shape().dims[0];
     let num_kv_heads = x.shape().dims[1];
     let head_dim = x.shape().dims[2];
-    
+
     // Unsqueeze to [seq_len, num_kv_heads, 1, head_dim]
     let x = x.unsqueeze_dim::<4>(2);
     // Repeat by expanding (or replicating)
@@ -249,7 +257,10 @@ pub(crate) fn repeat_kv<B: Backend>(
 }
 
 /// Causal mask helper in Burn
-pub(crate) fn causal_mask<B: Backend>(seq_len: usize, device: &<B as Backend>::Device) -> Tensor<B, 2> {
+pub(crate) fn causal_mask<B: Backend>(
+    seq_len: usize,
+    device: &<B as Backend>::Device,
+) -> Tensor<B, 2> {
     let mut mask_data = vec![0.0f32; seq_len * seq_len];
     for i in 0..seq_len {
         for j in 0..seq_len {
@@ -294,9 +305,9 @@ where
     let k = w_shape.dims[0];
     let n = w_shape.dims[1];
     let size_bytes = k * n * 4;
-    
+
     let max_binding_bytes = 100_000_000;
-    
+
     if size_bytes <= max_binding_bytes || !crate::inference::is_cpu_only() {
         x.matmul(w_t)
     } else {
@@ -352,18 +363,20 @@ async fn get_tensor_1d(
 
     let db_read = db.tensor_db.read().await;
     let model = db_read.models.get(model_name).unwrap();
-    let page = model.layers.get(name)
+    let page = model
+        .layers
+        .get(name)
         .ok_or_else(|| format!("Weight not found in sharded DB: {}", name))?
         .clone();
     drop(db_read);
-    
+
     // AOT Alignment: We now strictly store data on disk as native F32.
     // The disk page bytes are exactly aligned float memory.
     let f32_data = safe_cast_to_f32(page.as_bytes());
-    
+
     let mut shape_arr = [0; 1];
     shape_arr[0] = page.shape[0];
-    
+
     let data = Data::new(f32_data.to_vec(), Shape::from(shape_arr)).convert();
     let tensor = Tensor::<Wgpu, 1>::from_data(data, device);
 
@@ -400,7 +413,9 @@ async fn get_tensor_2d(
 
     let db_read = db.tensor_db.read().await;
     let model = db_read.models.get(model_name).unwrap();
-    let page = model.layers.get(name)
+    let page = model
+        .layers
+        .get(name)
         .or_else(|| {
             if name == "lm_head.weight" {
                 model.layers.get("model.embed_tokens.weight")
@@ -410,8 +425,10 @@ async fn get_tensor_2d(
         })
         .ok_or_else(|| format!("Weight not found in sharded DB: {}", name))?
         .clone();
-        
-    let scale_page_opt = model.layers.get(&format!("{}.scale", name))
+
+    let scale_page_opt = model
+        .layers
+        .get(&format!("{}.scale", name))
         .or_else(|| {
             if name == "lm_head.weight" {
                 model.layers.get("model.embed_tokens.weight.scale")
@@ -421,7 +438,7 @@ async fn get_tensor_2d(
         })
         .cloned();
     drop(db_read);
-    
+
     // Dequantize on the fly if stored as I8 or U4, otherwise load raw F32
     let f32_data = match page.dtype {
         crate::core::tensor::DType::I8 => {
@@ -437,15 +454,13 @@ async fn get_tensor_2d(
             let scales = safe_cast_to_f32(scale_page.as_bytes());
             crate::models::quantization::dequantize_int4(page.as_bytes(), &scales, page.shape[1])
         }
-        _ => {
-            safe_cast_to_f32(page.as_bytes()).into_owned()
-        }
+        _ => safe_cast_to_f32(page.as_bytes()).into_owned(),
     };
-    
+
     let mut shape_arr = [0; 2];
     shape_arr[0] = page.shape[0];
     shape_arr[1] = page.shape[1];
-    
+
     let data = Data::new(f32_data, Shape::from(shape_arr)).convert();
     let tensor = Tensor::<Wgpu, 2>::from_data(data, device);
 
@@ -488,7 +503,9 @@ async fn get_transposed_tensor_2d(
         let size_bytes = transposed.shape().dims[0] * transposed.shape().dims[1] * 4;
         cache.enforce_limits(size_bytes);
         if cache.layers_1d.len() + cache.layers_2d.len() < cache.max_cached_tensors {
-            cache.layers_2d.insert(cache_key.clone(), transposed.clone());
+            cache
+                .layers_2d
+                .insert(cache_key.clone(), transposed.clone());
             cache.tensor_sizes.insert(cache_key.clone(), size_bytes);
             cache.current_vram_bytes += size_bytes;
             cache.record_access(&cache_key);
@@ -546,10 +563,15 @@ impl InferenceEngine {
         } else {
             crate::storage::answer_cache::DeterministicAnswerCache::load()
         };
-        
+
         // Lookup RAG context chunks or default to empty
         let context_chunks: Vec<(String, String)> = Vec::new();
-        let cached_completion = cache.get(prompt, model_name, &context_chunks, policy.max_cached_age_seconds);
+        let cached_completion = cache.get(
+            prompt,
+            model_name,
+            &context_chunks,
+            policy.max_cached_age_seconds,
+        );
         let has_cache = cached_completion.is_some();
 
         // 2. Query recent speculative accept rates and adaptive route confidences from SQLite persistent traces
@@ -558,9 +580,22 @@ impl InferenceEngine {
         let historical_accept_rate = sql_store.get_historical_accept_rate(10).unwrap_or(0.7);
 
         let mut route_confidences = std::collections::HashMap::new();
-        route_confidences.insert("SpeculativeDecode".to_string(), sql_store.get_route_confidence("SpeculativeDecode").unwrap_or(0.5));
-        route_confidences.insert("SpandaSparse".to_string(), sql_store.get_route_confidence("SpandaSparse").unwrap_or(0.5));
-        route_confidences.insert("ExactDecode".to_string(), sql_store.get_route_confidence("ExactDecode").unwrap_or(0.5));
+        route_confidences.insert(
+            "SpeculativeDecode".to_string(),
+            sql_store
+                .get_route_confidence("SpeculativeDecode")
+                .unwrap_or(0.5),
+        );
+        route_confidences.insert(
+            "SpandaSparse".to_string(),
+            sql_store
+                .get_route_confidence("SpandaSparse")
+                .unwrap_or(0.5),
+        );
+        route_confidences.insert(
+            "ExactDecode".to_string(),
+            sql_store.get_route_confidence("ExactDecode").unwrap_or(0.5),
+        );
 
         let spanda_healthy = spanda_engine::Session::new().health_check();
 
@@ -590,7 +625,9 @@ impl InferenceEngine {
         // 4. Handle CachedAnswer early exit
         if decision == crate::planner::policy::PlannerDecision::CachedAnswer {
             if let Some(completion) = cached_completion {
-                let log_msg = format!("⚡ [Planner] Cache HIT! Returning deterministic cached response instantly.");
+                let log_msg = format!(
+                    "⚡ [Planner] Cache HIT! Returning deterministic cached response instantly."
+                );
                 InferenceLogger::global().record_log(log_msg);
 
                 // Log trace to SQL
@@ -618,15 +655,19 @@ impl InferenceEngine {
         // 5. Configure speculation bypass dynamically
         let force_exact = decision == crate::planner::policy::PlannerDecision::ExactDecode;
         if force_exact {
-            unsafe { std::env::set_var("BRAMHA_FORCE_EXACT_DECODE", "true"); }
+            unsafe {
+                std::env::set_var("BRAMHA_FORCE_EXACT_DECODE", "true");
+            }
         } else {
-            unsafe { std::env::remove_var("BRAMHA_FORCE_EXACT_DECODE"); }
+            unsafe {
+                std::env::remove_var("BRAMHA_FORCE_EXACT_DECODE");
+            }
         }
 
         // 6. Execute dynamic routing scheduler for CPU/GPU placement
         let scheduler = crate::planner::scheduler::HeterogeneousScheduler::new();
         let use_cpu_entirely = scheduler.should_use_cpu_entirely(&db, model_name).await;
-        
+
         // Initialize SPANDA bridge, active database and model name
         crate::inference::spanda_backend::init_spanda_bridge();
         let _ = crate::inference::spanda_backend::BRAMHA_DATABASE.set(db.clone());
@@ -636,9 +677,11 @@ impl InferenceEngine {
 
         let mut result = {
             if decision == crate::planner::policy::PlannerDecision::SpandaSparse {
-                let log_msg = format!("🚀 [Scheduler] Routing request entirely to SPANDA engine for sparse fallback.");
+                let log_msg = format!(
+                    "🚀 [Scheduler] Routing request entirely to SPANDA engine for sparse fallback."
+                );
                 InferenceLogger::global().record_log(log_msg);
-                
+
                 let spanda_session = spanda_engine::Session::new();
                 match spanda_session.generate(prompt, max_new_tokens) {
                     Ok(res) => Ok(InferenceResult {
@@ -646,12 +689,16 @@ impl InferenceEngine {
                         completion: res,
                         elapsed_seconds: start_time.elapsed().as_secs_f64(),
                         tokens_generated: max_new_tokens,
-                        tokens_per_second: (max_new_tokens as f64) / start_time.elapsed().as_secs_f64(),
+                        tokens_per_second: (max_new_tokens as f64)
+                            / start_time.elapsed().as_secs_f64(),
                         average_exit_layer: 0.0,
                         average_uncertainty_score: 0.0,
                     }),
                     Err(e) => {
-                        let log_msg = format!("⚠️ [Scheduler] Spanda engine failed ({}). Falling back to CPU engine.", e);
+                        let log_msg = format!(
+                            "⚠️ [Scheduler] Spanda engine failed ({}). Falling back to CPU engine.",
+                            e
+                        );
                         InferenceLogger::global().record_log(log_msg);
                         crate::inference::cpu_engine::generate_cpu(
                             db.clone(),
@@ -659,11 +706,14 @@ impl InferenceEngine {
                             prompt,
                             max_new_tokens,
                             temperature,
-                        ).await
+                        )
+                        .await
                     }
                 }
             } else if use_cpu_entirely {
-                let log_msg = format!("📋 [Scheduler] Routing request entirely to CPU engine based on scheduler decisions.");
+                let log_msg = format!(
+                    "📋 [Scheduler] Routing request entirely to CPU engine based on scheduler decisions."
+                );
                 InferenceLogger::global().record_log(log_msg);
                 crate::inference::cpu_engine::generate_cpu(
                     db.clone(),
@@ -671,9 +721,12 @@ impl InferenceEngine {
                     prompt,
                     max_new_tokens,
                     temperature,
-                ).await
+                )
+                .await
             } else {
-                let log_msg = format!("🚀 [Scheduler] Routing request entirely to WGPU GPU engine for peak hardware performance.");
+                let log_msg = format!(
+                    "🚀 [Scheduler] Routing request entirely to WGPU GPU engine for peak hardware performance."
+                );
                 InferenceLogger::global().record_log(log_msg);
                 Self::generate_wgpu(
                     db.clone(),
@@ -683,12 +736,15 @@ impl InferenceEngine {
                     temperature,
                     workflow_id,
                     branch_id,
-                ).await
+                )
+                .await
             }
         };
 
         // Cleanup temporary speculation bypass environment variable
-        unsafe { std::env::remove_var("BRAMHA_FORCE_EXACT_DECODE"); }
+        unsafe {
+            std::env::remove_var("BRAMHA_FORCE_EXACT_DECODE");
+        }
 
         // 7. Post-process, cache result, and log trace telemetry
         if let Ok(ref mut res) = result {
@@ -696,11 +752,12 @@ impl InferenceEngine {
             let _ = cache.insert(prompt, model_name, &context_chunks, res.completion.clone());
 
             // Compute actual speculative acceptance rate if speculative path was run
-            let actual_accept_rate = if decision == crate::planner::policy::PlannerDecision::SpeculativeDecode {
-                0.85f32
-            } else {
-                0.0f32
-            };
+            let actual_accept_rate =
+                if decision == crate::planner::policy::PlannerDecision::SpeculativeDecode {
+                    0.85f32
+                } else {
+                    0.0f32
+                };
 
             let latency_ms = start_time.elapsed().as_secs_f64() * 1000.0;
 
@@ -737,8 +794,6 @@ impl InferenceEngine {
         workflow_id: Option<String>,
         branch_id: Option<String>,
     ) -> Result<InferenceResult, String> {
-
-
         {
             let mut cache = VramCache::global().lock().unwrap();
             // Do not uncap max_vram_bytes to prevent OOM
@@ -747,15 +802,17 @@ impl InferenceEngine {
         }
 
         let start_time = Instant::now();
-        
+
         let prefetcher = crate::inference::prefetcher::Prefetcher::new();
- 
+
         // Ensure model is loaded on demand (lazy loading)
         {
             let mut tensor_db_write = db.tensor_db.write().await;
             tensor_db_write.ensure_model_loaded(model_name)?;
             // Load global layers
-            let crate::storage::tensor_db::TensorDB { models, block_db, .. } = &mut *tensor_db_write;
+            let crate::storage::tensor_db::TensorDB {
+                models, block_db, ..
+            } = &mut *tensor_db_write;
             let mut block_db_guard = block_db.lock().unwrap();
             if let Some(m) = models.get_mut(model_name) {
                 let _ = m.load_tensor_chunks("model.embed_tokens.weight", &mut *block_db_guard);
@@ -766,8 +823,12 @@ impl InferenceEngine {
 
         let active_device = {
             let tensor_db_guard = db.tensor_db.read().await;
-            let model = tensor_db_guard.models.get(model_name)
-                .ok_or_else(|| format!("Model '{}' not found in database. Ingest model first.", model_name))?;
+            let model = tensor_db_guard.models.get(model_name).ok_or_else(|| {
+                format!(
+                    "Model '{}' not found in database. Ingest model first.",
+                    model_name
+                )
+            })?;
             model.active_device.clone()
         };
 
@@ -786,11 +847,14 @@ impl InferenceEngine {
                 _ => WgpuDevice::default(),
             }
         };
-        
+
         let complexity = estimate_query_complexity(prompt);
-        let log_msg = format!("🚀 Universal Engine initialized! running WGPU Compute Shaders on device: \"{}\". Target Model: \"{}\" (complexity: {:.2})", active_device, model_name, complexity);
+        let log_msg = format!(
+            "🚀 Universal Engine initialized! running WGPU Compute Shaders on device: \"{}\". Target Model: \"{}\" (complexity: {:.2})",
+            active_device, model_name, complexity
+        );
         InferenceLogger::global().record_log(log_msg);
- 
+
         // 2. Load tokenizer in-process utilizing our new wrapper
         let base_path = {
             let tensor_db_guard = db.tensor_db.read().await;
@@ -799,37 +863,49 @@ impl InferenceEngine {
         };
         let bramha_tokenizer = BramhaTokenizer::load(model_name, &base_path)?;
         let tokenizer = bramha_tokenizer.inner();
- 
+
         // 3. Tokenize input prompt
         // If the prompt doesn't look like it's already template-formatted (e.g. doesn't contain ChatML tokens),
         // we wrap it in TinyLlama's official ChatML template structure.
         let model_name_lower = model_name.to_lowercase();
-        let formatted_prompt = crate::inference::tokenizer::BramhaTokenizer::apply_chat_template(model_name, &base_path, prompt);
- 
+        let formatted_prompt = crate::inference::tokenizer::BramhaTokenizer::apply_chat_template(
+            model_name, &base_path, prompt,
+        );
+
         let add_bos = model_name_lower.contains("tinyllama") || model_name_lower.contains("llama");
         let mut tokens = bramha_tokenizer.encode(&formatted_prompt, add_bos)?;
         if tokens.is_empty() {
             tokens.push(1); // Fallback token to avoid 0-sized WGPU buffer binding panics
         }
         let _initial_prompt_len = tokens.len();
-        
+
         let log_msg = format!("📝 Tokenized prompt (len: {}): {:?}", tokens.len(), tokens);
         InferenceLogger::global().record_log(log_msg);
-        
+
         let mut generated_tokens = Vec::new();
-        
+
         let is_mock = model_name_lower.contains("mock");
         let (num_layers, head_dim, num_q_heads, num_kv_heads, hidden_size) = if is_mock {
             (1, 16, 4, 1, 64)
         } else {
             let db_read = db.tensor_db.read().await;
-            let model = db_read.models.get(model_name)
-                .ok_or_else(|| format!("Model '{}' not found for dimension auto-detection", model_name))?;
+            let model = db_read.models.get(model_name).ok_or_else(|| {
+                format!(
+                    "Model '{}' not found for dimension auto-detection",
+                    model_name
+                )
+            })?;
 
-            let detected_layers = model.layers.keys()
-                .filter(|k| k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight"))
+            let detected_layers = model
+                .layers
+                .keys()
+                .filter(|k| {
+                    k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight")
+                })
                 .count();
-            let detected_hidden = model.layers.get("model.embed_tokens.weight")
+            let detected_hidden = model
+                .layers
+                .get("model.embed_tokens.weight")
                 .and_then(|p| p.shape.get(1).copied())
                 .unwrap_or(2048);
 
@@ -838,14 +914,17 @@ impl InferenceEngine {
             // Try reading config.json for ground-truth architecture parameters
             let config_path = base_path.join("config.json");
             let from_config = if config_path.exists() {
-                std::fs::read_to_string(&config_path).ok()
+                std::fs::read_to_string(&config_path)
+                    .ok()
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                     .and_then(|cfg| {
                         let num_q = cfg.get("num_attention_heads")?.as_u64()? as usize;
-                        let num_kv = cfg.get("num_key_value_heads")
+                        let num_kv = cfg
+                            .get("num_key_value_heads")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(num_q as u64) as usize;
-                        let hd = cfg.get("head_dim")
+                        let hd = cfg
+                            .get("head_dim")
                             .and_then(|v| v.as_u64())
                             .map(|v| v as usize)
                             .unwrap_or_else(|| detected_hidden / num_q);
@@ -860,10 +939,14 @@ impl InferenceEngine {
             } else {
                 let db_read = db.tensor_db.read().await;
                 let model = db_read.models.get(model_name).unwrap();
-                let q_proj_rows = model.layers.get("model.layers.0.self_attn.q_proj.weight")
+                let q_proj_rows = model
+                    .layers
+                    .get("model.layers.0.self_attn.q_proj.weight")
                     .and_then(|p| p.shape.first().copied())
                     .unwrap_or(detected_hidden);
-                let k_proj_rows = model.layers.get("model.layers.0.self_attn.k_proj.weight")
+                let k_proj_rows = model
+                    .layers
+                    .get("model.layers.0.self_attn.k_proj.weight")
                     .and_then(|p| p.shape.first().copied())
                     .unwrap_or(detected_hidden / 8);
                 let hd = if q_proj_rows % 64 == 0 && k_proj_rows % 64 == 0 {
@@ -873,7 +956,11 @@ impl InferenceEngine {
                 } else {
                     let mut a = q_proj_rows;
                     let mut b = k_proj_rows;
-                    while b != 0 { let t = b; b = a % b; a = t; }
+                    while b != 0 {
+                        let t = b;
+                        b = a % b;
+                        a = t;
+                    }
                     a.max(1)
                 };
                 drop(db_read);
@@ -885,7 +972,7 @@ impl InferenceEngine {
 
         // Estimate query complexity to scale early exit thresholds dynamically
         let _threshold_multiplier = 0.8 + 0.4 * complexity; // Range: [0.84, 1.2]
-        
+
         let mut total_exit_layers = 0;
         let mut total_uncertainty_score = 0.0f32;
 
@@ -893,20 +980,33 @@ impl InferenceEngine {
         let prefill_chunk_size = 128;
         if tokens.len() > prefill_chunk_size {
             let _s_prefill = crate::profile!("wgpu_chunked_prefill");
-            let log_msg = format!("📦 Prompt length {} exceeds prefill_chunk_size {}. Executing Chunked Prefill pipeline...", tokens.len(), prefill_chunk_size);
+            let log_msg = format!(
+                "📦 Prompt length {} exceeds prefill_chunk_size {}. Executing Chunked Prefill pipeline...",
+                tokens.len(),
+                prefill_chunk_size
+            );
             InferenceLogger::global().record_log(log_msg);
-            let chunks: Vec<Vec<u32>> = tokens.chunks(prefill_chunk_size).map(|c| c.to_vec()).collect();
+            let chunks: Vec<Vec<u32>> = tokens
+                .chunks(prefill_chunk_size)
+                .map(|c| c.to_vec())
+                .collect();
             for (chunk_idx, chunk) in chunks.iter().enumerate() {
-                let log_msg = format!("   Processing prefill chunk {}/{} (tokens: {})", chunk_idx + 1, chunks.len(), chunk.len());
+                let log_msg = format!(
+                    "   Processing prefill chunk {}/{} (tokens: {})",
+                    chunk_idx + 1,
+                    chunks.len(),
+                    chunk.len()
+                );
                 InferenceLogger::global().record_log(log_msg);
                 for layer_idx in 0..num_layers {
                     let depth = prefetcher.get_adaptive_depth();
-                    prefetcher.prefetch_layers(model_name, &db, layer_idx, num_layers, depth).await;
+                    prefetcher
+                        .prefetch_layers(model_name, &db, layer_idx, num_layers, depth)
+                        .await;
                 }
             }
             drop(_s_prefill);
         }
-
 
         let mut steps_run = 0;
         let speculation_depth = 0;
@@ -922,7 +1022,11 @@ impl InferenceEngine {
         if let (Some(w_id), Some(b_id)) = (&workflow_id, &branch_id) {
             let meta_store = crate::storage::metadata_sql::MetadataSqlStore::new();
             if let Ok(Some(view)) = meta_store.get_activation_view(w_id, b_id) {
-                if let Ok(replay_res) = crate::inference::paged_kv::branch_replay::load_and_validate_branch(&view, &tokens) {
+                if let Ok(replay_res) =
+                    crate::inference::paged_kv::branch_replay::load_and_validate_branch(
+                        &view, &tokens,
+                    )
+                {
                     InferenceLogger::global().record_log(format!("⚡ Branch Replay HIT! Restored {} validated tokens from Materialized View.", replay_res.valid_length));
                     prefix_len = replay_res.valid_length;
                     cached_entry = Some(replay_res.entry);
@@ -931,26 +1035,37 @@ impl InferenceEngine {
         }
 
         if cached_entry.is_none() {
-            if let Some((mut p_len, mut entry)) = crate::inference::paged_kv::prefix_cache::find_longest_prefix(&base_path, &tokens) {
-            let max_allowed_prefix = if tokens.len() > 1 { tokens.len() - 1 } else { 0 };
-            if p_len > max_allowed_prefix {
-                let page_size = 16;
-                p_len = (max_allowed_prefix / page_size) * page_size;
-                if p_len > 0 {
-                    if let Some((_, adjusted_entry)) = crate::inference::paged_kv::prefix_cache::find_longest_prefix(&base_path, &tokens[..p_len]) {
-                        entry = adjusted_entry;
-                    } else {
-                        p_len = 0;
+            if let Some((mut p_len, mut entry)) =
+                crate::inference::paged_kv::prefix_cache::find_longest_prefix(&base_path, &tokens)
+            {
+                let max_allowed_prefix = if tokens.len() > 1 {
+                    tokens.len() - 1
+                } else {
+                    0
+                };
+                if p_len > max_allowed_prefix {
+                    let page_size = 16;
+                    p_len = (max_allowed_prefix / page_size) * page_size;
+                    if p_len > 0 {
+                        if let Some((_, adjusted_entry)) =
+                            crate::inference::paged_kv::prefix_cache::find_longest_prefix(
+                                &base_path,
+                                &tokens[..p_len],
+                            )
+                        {
+                            entry = adjusted_entry;
+                        } else {
+                            p_len = 0;
+                        }
                     }
                 }
+                if p_len > 0 {
+                    // println!("KV Cache found prefix of length {}", p_len);
+                    InferenceLogger::global().record_log(format!("⚡ Generic Prefix KV Cache HIT (WGPU)! Skipping prefill pass for first {} tokens.", p_len));
+                    prefix_len = p_len;
+                    cached_entry = Some(entry);
+                }
             }
-            if p_len > 0 {
-                // println!("KV Cache found prefix of length {}", p_len);
-                InferenceLogger::global().record_log(format!("⚡ Generic Prefix KV Cache HIT (WGPU)! Skipping prefill pass for first {} tokens.", p_len));
-                prefix_len = p_len;
-                cached_entry = Some(entry);
-            }
-        }
         }
 
         if let Some(entry) = cached_entry {
@@ -967,13 +1082,13 @@ impl InferenceEngine {
                 }
             }
         }
-        
+
         let db_speculative_path: Option<Vec<u32>> = None;
 
         while generated_tokens.len() < max_new_tokens {
             let step_start = std::time::Instant::now();
             steps_run += 1;
-            
+
             // S1: Prompt Lookup / Speculative N-gram Matching
             // S1: Database-Assisted Speculative Decoding (DB-First Materialized Graph)
             let mut speculated_tokens: Vec<u32> = Vec::new();
@@ -998,15 +1113,23 @@ impl InferenceEngine {
             }
 
             let spec_len = speculated_tokens.len();
-            let start_pos = if steps_run == 1 { prefix_len } else { tokens.len() - 1 };
-            let num_new_tokens = if steps_run == 1 { tokens.len() - prefix_len } else { 1 + spec_len };
+            let start_pos = if steps_run == 1 {
+                prefix_len
+            } else {
+                tokens.len() - 1
+            };
+            let num_new_tokens = if steps_run == 1 {
+                tokens.len() - prefix_len
+            } else {
+                1 + spec_len
+            };
             let total_seq_len = start_pos + num_new_tokens;
-            
+
             // Precompute RoPE cos and sin vectors up to total_seq_len
             // println!("Precomputing RoPE for seq_len {}", total_seq_len);
             let _s_rope_pre = crate::profile!("wgpu_rope_precompute");
             let (cos, sin) = precompute_rope_freqs::<B>(total_seq_len, head_dim, 10000.0, &device);
-            
+
             // Slice cos and sin to match the absolute positions of the new tokens
             let cos_slice = cos.slice([start_pos..start_pos + num_new_tokens]);
             let sin_slice = sin.slice([start_pos..start_pos + num_new_tokens]);
@@ -1014,7 +1137,7 @@ impl InferenceEngine {
 
             let mut exit_layer_idx = num_layers - 1;
             let mut step_confidence = 1.0f32;
-            
+
             // Define active tokens that we feed into embedding
             let mut active_tokens = if steps_run == 1 {
                 tokens[prefix_len..].to_vec()
@@ -1031,7 +1154,8 @@ impl InferenceEngine {
                     let db_read = db.tensor_db.read().await;
                     let m = db_read.models.get(model_name).unwrap();
                     m.layers.get("model.embed_tokens.weight").cloned()
-                }.ok_or_else(|| "model.embed_tokens.weight not found".to_string())?;
+                }
+                .ok_or_else(|| "model.embed_tokens.weight not found".to_string())?;
                 let f32_data = safe_cast_to_f32(page.as_bytes());
                 let vocab_size_val = page.shape[0];
                 let hidden_size_val = page.shape[1];
@@ -1042,12 +1166,22 @@ impl InferenceEngine {
                     let end = start + hidden_size_val;
                     x_flat.extend_from_slice(&f32_data[start..end]);
                 }
-                let data = Data::new(x_flat, Shape::from([num_new_tokens, hidden_size_val])).convert();
+                let data =
+                    Data::new(x_flat, Shape::from([num_new_tokens, hidden_size_val])).convert();
                 Tensor::<B, 2>::from_data(data, &device)
             } else {
-                let embed_w = get_tensor_2d(model_name, &db, "model.embed_tokens.weight", &device).await?;
-                let tokens_data = Data::new(active_tokens.iter().map(|&t| t as i32).collect::<Vec<i32>>(), Shape::from([num_new_tokens])).convert();
-                let tokens_tensor = Tensor::<B, 1, burn::tensor::Int>::from_data(tokens_data, &device);
+                let embed_w =
+                    get_tensor_2d(model_name, &db, "model.embed_tokens.weight", &device).await?;
+                let tokens_data = Data::new(
+                    active_tokens
+                        .iter()
+                        .map(|&t| t as i32)
+                        .collect::<Vec<i32>>(),
+                    Shape::from([num_new_tokens]),
+                )
+                .convert();
+                let tokens_tensor =
+                    Tensor::<B, 1, burn::tensor::Int>::from_data(tokens_data, &device);
                 embed_w.select(0, tokens_tensor)
             };
             drop(_s_embed);
@@ -1055,14 +1189,17 @@ impl InferenceEngine {
 
             // Construct and apply causal mask for KV cache ONCE per step to avoid 22 CPU-to-GPU copies
             let _s_mask = crate::profile!("wgpu_causal_mask");
-            let mask = causal_mask_kv::<B>(num_new_tokens, total_seq_len, start_pos, &device).unsqueeze_dim::<3>(0);
+            let mask = causal_mask_kv::<B>(num_new_tokens, total_seq_len, start_pos, &device)
+                .unsqueeze_dim::<3>(0);
             drop(_s_mask);
 
             // 4. Zero-VRAM In-Process Decoder Layer Stream Loop
             // println!("Starting 24-layer transformer loop...");
             for layer_idx in 0..num_layers {
                 let depth = prefetcher.get_adaptive_depth();
-                prefetcher.prefetch_layers(model_name, &db, layer_idx, num_layers, depth).await;
+                prefetcher
+                    .prefetch_layers(model_name, &db, layer_idx, num_layers, depth)
+                    .await;
 
                 if layer_idx > 0 {
                     let mut db_write = db.tensor_db.write().await;
@@ -1072,7 +1209,9 @@ impl InferenceEngine {
                 }
                 {
                     let mut db_write = db.tensor_db.write().await;
-                    let crate::storage::tensor_db::TensorDB { models, block_db, .. } = &mut *db_write;
+                    let crate::storage::tensor_db::TensorDB {
+                        models, block_db, ..
+                    } = &mut *db_write;
                     let mut block_db_guard = block_db.lock().unwrap();
                     if let Some(m) = models.get_mut(model_name) {
                         let _ = m.load_transformer_layer_chunks(layer_idx, &mut *block_db_guard);
@@ -1081,28 +1220,73 @@ impl InferenceEngine {
 
                 // RMSNorm 1 (input_layernorm)
                 let _s_norm1 = crate::profile!("wgpu_input_layernorm");
-                let norm1_w = get_tensor_1d(model_name, &db, &format!("model.layers.{}.input_layernorm.weight", layer_idx), &device).await?;
+                let norm1_w = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.input_layernorm.weight", layer_idx),
+                    &device,
+                )
+                .await?;
                 let h = rms_norm(x.clone(), norm1_w, 1e-5);
                 drop(_s_norm1);
 
                 // Self Attention Projections (Use cached transposed tensors to avoid thread context-switching and GPU transpose overheads)
                 let _s_qkv = crate::profile!("wgpu_qkv_proj");
-                let q_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.self_attn.q_proj.weight", layer_idx), &device).await?;
-                let k_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.self_attn.k_proj.weight", layer_idx), &device).await?;
-                let v_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.self_attn.v_proj.weight", layer_idx), &device).await?;
+                let q_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.q_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
+                let k_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.k_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
+                let v_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.v_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
 
                 let mut q = split_matmul(h.clone(), q_proj_w_t, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.self_attn.q_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.q_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     q = q.add(bias.unsqueeze_dim(0));
                 }
-                
+
                 let mut k = split_matmul(h.clone(), k_proj_w_t, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.self_attn.k_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.k_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     k = k.add(bias.unsqueeze_dim(0));
                 }
-                
+
                 let mut v = split_matmul(h, v_proj_w_t, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.self_attn.v_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.v_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     v = v.add(bias.unsqueeze_dim(0));
                 }
                 drop(_s_qkv);
@@ -1120,15 +1304,14 @@ impl InferenceEngine {
 
                 // Store / update key/value caches purely on the GPU
                 let _s_kvcache = crate::profile!("wgpu_kv_cache_append");
-                let (k_cached, v_cached) = match (&key_caches[layer_idx], &value_caches[layer_idx]) {
+                let (k_cached, v_cached) = match (&key_caches[layer_idx], &value_caches[layer_idx])
+                {
                     (Some(prev_k), Some(prev_v)) => {
                         let new_k = Tensor::cat(vec![prev_k.clone(), k], 0);
                         let new_v = Tensor::cat(vec![prev_v.clone(), v], 0);
                         (new_k, new_v)
                     }
-                    _ => {
-                        (k, v)
-                    }
+                    _ => (k, v),
                 };
                 key_caches[layer_idx] = Some(k_cached.clone());
                 value_caches[layer_idx] = Some(v_cached.clone());
@@ -1147,18 +1330,33 @@ impl InferenceEngine {
                 // Attention score calculation
                 let scale = 1.0 / (head_dim as f32).sqrt();
                 let scores = q_perm.matmul(k_perm.swap_dims(1, 2)).mul_scalar(scale);
-                
+
                 let probs = softmax(scores.add(mask.clone()), 2);
                 let context = probs.matmul(v_perm);
 
-                let context = context.swap_dims(0, 1).reshape(Shape::from([num_new_tokens, hidden_size]));
+                let context = context
+                    .swap_dims(0, 1)
+                    .reshape(Shape::from([num_new_tokens, hidden_size]));
                 drop(_s_attn);
 
                 // Output projection
                 let _s_o_proj = crate::profile!("wgpu_o_proj");
-                let o_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.self_attn.o_proj.weight", layer_idx), &device).await?;
+                let o_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.o_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
                 let mut attn_out = split_matmul(context, o_proj_w_t, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.self_attn.o_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.self_attn.o_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     attn_out = attn_out.add(bias.unsqueeze_dim(0));
                 }
                 drop(_s_o_proj);
@@ -1167,24 +1365,62 @@ impl InferenceEngine {
 
                 // RMSNorm 2 (post_attention_layernorm)
                 let _s_norm2 = crate::profile!("wgpu_post_attn_layernorm");
-                let norm2_w = get_tensor_1d(model_name, &db, &format!("model.layers.{}.post_attention_layernorm.weight", layer_idx), &device).await?;
+                let norm2_w = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.post_attention_layernorm.weight", layer_idx),
+                    &device,
+                )
+                .await?;
                 let h2 = rms_norm(x_attn.clone(), norm2_w, 1e-5);
                 drop(_s_norm2);
 
                 // SwiGLU MLP
                 let _s_mlp = crate::profile!("wgpu_mlp");
-                let gate_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.mlp.gate_proj.weight", layer_idx), &device).await?;
-                let up_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.mlp.up_proj.weight", layer_idx), &device).await?;
-                let down_proj_w_t = get_transposed_tensor_2d(model_name, &db, &format!("model.layers.{}.mlp.down_proj.weight", layer_idx), &device).await?;
+                let gate_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.mlp.gate_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
+                let up_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.mlp.up_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
+                let down_proj_w_t = get_transposed_tensor_2d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.mlp.down_proj.weight", layer_idx),
+                    &device,
+                )
+                .await?;
 
                 let mut gate = split_matmul(h2.clone(), gate_proj_w_t, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.mlp.gate_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.mlp.gate_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     gate = gate.add(bias.unsqueeze_dim(0));
                 }
                 let silu_gate = gate.clone().mul(burn::tensor::activation::sigmoid(gate));
-                
+
                 let mut up = split_matmul(h2, up_proj_w_t, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.mlp.up_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.mlp.up_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     up = up.add(bias.unsqueeze_dim(0));
                 }
                 let mlp_h = silu_gate.mul(up);
@@ -1199,20 +1435,31 @@ impl InferenceEngine {
                 let active_counts = mask_sparsity.int().sum_dim(0);
                 let active_union_mask = active_counts.greater_elem(0);
                 let active_mask_1d = active_union_mask.squeeze::<1>(0);
-                
+
                 let mlp_size = mlp_h.shape().dims[1];
                 let first_elem = Tensor::ones(Shape::from([1]), &device);
                 let rest_elems = Tensor::zeros(Shape::from([mlp_size - 1]), &device);
                 let one_at_zero = Tensor::cat(vec![first_elem, rest_elems], 0);
-                let active_mask_guaranteed = active_mask_1d.int().float().add(one_at_zero).greater_elem(0);
-                
+                let active_mask_guaranteed = active_mask_1d
+                    .int()
+                    .float()
+                    .add(one_at_zero)
+                    .greater_elem(0);
+
                 let indices2d = active_mask_guaranteed.argwhere();
                 let indices_tensor = indices2d.squeeze::<1>(1);
-                
+
                 let active_mlp_h = mlp_h.select(1, indices_tensor.clone());
                 let active_down_proj = down_proj_w_t.select(0, indices_tensor);
                 let mut mlp_out = split_matmul(active_mlp_h, active_down_proj, &device);
-                if let Ok(bias) = get_tensor_1d(model_name, &db, &format!("model.layers.{}.mlp.down_proj.bias", layer_idx), &device).await {
+                if let Ok(bias) = get_tensor_1d(
+                    model_name,
+                    &db,
+                    &format!("model.layers.{}.mlp.down_proj.bias", layer_idx),
+                    &device,
+                )
+                .await
+                {
                     mlp_out = mlp_out.add(bias.unsqueeze_dim(0));
                 }
                 drop(_s_das);
@@ -1221,78 +1468,81 @@ impl InferenceEngine {
                 x = x_next;
 
                 // Early exit check (only in CPU mode - bypassed on GPU to avoid PCIe roundtrips)
-                    let last_actual_idx = num_new_tokens - 1;
-                    let last_token_x = x.clone().slice([ last_actual_idx..last_actual_idx + 1, 0..hidden_size ]);
-                    
-                    let max_prob = if crate::inference::is_cpu_only() {
-                        // CPU-side early exit matmul to avoid WGPU 128MB max_storage_buffer_binding_size limit
-                        if let (Ok(norm_w), Some(page)) = (
-                            get_tensor_1d(model_name, &db, "model.norm.weight", &device).await,
-                            {
-                                let db_read = db.tensor_db.read().await;
-                                let m = db_read.models.get(model_name).unwrap();
-                                m.layers.get("lm_head.weight")
-                                    .or_else(|| m.layers.get("model.embed_tokens.weight"))
-                                    .cloned()
+                let last_actual_idx = num_new_tokens - 1;
+                let last_token_x = x
+                    .clone()
+                    .slice([last_actual_idx..last_actual_idx + 1, 0..hidden_size]);
+
+                let max_prob = if crate::inference::is_cpu_only() {
+                    // CPU-side early exit matmul to avoid WGPU 128MB max_storage_buffer_binding_size limit
+                    if let (Ok(norm_w), Some(page)) = (
+                        get_tensor_1d(model_name, &db, "model.norm.weight", &device).await,
+                        {
+                            let db_read = db.tensor_db.read().await;
+                            let m = db_read.models.get(model_name).unwrap();
+                            m.layers
+                                .get("lm_head.weight")
+                                .or_else(|| m.layers.get("model.embed_tokens.weight"))
+                                .cloned()
+                        },
+                    ) {
+                        let final_x = rms_norm(last_token_x, norm_w, 1e-5);
+                        // println!("Syncing Burn graph for layer {} to {}...", 0, num_layers);
+                        let x_vec: Vec<f32> = final_x.into_data().value;
+                        // println!("Burn graph evaluation complete!");
+                        let f32_data = safe_cast_to_f32(page.as_bytes());
+                        let v_size = page.shape[0];
+
+                        let mut max_val = f32::NEG_INFINITY;
+                        let mut dot_products = vec![0.0f32; v_size];
+                        for v in 0..v_size {
+                            let weight_row = &f32_data[v * hidden_size..(v + 1) * hidden_size];
+                            let mut sum = 0.0f32;
+                            for k in 0..hidden_size {
+                                sum += x_vec[k] * weight_row[k];
                             }
-                        ) {
-                            let final_x = rms_norm(last_token_x, norm_w, 1e-5);
-                            // println!("Syncing Burn graph for layer {} to {}...", 0, num_layers);
-                            let x_vec: Vec<f32> = final_x.into_data().value;
-                            // println!("Burn graph evaluation complete!");
-                            let f32_data = safe_cast_to_f32(page.as_bytes());
-                            let v_size = page.shape[0];
-                            
-                            let mut max_val = f32::NEG_INFINITY;
-                            let mut dot_products = vec![0.0f32; v_size];
-                            for v in 0..v_size {
-                                let weight_row = &f32_data[v * hidden_size..(v + 1) * hidden_size];
-                                let mut sum = 0.0f32;
-                                for k in 0..hidden_size {
-                                    sum += x_vec[k] * weight_row[k];
-                                }
-                                dot_products[v] = sum;
-                                if sum > max_val {
-                                    max_val = sum;
-                                }
+                            dot_products[v] = sum;
+                            if sum > max_val {
+                                max_val = sum;
                             }
-                            let mut sum_exp = 0.0f32;
-                            let mut max_prob_val = 0.0f32;
-                            for &val in &dot_products {
-                                let exp_val = (val - max_val).exp();
-                                sum_exp += exp_val;
-                                if val == max_val {
-                                    max_prob_val = exp_val;
-                                }
+                        }
+                        let mut sum_exp = 0.0f32;
+                        let mut max_prob_val = 0.0f32;
+                        for &val in &dot_products {
+                            let exp_val = (val - max_val).exp();
+                            sum_exp += exp_val;
+                            if val == max_val {
+                                max_prob_val = exp_val;
                             }
-                            if sum_exp > 0.0 {
-                                max_prob_val / sum_exp
-                            } else {
-                                0.0f32
-                            }
+                        }
+                        if sum_exp > 0.0 {
+                            max_prob_val / sum_exp
                         } else {
                             0.0f32
                         }
                     } else {
                         0.0f32
-                    };
-
-                    if max_prob > 0.0 {
-                        let base_threshold = 0.8;
-                        let adapted_threshold = (base_threshold * 1.0f32).clamp(0.5, 0.99);
-
-                        if max_prob >= adapted_threshold {
-                            exit_layer_idx = layer_idx;
-                            step_confidence = max_prob;
-                            for skipped_idx in (layer_idx + 1)..num_layers {
-                                let mut db_write = db.tensor_db.write().await;
-                                if let Some(m) = db_write.models.get_mut(model_name) {
-                                    m.advise_dont_need_for_layer(skipped_idx);
-                                }
-                            }
-                            break;
-                        }
                     }
+                } else {
+                    0.0f32
+                };
+
+                if max_prob > 0.0 {
+                    let base_threshold = 0.8;
+                    let adapted_threshold = (base_threshold * 1.0f32).clamp(0.5, 0.99);
+
+                    if max_prob >= adapted_threshold {
+                        exit_layer_idx = layer_idx;
+                        step_confidence = max_prob;
+                        for skipped_idx in (layer_idx + 1)..num_layers {
+                            let mut db_write = db.tensor_db.write().await;
+                            if let Some(m) = db_write.models.get_mut(model_name) {
+                                m.advise_dont_need_for_layer(skipped_idx);
+                            }
+                        }
+                        break;
+                    }
+                }
             }
 
             {
@@ -1308,14 +1558,20 @@ impl InferenceEngine {
             let final_x = rms_norm(x.clone(), norm_w, 1e-5);
 
             let num_rows = if steps_run == 1 { 1 } else { num_new_tokens };
-            let start_idx_row = if steps_run == 1 { num_new_tokens - 1 } else { 0 };
-            let last_tokens_x = final_x.slice([ start_idx_row..start_idx_row + num_rows, 0..hidden_size ]);
-            
+            let start_idx_row = if steps_run == 1 {
+                num_new_tokens - 1
+            } else {
+                0
+            };
+            let last_tokens_x =
+                final_x.slice([start_idx_row..start_idx_row + num_rows, 0..hidden_size]);
+
             let logits_vec = if crate::inference::is_cpu_only() {
                 let page = {
                     let db_read = db.tensor_db.read().await;
                     let m = db_read.models.get(model_name).unwrap();
-                    m.layers.get("lm_head.weight")
+                    m.layers
+                        .get("lm_head.weight")
                         .or_else(|| m.layers.get("model.embed_tokens.weight"))
                         .cloned()
                         .ok_or_else(|| "lm_head.weight not found".to_string())?
@@ -1324,14 +1580,14 @@ impl InferenceEngine {
                 // println!("Syncing Burn graph for chunked logits...");
                 let x_vec: Vec<f32> = last_tokens_x.into_data().value;
                 // println!("Burn graph chunked logits sync complete!");
-                
+
                 let v_size = page.shape[0];
                 let mut logits_flat = vec![0.0f32; num_rows * v_size];
-                
+
                 for r in 0..num_rows {
                     let x_row = &x_vec[r * hidden_size..(r + 1) * hidden_size];
                     let logits_row_slice = &mut logits_flat[r * v_size..(r + 1) * v_size];
-                    
+
                     for v in 0..v_size {
                         let weight_row = &f32_data[v * hidden_size..(v + 1) * hidden_size];
                         let mut sum = 0.0f32;
@@ -1343,7 +1599,8 @@ impl InferenceEngine {
                 }
                 logits_flat
             } else {
-                let lm_head_w_t = get_transposed_tensor_2d(model_name, &db, "lm_head.weight", &device).await?;
+                let lm_head_w_t =
+                    get_transposed_tensor_2d(model_name, &db, "lm_head.weight", &device).await?;
                 let logits = last_tokens_x.matmul(lm_head_w_t);
                 let logits_data = logits.into_data();
                 logits_data.value
@@ -1353,7 +1610,7 @@ impl InferenceEngine {
 
             let mut accepted_count = 0;
             let mut next_generated_tokens = Vec::new();
-            
+
             for i in 0..=spec_len {
                 let start_offset = i * vocab_size;
                 let end_offset = (i + 1) * vocab_size;
@@ -1382,8 +1639,14 @@ impl InferenceEngine {
                         *val /= temp;
                     }
 
-                    let max_logit = current_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    let mut exps: Vec<f32> = current_logits.iter().map(|&x| (x - max_logit).exp()).collect();
+                    let max_logit = current_logits
+                        .iter()
+                        .copied()
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let mut exps: Vec<f32> = current_logits
+                        .iter()
+                        .map(|&x| (x - max_logit).exp())
+                        .collect();
                     let sum_exp: f32 = exps.iter().sum();
                     if sum_exp > 0.0 {
                         for val in exps.iter_mut() {
@@ -1392,8 +1655,10 @@ impl InferenceEngine {
                     }
 
                     let top_k = 40;
-                    let mut indexed_probs: Vec<(usize, f32)> = exps.into_iter().enumerate().collect();
-                    indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    let mut indexed_probs: Vec<(usize, f32)> =
+                        exps.into_iter().enumerate().collect();
+                    indexed_probs
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     indexed_probs.truncate(top_k);
 
                     let top_sum: f32 = indexed_probs.iter().map(|&(_, p)| p).sum();
@@ -1429,15 +1694,28 @@ impl InferenceEngine {
                 };
 
                 if std::env::var("BRAMHA_DUMP_LOGPROBS").is_ok() {
-                    let max_logit = current_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    let sum_exp: f32 = current_logits.iter().map(|&val| (val - max_logit).exp()).sum();
+                    let max_logit = current_logits
+                        .iter()
+                        .copied()
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let sum_exp: f32 = current_logits
+                        .iter()
+                        .map(|&val| (val - max_logit).exp())
+                        .sum();
                     let logprob = current_logits[next_token_id as usize] - max_logit - sum_exp.ln();
-                    println!("📝 [Logprob] Token ID: {}, Logprob: {:.4}", next_token_id, logprob);
+                    println!(
+                        "📝 [Logprob] Token ID: {}, Logprob: {:.4}",
+                        next_token_id, logprob
+                    );
                 }
 
                 if std::env::var("BRAMHA_TRACE").is_ok() {
-                    println!("🔍 [Trace] Generation Step: {}, Token ID: {}, Temperature: {}", 
-                             generated_tokens.len() + i, next_token_id, temperature);
+                    println!(
+                        "🔍 [Trace] Generation Step: {}, Token ID: {}, Temperature: {}",
+                        generated_tokens.len() + i,
+                        next_token_id,
+                        temperature
+                    );
                 }
 
                 if i < spec_len {
@@ -1464,8 +1742,14 @@ impl InferenceEngine {
                         std::io::stdout().flush().unwrap_or_default();
 
                         let cleaned_word = word.replace("\u{2581}", " ");
-                        let log_msg = format!("✓ Token {} generated: \"{}\" (exit layer: {}/{}, confidence: {:.1}%)",
-                            generated_tokens.len(), cleaned_word, exit_layer_idx + 1, num_layers, step_confidence * 100.0);
+                        let log_msg = format!(
+                            "✓ Token {} generated: \"{}\" (exit layer: {}/{}, confidence: {:.1}%)",
+                            generated_tokens.len(),
+                            cleaned_word,
+                            exit_layer_idx + 1,
+                            num_layers,
+                            step_confidence * 100.0
+                        );
                         InferenceLogger::global().record_log(log_msg);
                     }
 
@@ -1476,8 +1760,10 @@ impl InferenceEngine {
             }
 
             if spec_len > 0 {
-                let log_msg = format!("   ⚡ Parallel Speculative Decoding: Proposed {} tokens, Accepted {}/{} speculations.",
-                    spec_len, accepted_count, spec_len);
+                let log_msg = format!(
+                    "   ⚡ Parallel Speculative Decoding: Proposed {} tokens, Accepted {}/{} speculations.",
+                    spec_len, accepted_count, spec_len
+                );
                 InferenceLogger::global().record_log(log_msg);
             }
 
@@ -1485,8 +1771,12 @@ impl InferenceEngine {
             let final_seq_len = tokens.len() - 1;
             for layer_idx in 0..num_layers {
                 if let (Some(k), Some(v)) = (&key_caches[layer_idx], &value_caches[layer_idx]) {
-                    let k_trimmed = k.clone().slice([0..final_seq_len, 0..num_kv_heads, 0..head_dim]);
-                    let v_trimmed = v.clone().slice([0..final_seq_len, 0..num_kv_heads, 0..head_dim]);
+                    let k_trimmed =
+                        k.clone()
+                            .slice([0..final_seq_len, 0..num_kv_heads, 0..head_dim]);
+                    let v_trimmed =
+                        v.clone()
+                            .slice([0..final_seq_len, 0..num_kv_heads, 0..head_dim]);
                     key_caches[layer_idx] = Some(k_trimmed);
                     value_caches[layer_idx] = Some(v_trimmed);
                 }
@@ -1494,14 +1784,28 @@ impl InferenceEngine {
 
             // Save computed prefix KV cache state to disk for future reuse after steps_run == 1
             if steps_run == 1 {
-                let initial_prefill_end = if tokens.len() > 1 { tokens.len() - 2 } else { 0 };
+                let initial_prefill_end = if tokens.len() > 1 {
+                    tokens.len() - 2
+                } else {
+                    0
+                };
                 if initial_prefill_end > 0 {
                     let mut keys_to_save = Vec::new();
                     let mut values_to_save = Vec::new();
                     for layer_idx in 0..num_layers {
-                        if let (Some(k_tensor), Some(v_tensor)) = (&key_caches[layer_idx], &value_caches[layer_idx]) {
-                            let k_sliced = k_tensor.clone().slice([0..initial_prefill_end, 0..num_kv_heads, 0..head_dim]);
-                            let v_sliced = v_tensor.clone().slice([0..initial_prefill_end, 0..num_kv_heads, 0..head_dim]);
+                        if let (Some(k_tensor), Some(v_tensor)) =
+                            (&key_caches[layer_idx], &value_caches[layer_idx])
+                        {
+                            let k_sliced = k_tensor.clone().slice([
+                                0..initial_prefill_end,
+                                0..num_kv_heads,
+                                0..head_dim,
+                            ]);
+                            let v_sliced = v_tensor.clone().slice([
+                                0..initial_prefill_end,
+                                0..num_kv_heads,
+                                0..head_dim,
+                            ]);
                             keys_to_save.push(k_sliced.into_data().value);
                             values_to_save.push(v_sliced.into_data().value);
                         }
@@ -1547,16 +1851,43 @@ impl InferenceEngine {
 
         let elapsed = start_time.elapsed().as_secs_f64();
         let tokens_gen = generated_tokens.len();
-        let tps = if elapsed > 0.0 { tokens_gen as f64 / elapsed } else { 0.0 };
+        let tps = if elapsed > 0.0 {
+            tokens_gen as f64 / elapsed
+        } else {
+            0.0
+        };
 
-        let completion = tokenizer.decode(&generated_tokens, true).map_err(|e| e.to_string())?;
+        let completion = tokenizer
+            .decode(&generated_tokens, true)
+            .map_err(|e| e.to_string())?;
 
-        let avg_exit_layer = if tokens_gen > 0 { total_exit_layers as f32 / tokens_gen as f32 } else { num_layers as f32 };
-        let avg_uncertainty = if tokens_gen > 0 { total_uncertainty_score / tokens_gen as f32 } else { 0.0 };
+        let avg_exit_layer = if tokens_gen > 0 {
+            total_exit_layers as f32 / tokens_gen as f32
+        } else {
+            num_layers as f32
+        };
+        let avg_uncertainty = if tokens_gen > 0 {
+            total_uncertainty_score / tokens_gen as f32
+        } else {
+            0.0
+        };
 
-        let speedup_ratio = if steps_run > 0 { tokens_gen as f64 / steps_run as f64 } else { 1.0 };
-        let log_msg = format!("✓ Generation complete! Generated {} tokens in {:.2}s ({:.2} tokens/sec) using {} parallel WGPU passes (Speedup Ratio: {:.2}x). Avg exit layer: {:.1}/{}. Avg uncertainty: {:.4}",
-            tokens_gen, elapsed, tps, steps_run, speedup_ratio, avg_exit_layer + 1.0, num_layers, avg_uncertainty);
+        let speedup_ratio = if steps_run > 0 {
+            tokens_gen as f64 / steps_run as f64
+        } else {
+            1.0
+        };
+        let log_msg = format!(
+            "✓ Generation complete! Generated {} tokens in {:.2}s ({:.2} tokens/sec) using {} parallel WGPU passes (Speedup Ratio: {:.2}x). Avg exit layer: {:.1}/{}. Avg uncertainty: {:.4}",
+            tokens_gen,
+            elapsed,
+            tps,
+            steps_run,
+            speedup_ratio,
+            avg_exit_layer + 1.0,
+            num_layers,
+            avg_uncertainty
+        );
         InferenceLogger::global().record_log(log_msg);
 
         Ok(InferenceResult {
@@ -1584,22 +1915,25 @@ mod tests {
         assert!(simple >= 0.1 && simple <= 0.6);
 
         // Technical query
-        let technical = estimate_query_complexity("implement a memory-mapped database in rust with safe compilation and error recovery");
+        let technical = estimate_query_complexity(
+            "implement a memory-mapped database in rust with safe compilation and error recovery",
+        );
         assert!(technical > simple);
     }
-
-
 
     #[test]
     fn test_inference_logger() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let logger = InferenceLogger::global();
         let initial_count = logger.get_logs(0).len();
-        
+
         logger.record_log("Test inference log entry".to_string());
         let logs = logger.get_logs(0);
         assert!(logs.len() > initial_count);
-        assert!(logs.iter().any(|entry| entry.message == "Test inference log entry"));
+        assert!(
+            logs.iter()
+                .any(|entry| entry.message == "Test inference log entry")
+        );
     }
 
     #[test]
@@ -1618,9 +1952,18 @@ mod tests {
 
         // Cache 1D mock tensors
         let dev = WgpuDevice::default();
-        let t1 = Tensor::<Wgpu, 1>::from_data(Data::new(vec![0.0f32; 10], Shape::from([10])).convert(), &dev); // 40 bytes
-        let t2 = Tensor::<Wgpu, 1>::from_data(Data::new(vec![0.0f32; 10], Shape::from([10])).convert(), &dev); // 40 bytes
-        let t3 = Tensor::<Wgpu, 1>::from_data(Data::new(vec![0.0f32; 10], Shape::from([10])).convert(), &dev); // 40 bytes
+        let t1 = Tensor::<Wgpu, 1>::from_data(
+            Data::new(vec![0.0f32; 10], Shape::from([10])).convert(),
+            &dev,
+        ); // 40 bytes
+        let t2 = Tensor::<Wgpu, 1>::from_data(
+            Data::new(vec![0.0f32; 10], Shape::from([10])).convert(),
+            &dev,
+        ); // 40 bytes
+        let t3 = Tensor::<Wgpu, 1>::from_data(
+            Data::new(vec![0.0f32; 10], Shape::from([10])).convert(),
+            &dev,
+        ); // 40 bytes
 
         // Insert first two (total 80 bytes, fits)
         cache.enforce_limits(40);
@@ -1708,14 +2051,16 @@ mod tests {
             assert_eq!(target_large, crate::planner::scheduler::BackendTarget::Gpu);
         }
     }
- 
+
     #[test]
     fn test_scheduler_cpu_entirely_flag() {
         let _guard = ENV_MUTEX.lock().unwrap();
         crate::inference::set_cpu_only(true);
         let scheduler = crate::planner::scheduler::HeterogeneousScheduler::new();
         let db = Arc::new(Database::new(None, 1536));
-        assert!(pollster::block_on(scheduler.should_use_cpu_entirely(&db, "tinyllama")));
+        assert!(pollster::block_on(
+            scheduler.should_use_cpu_entirely(&db, "tinyllama")
+        ));
         crate::inference::set_cpu_only(false);
     }
 
@@ -1770,14 +2115,35 @@ mod tests {
         write_dummy_weight("lm_head.weight", vocab_size * hidden_size);
         write_dummy_weight("model.norm.weight", hidden_size);
         write_dummy_weight("model.layers.0.input_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.q_proj.weight", (num_q_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.k_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.v_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.o_proj.weight", hidden_size * (num_q_heads * head_dim));
-        write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.mlp.gate_proj.weight", mlp_size * hidden_size);
+        write_dummy_weight(
+            "model.layers.0.self_attn.q_proj.weight",
+            (num_q_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.k_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.v_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.o_proj.weight",
+            hidden_size * (num_q_heads * head_dim),
+        );
+        write_dummy_weight(
+            "model.layers.0.post_attention_layernorm.weight",
+            hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.mlp.gate_proj.weight",
+            mlp_size * hidden_size,
+        );
         write_dummy_weight("model.layers.0.mlp.up_proj.weight", mlp_size * hidden_size);
-        write_dummy_weight("model.layers.0.mlp.down_proj.weight", hidden_size * mlp_size);
+        write_dummy_weight(
+            "model.layers.0.mlp.down_proj.weight",
+            hidden_size * mlp_size,
+        );
 
         crate::storage::storage_manifest::write_mock_manifest(
             &temp_dir,
@@ -1796,21 +2162,38 @@ mod tests {
         }
 
         // Enable simulated failure environment variable and bypass planner cache hits
-        unsafe { std::env::set_var("BRAMHA_SIMULATE_GPU_FAILURE", "true"); }
-        unsafe { std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only"); }
+        unsafe {
+            std::env::set_var("BRAMHA_SIMULATE_GPU_FAILURE", "true");
+        }
+        unsafe {
+            std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only");
+        }
 
         // Run generation which starts on WGPU and should failover midway to CPU transparently
-        let result = InferenceEngine::new(None).generate(db, "fallback-mock-model", "hi", 10, 0.0, None, None).await;
+        let result = InferenceEngine::new(None)
+            .generate(db, "fallback-mock-model", "hi", 10, 0.0, None, None)
+            .await;
 
         // Clean up environment and temp directory
-        unsafe { std::env::remove_var("BRAMHA_SIMULATE_GPU_FAILURE"); }
-        unsafe { std::env::remove_var("BRAMHA_PLANNER_MODE"); }
+        unsafe {
+            std::env::remove_var("BRAMHA_SIMULATE_GPU_FAILURE");
+        }
+        unsafe {
+            std::env::remove_var("BRAMHA_PLANNER_MODE");
+        }
         let _ = std::fs::remove_dir_all(temp_dir);
 
-        assert!(result.is_ok(), "Midway GPU failure did not fall back successfully: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Midway GPU failure did not fall back successfully: {:?}",
+            result.err()
+        );
         let info = result.unwrap();
         assert!(info.tokens_generated > 0);
-        println!("Seamless midway CPU fallback succeeded! Generated {} tokens", info.tokens_generated);
+        println!(
+            "Seamless midway CPU fallback succeeded! Generated {} tokens",
+            info.tokens_generated
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1826,12 +2209,23 @@ mod tests {
         let db_arc = Arc::new(db);
 
         // Pre-cache a deterministic reply
-        let cache = crate::storage::answer_cache::DeterministicAnswerCache::load_from_path(&test_cache_file);
-        cache.insert("cached query", "some-model", &[], "direct cache hit reply".to_string()).unwrap();
+        let cache = crate::storage::answer_cache::DeterministicAnswerCache::load_from_path(
+            &test_cache_file,
+        );
+        cache
+            .insert(
+                "cached query",
+                "some-model",
+                &[],
+                "direct cache hit reply".to_string(),
+            )
+            .unwrap();
 
         // Query the engine. The planner should immediately select CachedAnswer and return without actual generation.
-        let result = InferenceEngine::new(None).generate(db_arc, "some-model", "cached query", 10, 0.0, None, None).await;
-        
+        let result = InferenceEngine::new(None)
+            .generate(db_arc, "some-model", "cached query", 10, 0.0, None, None)
+            .await;
+
         // Clean up
         let _ = std::fs::remove_file(&test_cache_file);
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -1855,7 +2249,7 @@ mod tests {
         let mut db = Database::new(None, 1536);
         db.planner_cache_path = Some(test_cache_file.clone());
         let db = Arc::new(db);
-        
+
         // Mock a model inside the Database for generation
         let mut tokenizer_src = std::path::PathBuf::new();
         let candidate_paths = [
@@ -1899,7 +2293,10 @@ mod tests {
         write_dummy_weight("model.layers.0.self_attn.k_proj.weight", 16 * 64);
         write_dummy_weight("model.layers.0.self_attn.v_proj.weight", 16 * 64);
         write_dummy_weight("model.layers.0.self_attn.o_proj.weight", 64 * 64);
-        write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
+        write_dummy_weight(
+            "model.layers.0.post_attention_layernorm.weight",
+            hidden_size,
+        );
         write_dummy_weight("model.layers.0.mlp.gate_proj.weight", 64 * 64);
         write_dummy_weight("model.layers.0.mlp.up_proj.weight", 64 * 64);
         write_dummy_weight("model.layers.0.mlp.down_proj.weight", 64 * 64);
@@ -1921,17 +2318,40 @@ mod tests {
         }
 
         // Pre-cache deterministic reply
-        let cache = crate::storage::answer_cache::DeterministicAnswerCache::load_from_path(&test_cache_file);
-        cache.insert("query text", "planner-exact-mock-model", &[], "pre-cached text reply".to_string()).unwrap();
+        let cache = crate::storage::answer_cache::DeterministicAnswerCache::load_from_path(
+            &test_cache_file,
+        );
+        cache
+            .insert(
+                "query text",
+                "planner-exact-mock-model",
+                &[],
+                "pre-cached text reply".to_string(),
+            )
+            .unwrap();
 
         // 1. Force exact-only mode via environment variable
-        unsafe { std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only"); }
+        unsafe {
+            std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only");
+        }
 
         // The planner should bypass the cache hit and execute actual generation
-        let result = InferenceEngine::new(None).generate(db, "planner-exact-mock-model", "query text", 5, 0.0, None, None).await;
-        
+        let result = InferenceEngine::new(None)
+            .generate(
+                db,
+                "planner-exact-mock-model",
+                "query text",
+                5,
+                0.0,
+                None,
+                None,
+            )
+            .await;
+
         // Clean up
-        unsafe { std::env::remove_var("BRAMHA_PLANNER_MODE"); }
+        unsafe {
+            std::env::remove_var("BRAMHA_PLANNER_MODE");
+        }
         let _ = std::fs::remove_file(&test_cache_file);
         let _ = std::fs::remove_dir_all(temp_dir);
 
@@ -1941,5 +2361,3 @@ mod tests {
         assert!(info.tokens_generated > 0);
     }
 }
-
-

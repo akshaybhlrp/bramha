@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTier {
@@ -53,7 +53,8 @@ impl MemoryManager {
         let temp_path = self.file_path.with_extension("tmp");
         {
             let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
-            file.write_all(serialized.as_bytes()).map_err(|e| e.to_string())?;
+            file.write_all(serialized.as_bytes())
+                .map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| e.to_string())?;
         }
         std::fs::rename(temp_path, &self.file_path).map_err(|e| e.to_string())?;
@@ -106,8 +107,11 @@ impl MemoryManager {
     pub fn proactive_inject(&self, prompt: &str, now_ms: u64) -> (String, Vec<String>) {
         let memories = self.load_memories();
         let mut candidates = Vec::new();
-        let stopwords = ["the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as"];
-        let prompt_words: Vec<String> = prompt.to_lowercase()
+        let stopwords = [
+            "the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as",
+        ];
+        let prompt_words: Vec<String> = prompt
+            .to_lowercase()
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_string())
             .filter(|w| !w.is_empty() && !stopwords.contains(&w.as_str()))
@@ -121,7 +125,8 @@ impl MemoryManager {
                 MemoryTier::Episodic => 0.005,
                 MemoryTier::Semantic => 0.0005,
             };
-            let decayed_confidence = (entry.confidence * (-decay_rate * elapsed_sec).exp()).max(0.0);
+            let decayed_confidence =
+                (entry.confidence * (-decay_rate * elapsed_sec).exp()).max(0.0);
 
             // 2. Keyword relevance
             let content_lower = entry.content.to_lowercase();
@@ -150,7 +155,7 @@ impl MemoryManager {
 
         let mut injected_prompts = Vec::new();
         let mut decision_logs = Vec::new();
-        
+
         // Pick top 2 memories
         for (entry, score) in candidates.iter().take(2) {
             injected_prompts.push(format!(
@@ -164,13 +169,15 @@ impl MemoryManager {
         }
 
         if injected_prompts.is_empty() {
-            (prompt.to_string(), vec!["No relevant memories found to inject".to_string()])
+            (
+                prompt.to_string(),
+                vec!["No relevant memories found to inject".to_string()],
+            )
         } else {
             let merged_prompt = format!("{}\n{}", injected_prompts.join("\n"), prompt);
             (merged_prompt, decision_logs)
         }
     }
-
 
     /// Apply forgetting curves with different decay rates per tier
     /// score = confidence * exp(-decay_rate * (now - last_accessed))
@@ -178,7 +185,7 @@ impl MemoryManager {
         let mut memories = self.load_memories();
         for entry in memories.values_mut() {
             let elapsed_sec = ((now_ms.saturating_sub(entry.last_accessed_ms)) as f64) / 1000.0;
-            
+
             // Tier-specific decay rates (Episodic decays faster than Semantic)
             let decay_rate = match entry.tier {
                 MemoryTier::Working => 0.05,    // Fast decay
@@ -238,14 +245,16 @@ impl MemoryManager {
     pub fn detect_contradiction(&self, new_fact: &str) -> Option<MemoryEntry> {
         let memories = self.load_memories();
         let new_fact_clean = new_fact.to_lowercase();
-        
-        let stopwords = ["the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as"];
+
+        let stopwords = [
+            "the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as",
+        ];
         let new_fact_words: std::collections::HashSet<String> = new_fact_clean
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_string())
             .filter(|w| !w.is_empty() && !stopwords.contains(&w.as_str()))
             .collect();
-            
+
         if new_fact_words.is_empty() {
             return None;
         }
@@ -258,22 +267,36 @@ impl MemoryManager {
                     .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_string())
                     .filter(|w| !w.is_empty() && !stopwords.contains(&w.as_str()))
                     .collect();
-                
+
                 // Calculate word overlap ratio
-                let intersection: std::collections::HashSet<_> = new_fact_words.intersection(&entry_words).cloned().collect();
-                let overlap = intersection.len() as f32 / new_fact_words.len().min(entry_words.len()) as f32;
-                
+                let intersection: std::collections::HashSet<_> =
+                    new_fact_words.intersection(&entry_words).cloned().collect();
+                let overlap =
+                    intersection.len() as f32 / new_fact_words.len().min(entry_words.len()) as f32;
+
                 // If there's high overlap, check if there's a negation contradiction
                 if overlap >= 0.4 {
                     // Check if one contains negation words and the other does not
-                    let negations = ["not", "no", "never", "cannot", "isn't", "aren't", "won't", "don't", "doesn't", "false", "incorrect"];
+                    let negations = [
+                        "not",
+                        "no",
+                        "never",
+                        "cannot",
+                        "isn't",
+                        "aren't",
+                        "won't",
+                        "don't",
+                        "doesn't",
+                        "false",
+                        "incorrect",
+                    ];
                     let new_has_neg = negations.iter().any(|&neg| new_fact_clean.contains(neg));
                     let entry_has_neg = negations.iter().any(|&neg| entry_clean.contains(neg));
-                    
+
                     if new_has_neg != entry_has_neg {
                         return Some(entry.clone());
                     }
-                    
+
                     // Direct antonym pairs check (e.g. true vs false, enable vs disable, hot vs cold)
                     let antonyms = [
                         ("true", "false"),
@@ -288,11 +311,11 @@ impl MemoryManager {
                         ("success", "failure"),
                         ("successful", "failed"),
                     ];
-                    
+
                     for (a, b) in antonyms {
                         let has_a = new_fact_clean.contains(a) || entry_clean.contains(a);
                         let has_b = new_fact_clean.contains(b) || entry_clean.contains(b);
-                        
+
                         if has_a && has_b {
                             let new_has_a = new_fact_clean.contains(a);
                             let entry_has_a = entry_clean.contains(a);
@@ -370,7 +393,7 @@ mod tests {
         // 2. Retrieve & Reinforce manually
         let retrieved = manager.retrieve_memory("mem_1", now + 1000).unwrap();
         assert_eq!(retrieved.usage_count, 2);
-        
+
         manager.reinforce_memory("mem_1", 0.15).unwrap();
         let reinforced = manager.load_memories().get("mem_1").unwrap().clone();
         assert!((reinforced.confidence - 0.95).abs() < 1e-9);
@@ -424,4 +447,3 @@ mod tests {
         let _ = std::fs::remove_file(&manager.file_path);
     }
 }
-

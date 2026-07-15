@@ -1,14 +1,21 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Operator {
-    #[serde(rename = "$eq")] Eq,
-    #[serde(rename = "$ne")] Ne,
-    #[serde(rename = "$gt")] Gt,
-    #[serde(rename = "$lt")] Lt,
-    #[serde(rename = "$gte")] Gte,
-    #[serde(rename = "$lte")] Lte,
-    #[serde(rename = "$in")] In,
+    #[serde(rename = "$eq")]
+    Eq,
+    #[serde(rename = "$ne")]
+    Ne,
+    #[serde(rename = "$gt")]
+    Gt,
+    #[serde(rename = "$lt")]
+    Lt,
+    #[serde(rename = "$gte")]
+    Gte,
+    #[serde(rename = "$lte")]
+    Lte,
+    #[serde(rename = "$in")]
+    In,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -45,11 +52,15 @@ impl Filter {
         match self {
             Filter::Logical(logical) => match logical {
                 LogicalFilter::And(filters) => {
-                    if filters.is_empty() { return true; }
+                    if filters.is_empty() {
+                        return true;
+                    }
                     filters.iter().all(|f| f.matches(metadata))
                 }
                 LogicalFilter::Or(filters) => {
-                    if filters.is_empty() { return false; }
+                    if filters.is_empty() {
+                        return false;
+                    }
                     filters.iter().any(|f| f.matches(metadata))
                 }
                 LogicalFilter::Not(filter) => !filter.matches(metadata),
@@ -63,8 +74,13 @@ impl Filter {
                 match comp.operator {
                     Operator::Eq => field_value == &comp.value,
                     Operator::Ne => field_value != &comp.value,
-                    Operator::Gt => compare_values(field_value, &comp.value) == Some(std::cmp::Ordering::Greater),
-                    Operator::Lt => compare_values(field_value, &comp.value) == Some(std::cmp::Ordering::Less),
+                    Operator::Gt => {
+                        compare_values(field_value, &comp.value)
+                            == Some(std::cmp::Ordering::Greater)
+                    }
+                    Operator::Lt => {
+                        compare_values(field_value, &comp.value) == Some(std::cmp::Ordering::Less)
+                    }
                     Operator::Gte => matches!(
                         compare_values(field_value, &comp.value),
                         Some(std::cmp::Ordering::Greater) | Some(std::cmp::Ordering::Equal)
@@ -90,7 +106,9 @@ impl Filter {
         match self {
             Filter::Logical(logical) => match logical {
                 LogicalFilter::And(filters) => {
-                    if filters.is_empty() { return ("1=1".to_string(), vec![]); }
+                    if filters.is_empty() {
+                        return ("1=1".to_string(), vec![]);
+                    }
                     let mut parts = Vec::new();
                     let mut params = Vec::new();
                     for f in filters {
@@ -101,7 +119,9 @@ impl Filter {
                     (parts.join(" AND "), params)
                 }
                 LogicalFilter::Or(filters) => {
-                    if filters.is_empty() { return ("1=0".to_string(), vec![]); }
+                    if filters.is_empty() {
+                        return ("1=0".to_string(), vec![]);
+                    }
                     let mut parts = Vec::new();
                     let mut params = Vec::new();
                     for f in filters {
@@ -119,7 +139,7 @@ impl Filter {
             Filter::Comparison(comp) => {
                 let json_path = format!("$.{}", comp.field);
                 let col = format!("json_extract(metadata, '{}')", json_path);
-                
+
                 match comp.operator {
                     Operator::Eq => (format!("{} = ?", col), vec![comp.value.clone()]),
                     Operator::Ne => (format!("{} != ?", col), vec![comp.value.clone()]),
@@ -155,12 +175,12 @@ fn get_nested_value<'a>(
             _ => return None,
         };
     }
-    
+
     // We need to return a reference to the actual value in the map, so we lookup in map directly if possible, or build it
     // To avoid lifetime issues since we cloned during descent, let's trace from raw reference:
     let mut current_ref = map.get(field_path.split('.').next()?);
     let rest_parts = &field_path.split('.').collect::<Vec<&str>>()[1..];
-    
+
     for part in rest_parts {
         current_ref = match current_ref {
             Some(serde_json::Value::Object(m)) => m.get(*part),

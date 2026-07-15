@@ -1,7 +1,7 @@
+use bramha::inference::engine::InferenceEngine;
+use bramha::storage::Database;
 /// Simple benchmarking script to test GPU (WGPU) inference performance with profiling
 use std::sync::Arc;
-use bramha::storage::Database;
-use bramha::inference::engine::InferenceEngine;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,7 +30,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test with the first available model
     let model_name = {
         let tensor_guard = db.tensor_db.read().await;
-        tensor_guard.models.keys().next().cloned().unwrap_or_default()
+        tensor_guard
+            .models
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_default()
     };
 
     if model_name.is_empty() {
@@ -49,7 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Remove speculative decoding target since we want actual model output
 
-
     // Run inference using generate_wgpu — bypasses the scheduler's CPU-only routing
     // and directly uses the WGPU GPU backend with unlimited VRAM cache
     match InferenceEngine::generate_wgpu(
@@ -60,7 +64,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         0.0, // temperature (greedy)
         None,
         None,
-    ).await {
+    )
+    .await
+    {
         Ok(result) => {
             println!("\n✅ GPU Inference Complete!");
             println!("───────────────────────────────────────────────────────────");
@@ -71,11 +77,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("\n📄 Completion:\n{}\n", result.completion);
 
             if result.tokens_per_second >= 100.0 {
-                println!("🎉 GPU TARGET MET! {:.2} tps >= 100.0 tps", result.tokens_per_second);
+                println!(
+                    "🎉 GPU TARGET MET! {:.2} tps >= 100.0 tps",
+                    result.tokens_per_second
+                );
             } else if result.tokens_per_second >= 50.0 {
-                println!("✓ Good GPU performance: {:.2} tps (target: 100+ tps)", result.tokens_per_second);
+                println!(
+                    "✓ Good GPU performance: {:.2} tps (target: 100+ tps)",
+                    result.tokens_per_second
+                );
             } else {
-                println!("⚠️ Below GPU target: {:.2} tps (target: 100+ tps)", result.tokens_per_second);
+                println!(
+                    "⚠️ Below GPU target: {:.2} tps (target: 100+ tps)",
+                    result.tokens_per_second
+                );
             }
         }
         Err(e) => {

@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChatTurn {
@@ -47,14 +47,15 @@ impl SessionStore {
     /// Saves all sessions to storage using an atomic crash-safe write
     pub fn save_all(&self, sessions: &HashMap<String, Session>) -> Result<(), String> {
         let serialized = serde_json::to_string_pretty(sessions).map_err(|e| e.to_string())?;
-        
+
         let temp_path = self.file_path.with_extension("tmp");
         {
             let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
-            file.write_all(serialized.as_bytes()).map_err(|e| e.to_string())?;
+            file.write_all(serialized.as_bytes())
+                .map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| e.to_string())?;
         }
-        
+
         std::fs::rename(temp_path, &self.file_path).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -124,6 +125,4 @@ mod tests {
         assert!(deleted);
         let _ = std::fs::remove_file(&store.file_path);
     }
-
-
 }

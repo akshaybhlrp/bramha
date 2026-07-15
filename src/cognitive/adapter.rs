@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 
 pub trait ModelAdapter {
     fn name(&self) -> &str;
@@ -197,11 +197,12 @@ impl BackendCapabilityProfile {
             _ => 4.0, // F32
         };
         let estimated_size_bytes = (layers * hidden_dim * hidden_dim * 6) as f64 * bytes_per_param;
-        
+
         // Model fits if VRAM has sufficient headroom, and individual layer tensor weights don't exceed storage buffer limits
         let layer_weight_bytes = (hidden_dim * hidden_dim) as f64 * bytes_per_param;
 
-        estimated_size_bytes < self.max_vram_bytes as f64 && layer_weight_bytes < self.max_storage_buffer_binding_size as f64
+        estimated_size_bytes < self.max_vram_bytes as f64
+            && layer_weight_bytes < self.max_storage_buffer_binding_size as f64
     }
 }
 
@@ -229,21 +230,21 @@ impl AdapterManager {
         };
         let hidden_dim = 4096;
         let mut lora_weights = HashMap::new();
-        
+
         // Initialize weights for 32 layers, for both q_proj and v_proj
         for layer_idx in 0..32 {
             for module in &metadata.target_modules {
                 let key = format!("model.layers.{}.self_attn.{}", layer_idx, module);
-                
+
                 // lora_A initialized with small random values to break symmetry
                 let mut lora_a = vec![0.0f32; metadata.rank as usize * hidden_dim];
                 for val in &mut lora_a {
                     *val = (rand::random::<f32>() - 0.5) / (metadata.rank as f32).sqrt();
                 }
-                
+
                 // lora_B initialized to zero to ensure zero identity transform at start
                 let lora_b = vec![0.0f32; hidden_dim * metadata.rank as usize];
-                
+
                 lora_weights.insert(key, (lora_a, lora_b));
             }
         }
@@ -267,9 +268,11 @@ impl AdapterManager {
         learning_rate: f32,
         batch_size: usize,
     ) -> Result<(), String> {
-        let (lora_a, lora_b) = self.lora_weights.get_mut(key)
+        let (lora_a, lora_b) = self
+            .lora_weights
+            .get_mut(key)
             .ok_or_else(|| format!("Layer weights for {} not found", key))?;
-        
+
         let r = self.metadata.rank as usize;
         let d = self.hidden_dim;
         let n = batch_size;
@@ -351,8 +354,8 @@ impl AdapterManager {
     pub fn train_on_activations(
         &mut self,
         layer_key: &str,
-        inputs: &[Vec<f32>],     // Batch of inputs (each is size hidden_dim)
-        targets: &[Vec<f32>],    // Batch of targets/outputs (each is size hidden_dim)
+        inputs: &[Vec<f32>],  // Batch of inputs (each is size hidden_dim)
+        targets: &[Vec<f32>], // Batch of targets/outputs (each is size hidden_dim)
         learning_rate: f32,
         epochs: usize,
     ) -> Result<f32, String> {
@@ -377,7 +380,9 @@ impl AdapterManager {
         let mut avg_loss = 0.0;
 
         for _epoch in 0..epochs {
-            let (lora_a, lora_b) = self.lora_weights.get(layer_key)
+            let (lora_a, lora_b) = self
+                .lora_weights
+                .get(layer_key)
                 .ok_or_else(|| format!("Layer {} not found", layer_key))?;
 
             // Z = X * A^T (n x r)
@@ -490,23 +495,26 @@ mod tests {
     fn test_adapter_learning_pipeline() {
         let mut manager = AdapterManager::load_from_config("dummy/path").unwrap();
         let key = "model.layers.0.self_attn.q_proj";
-        
+
         // Create dummy inputs
-        let inputs = vec![
-            vec![1.0f32; 4096],
-            vec![0.5f32; 4096],
-        ];
-        
+        let inputs = vec![vec![1.0f32; 4096], vec![0.5f32; 4096]];
+
         // Targets are simulated target outputs of the LoRA projection
-        let targets = vec![
-            vec![0.1f32; 4096],
-            vec![0.05f32; 4096],
-        ];
+        let targets = vec![vec![0.1f32; 4096], vec![0.05f32; 4096]];
 
         // 1. Initial training should succeed and reduce loss
-        let loss_start = manager.train_on_activations(key, &inputs, &targets, 0.01, 1).unwrap();
-        let loss_end = manager.train_on_activations(key, &inputs, &targets, 0.01, 10).unwrap();
-        
-        assert!(loss_end < loss_start, "Loss should decrease from start {} to end {}", loss_start, loss_end);
+        let loss_start = manager
+            .train_on_activations(key, &inputs, &targets, 0.01, 1)
+            .unwrap();
+        let loss_end = manager
+            .train_on_activations(key, &inputs, &targets, 0.01, 10)
+            .unwrap();
+
+        assert!(
+            loss_end < loss_start,
+            "Loss should decrease from start {} to end {}",
+            loss_start,
+            loss_end
+        );
     }
 }

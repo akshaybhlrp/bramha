@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# bramha
-=======
 # Bramha — Local-First Intelligence Database
 
 ## What Is Bramha
@@ -177,4 +174,3 @@ See [Bramha Neural Engine — Master Roadmap v8.0.md](./Bramha%20Neural%20Engine
 ---
 
 *Last updated: 2026-07-10*
->>>>>>> 1a68dea (feat: initialize bramha project with cognitive, storage, and inference engine architecture)

@@ -1,9 +1,9 @@
-use bramha::storage::chunker::Chunker;
 use bramha::storage::block_db::BlockDB;
+use bramha::storage::chunker::Chunker;
 use bramha::storage::model_view::{ModelView, VirtualTensor};
-use bramha::storage::storage_manifest::{ModelManifest, CompressionFormat};
-use std::path::PathBuf;
+use bramha::storage::storage_manifest::{CompressionFormat, ModelManifest};
 use std::fs;
+use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -26,16 +26,28 @@ fn main() {
     for (name, meta) in &manifest.layers {
         // Construct the file path for this layer
         let mut file_path = manifest_dir.join(name.replace(".", "_"));
-        
+
         // Append correct extension based on format
         match meta.compression_format {
-            CompressionFormat::None => { file_path.set_extension("bin"); }
-            CompressionFormat::Int4PerChannel => { file_path.set_extension("u4.bin"); }
-            CompressionFormat::Int8Linear => { file_path.set_extension("u8.bin"); }
-            CompressionFormat::Svd => { file_path.set_extension("svd.bin"); }
-            CompressionFormat::ColumnarDict => { file_path.set_extension("columnar.bin"); }
-            
-            _ => { file_path.set_extension("bin"); }
+            CompressionFormat::None => {
+                file_path.set_extension("bin");
+            }
+            CompressionFormat::Int4PerChannel => {
+                file_path.set_extension("u4.bin");
+            }
+            CompressionFormat::Int8Linear => {
+                file_path.set_extension("u8.bin");
+            }
+            CompressionFormat::Svd => {
+                file_path.set_extension("svd.bin");
+            }
+            CompressionFormat::ColumnarDict => {
+                file_path.set_extension("columnar.bin");
+            }
+
+            _ => {
+                file_path.set_extension("bin");
+            }
         };
 
         if !file_path.exists() {

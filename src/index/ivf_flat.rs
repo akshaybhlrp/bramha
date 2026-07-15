@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
-use rayon::prelude::*;
 use crate::core::collection::{Collection, SearchResult};
-use crate::core::filter::Filter;
 use crate::core::distance::l2_distance;
+use crate::core::filter::Filter;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusteringAnalytics {
@@ -38,7 +38,11 @@ impl IvfFlatIndex {
         }
 
         let vec_ids: Vec<String> = collection.vectors.keys().cloned().collect();
-        let vec_data: Vec<Vec<f32>> = collection.vectors.values().map(|v| v.values.clone()).collect();
+        let vec_data: Vec<Vec<f32>> = collection
+            .vectors
+            .values()
+            .map(|v| v.values.clone())
+            .collect();
 
         // 1. Compute cluster centroids using K-Means
         let centroids = crate::index::kmeans::kmeans(
@@ -89,7 +93,7 @@ impl IvfFlatIndex {
             let sample_keys: Vec<String> = collection.vectors.keys().cloned().collect();
             let num_samples = std::cmp::min(5, sample_keys.len());
             let mut total_recall = 0.0;
-            
+
             // Build temporary index for validation
             let temp_idx = IvfFlatIndex {
                 num_clusters: actual_k,
@@ -100,15 +104,17 @@ impl IvfFlatIndex {
                 recall_at_k: 1.0,
                 analytics: None,
             };
-            
+
             for key in sample_keys.iter().take(num_samples) {
                 if let Some(v) = collection.vectors.get(key) {
                     let exact_res = collection.search(&v.values, 5, None, false);
-                    let exact_ids: std::collections::HashSet<String> = exact_res.iter().map(|r| r.id.clone()).collect();
-                    
+                    let exact_ids: std::collections::HashSet<String> =
+                        exact_res.iter().map(|r| r.id.clone()).collect();
+
                     let ann_res = temp_idx.search(collection, &v.values, 5, None, None);
-                    let ann_ids: std::collections::HashSet<String> = ann_res.iter().map(|r| r.id.clone()).collect();
-                    
+                    let ann_ids: std::collections::HashSet<String> =
+                        ann_res.iter().map(|r| r.id.clone()).collect();
+
                     if !exact_ids.is_empty() {
                         let matches = exact_ids.intersection(&ann_ids).count() as f32;
                         total_recall += matches / exact_ids.len() as f32;
@@ -128,7 +134,8 @@ impl IvfFlatIndex {
             for i in 0..actual_k {
                 let bucket = &buckets[i];
                 if !bucket.is_empty() {
-                    let sum_dist: f32 = bucket.iter()
+                    let sum_dist: f32 = bucket
+                        .iter()
                         .map(|id| collection.vectors.get(id).unwrap())
                         .map(|v| l2_distance(&v.values, &centroids[i]))
                         .sum();
@@ -165,7 +172,7 @@ impl IvfFlatIndex {
 
             for key in sample_keys.iter().take(num_sil_samples) {
                 let target_v = collection.vectors.get(key).unwrap();
-                
+
                 // Find which cluster the target vector belongs to
                 let mut own_cluster_idx = 0;
                 for i in 0..actual_k {
@@ -178,7 +185,8 @@ impl IvfFlatIndex {
                 // Compute a(i): average distance to other vectors in the same cluster
                 let own_bucket = &buckets[own_cluster_idx];
                 let a = if own_bucket.len() > 1 {
-                    let sum_a: f32 = own_bucket.iter()
+                    let sum_a: f32 = own_bucket
+                        .iter()
                         .filter(|id| *id != key)
                         .map(|id| collection.vectors.get(id).unwrap())
                         .map(|v| l2_distance(&target_v.values, &v.values))
@@ -194,7 +202,8 @@ impl IvfFlatIndex {
                     if j != own_cluster_idx {
                         let other_bucket = &buckets[j];
                         if !other_bucket.is_empty() {
-                            let sum_b: f32 = other_bucket.iter()
+                            let sum_b: f32 = other_bucket
+                                .iter()
                                 .map(|id| collection.vectors.get(id).unwrap())
                                 .map(|v| l2_distance(&target_v.values, &v.values))
                                 .sum();
@@ -209,11 +218,7 @@ impl IvfFlatIndex {
 
                 // Compute silhouette value s(i)
                 let max_ab = a.max(b);
-                let s = if max_ab > 1e-5 {
-                    (b - a) / max_ab
-                } else {
-                    0.0
-                };
+                let s = if max_ab > 1e-5 { (b - a) / max_ab } else { 0.0 };
                 total_s += s;
             }
             sil_score = total_s / num_sil_samples as f32;
@@ -226,7 +231,11 @@ impl IvfFlatIndex {
         } else {
             1.0
         };
-        let imbalance_ratio = if avg_size > 0.0 { max_size / avg_size } else { 1.0 };
+        let imbalance_ratio = if avg_size > 0.0 {
+            max_size / avg_size
+        } else {
+            1.0
+        };
 
         let analytics = Some(ClusteringAnalytics {
             davies_bouldin_index: db_index,
@@ -259,7 +268,8 @@ impl IvfFlatIndex {
         }
 
         // 1. Find the top n_probe closest centroids to the query vector
-        let mut centroid_dists: Vec<(usize, f32)> = self.centroids
+        let mut centroid_dists: Vec<(usize, f32)> = self
+            .centroids
             .iter()
             .enumerate()
             .map(|(c_idx, centroid)| {
@@ -271,7 +281,7 @@ impl IvfFlatIndex {
 
         // Sort centroids: closest (smallest L2 distance) first
         centroid_dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         let factor = match collection.tuning_profile {
             crate::core::collection::TuningProfile::LowLatency => 0.05,
             crate::core::collection::TuningProfile::Balanced => 0.15,
@@ -279,7 +289,7 @@ impl IvfFlatIndex {
         };
         let auto_probes = (self.centroids.len() as f32 * factor).round() as usize;
         let final_probes = std::cmp::max(1, auto_probes);
-        
+
         let probes = std::cmp::min(final_probes, self.centroids.len());
         let probe_centroids: Vec<usize> = centroid_dists
             .iter()
@@ -325,9 +335,17 @@ impl IvfFlatIndex {
 
         // 4. Sort according to collection metric rules
         if collection.metric.is_ascending() {
-            results.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         } else {
-            results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         results.truncate(k);
@@ -338,13 +356,13 @@ impl IvfFlatIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vector::{Vector, Metric};
     use crate::core::collection::TuningProfile;
+    use crate::core::vector::{Metric, Vector};
 
     #[test]
     fn test_ivf_diagnostics_and_profiles() {
         let mut collection = Collection::new("test_ivf_diag".to_string(), 4, Metric::L2);
-        
+
         // Add 20 deterministic vectors
         for i in 0..20 {
             let val = i as f32;

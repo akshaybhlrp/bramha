@@ -76,7 +76,6 @@ impl ResearchGraph {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_temporal_graph_filtering() {

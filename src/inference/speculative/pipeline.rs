@@ -31,7 +31,6 @@ impl SpeculativePipeline {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_speculative_rejection_sampling() {

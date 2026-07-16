@@ -91,7 +91,7 @@ pub struct ModelMetadata {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum SpandaTensor {
     Dense(Vec<f32>),
-    BlockSparse_2_4 {
+    BlockSparse2_4 {
         masks: Vec<u16>,
         nonzero_values: Vec<f32>,
     },

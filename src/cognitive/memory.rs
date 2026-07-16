@@ -119,7 +119,6 @@ impl MemoryManager {
         Ok(())
     }
 
-
     /// Search memory tiers automatically, score candidates by relevance/recency/confidence,
     /// and silently inject the top ones into the prompt. Logs injection decisions.
     pub fn proactive_inject(&self, prompt: &str, now_ms: u64) -> (String, Vec<String>) {
@@ -271,13 +270,16 @@ impl MemoryManager {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
                 println!("🧠 [Consolidation Worker] Running periodic memory promotion...");
-                
+
                 let mut memories = manager.load_memories();
                 let mut promoted = 0;
 
                 for entry in memories.values_mut() {
                     // Promote Episodic memories with high usage and high confidence
-                    if entry.tier == MemoryTier::Episodic && entry.usage_count >= 5 && entry.confidence > 0.85 {
+                    if entry.tier == MemoryTier::Episodic
+                        && entry.usage_count >= 5
+                        && entry.confidence > 0.85
+                    {
                         entry.tier = MemoryTier::Semantic;
                         entry.confidence = 1.0; // Maximize confidence on promotion
                         promoted += 1;
@@ -286,9 +288,15 @@ impl MemoryManager {
 
                 if promoted > 0 {
                     if let Err(e) = manager.save_memories(&memories) {
-                        eprintln!("⚠️ [Consolidation Worker] Failed to save promoted memories: {}", e);
+                        eprintln!(
+                            "⚠️ [Consolidation Worker] Failed to save promoted memories: {}",
+                            e
+                        );
                     } else {
-                        println!("✅ [Consolidation Worker] Successfully promoted {} memories to Semantic Tier.", promoted);
+                        println!(
+                            "✅ [Consolidation Worker] Successfully promoted {} memories to Semantic Tier.",
+                            promoted
+                        );
                     }
                 }
             }
@@ -533,13 +541,18 @@ mod tests {
         manager.insert_memory(entry).unwrap();
 
         // Perform retraction
-        manager.retract_memory("mem_retract_test", "Fact proven false").unwrap();
+        manager
+            .retract_memory("mem_retract_test", "Fact proven false")
+            .unwrap();
 
         let memories = manager.load_memories();
         let retracted_entry = memories.get("mem_retract_test").unwrap();
         assert!(retracted_entry.retracted);
         assert_eq!(retracted_entry.confidence, 0.0);
-        assert_eq!(retracted_entry.retraction_reason.as_deref(), Some("Fact proven false"));
+        assert_eq!(
+            retracted_entry.retraction_reason.as_deref(),
+            Some("Fact proven false")
+        );
 
         // Verify proactive inject skips it
         let prompt = "Fact to retract";
@@ -549,4 +562,3 @@ mod tests {
         let _ = std::fs::remove_file(&manager.file_path);
     }
 }
-

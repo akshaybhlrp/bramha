@@ -201,8 +201,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             k,
                         )?;
 
-                        let mut combined =
-                            Vec::with_capacity((out_features * actual_rank + actual_rank * in_features) * 4);
+                        let mut combined = Vec::with_capacity(
+                            (out_features * actual_rank + actual_rank * in_features) * 4,
+                        );
                         combined.extend_from_slice(bytemuck::cast_slice(&a));
                         combined.extend_from_slice(bytemuck::cast_slice(&b));
 

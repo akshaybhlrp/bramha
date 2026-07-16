@@ -80,7 +80,9 @@ mod tests {
             .method("POST")
             .header("Authorization", "Bearer write_key")
             .header("Content-Type", "application/json")
-            .body(axum::body::Body::from(serde_json::to_vec(&payload).unwrap()))
+            .body(axum::body::Body::from(
+                serde_json::to_vec(&payload).unwrap(),
+            ))
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
@@ -95,7 +97,10 @@ mod tests {
         let memories = memory_manager.load_memories();
         let entry = memories.get("mem_api_test").unwrap();
         assert!(entry.retracted);
-        assert_eq!(entry.retraction_reason.as_deref(), Some("Test retraction api"));
+        assert_eq!(
+            entry.retraction_reason.as_deref(),
+            Some("Test retraction api")
+        );
 
         let _ = std::fs::remove_file(memory_file);
         let _ = std::fs::remove_file(db_path);

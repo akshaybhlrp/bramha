@@ -10,8 +10,8 @@ pub mod prefill_cache;
 pub mod profiler;
 pub mod reranker;
 pub mod sparse_predictor;
-pub mod tokenizer;
 pub mod speculative;
+pub mod tokenizer;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

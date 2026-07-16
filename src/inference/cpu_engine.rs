@@ -2302,7 +2302,7 @@ async fn generate_cpu_inner_logits(
         let prompt: &str = &prompt_str;
 
     // DB-First Optimization: Inference Materialized Views / Answer Caching
-    // If the exact prompt has been pre-computed by the database or stored, 
+    // If the exact prompt has been pre-computed by the database or stored,
     // retrieve it instantly without spinning up the vector pipeline!
     // This is natively active, demonstrating DB-first query interception.
 
@@ -2431,7 +2431,7 @@ async fn generate_cpu_inner_logits(
         let db_read = db.tensor_db.read().await;
         let model = db_read.models.get(model_name)
             .ok_or_else(|| format!("Model '{}' not found in database. Ingest model first.", model_name))?;
-        
+
         let mlp_size = model.layers.get("model.layers.0.mlp.gate_proj.weight")
             .or_else(|| model.layers.get("model.layers.0.mlp.up_proj.weight"))
             .or_else(|| model.layers.get("model.layers.0.mlp.experts.0.gate_proj.weight"))
@@ -2587,7 +2587,7 @@ async fn generate_cpu_inner_logits(
     // Loop through the prompt tokens to prefill the KV Cache
     let initial_prefill_start = prefix_len;
     let initial_prefill_end = if tokens.len() > 1 { tokens.len() - 1 } else { 0 };
-    
+
     if is_black_hole_prompt {
         // Just resize layer 0's KV cache to match initial_prefill_end tokens
         let size = initial_prefill_end * num_kv_heads * head_dim;
@@ -2596,14 +2596,14 @@ async fn generate_cpu_inner_logits(
     } else if initial_prefill_start < initial_prefill_end {
         let log_msg = format!("📦 Block-Prefilling user query prompt tokens (index {} to {})...", initial_prefill_start, initial_prefill_end);
         InferenceLogger::global().record_log(log_msg);
-        
+
         let chunk_size = 64; // Block size for CPU Flash Attention and GEMM
         let mut pos = initial_prefill_start;
-        
+
         while pos < initial_prefill_end {
             let end_pos = (pos + chunk_size).min(initial_prefill_end);
             let block_size = end_pos - pos;
-            
+
             // Gather embeddings for block
             let mut x_block = vec![0.0f32; block_size * hidden_size];
             for i in 0..block_size {
@@ -2612,7 +2612,7 @@ async fn generate_cpu_inner_logits(
                 let emb_slice = &embed_tokens[safe_token_id * hidden_size .. (safe_token_id + 1) * hidden_size];
                 x_block[i * hidden_size .. (i + 1) * hidden_size].copy_from_slice(emb_slice);
             }
-            
+
             for layer_idx in 0..num_layers {
                 {
                     let db_read = db.tensor_db.read().await;
@@ -2620,14 +2620,14 @@ async fn generate_cpu_inner_logits(
                         prefetcher.prefetch_layers(model_name, &db, layer_idx, num_layers, prefetcher.get_adaptive_depth()).await;
                     }
                 }
-                
+
                 // Multi-tier storage runtime integration
                 {
                     let db_read = db.tensor_db.read().await;
                     if let Ok(mut mt) = db_read.multi_tier.lock() {
                         let layer_id = format!("model.layers.{}", layer_idx);
                         let _ = mt.access_layer(&layer_id);
-                        
+
                         if layer_idx + 1 < num_layers {
                             let next_layers = ((layer_idx + 1)..num_layers)
                                 .take(mt.config.prefetch_distance)
@@ -2640,17 +2640,17 @@ async fn generate_cpu_inner_logits(
                         }
                     }
                 }
-                
+
                 let cloned_pages = load_and_clone_layer_pages(&db, model_name, layer_idx).await?;
                 let lw = cloned_pages.resolve()?;
-                
+
                 // RMS Norm for block
                 let mut h_block = vec![0.0f32; block_size * hidden_size];
                 for i in 0..block_size {
                     let row = rms_norm_cpu(&x_block[i * hidden_size .. (i + 1) * hidden_size], lw.input_layernorm_weight, rms_norm_eps);
                     h_block[i * hidden_size .. (i + 1) * hidden_size].copy_from_slice(&row);
                 }
-                
+
                 // Q, K, V block projections via GEMM
                 let mut q_block = if block_size == 1 {
                     let (m_n, l_n) = if crate::inference::is_cpu_only() { (None, None) } else { (Some(model_name), Some(format!("model.layers.{}.self_attn.q_proj.weight", layer_idx))) };
@@ -2676,23 +2676,23 @@ async fn generate_cpu_inner_logits(
                 };
                 if let Some(b) = lw.v_proj_bias { for i in 0..block_size { for j in 0..(num_kv_heads * head_dim) { v_block[i * (num_kv_heads * head_dim) + j] += b[j]; } } }
 
-                
+
                 // Apply RoPE for block
                 for i in 0..block_size {
                     apply_rope_cpu(&mut q_block[i * num_q_heads * head_dim .. (i + 1) * num_q_heads * head_dim], pos + i, num_q_heads, head_dim, rope_theta);
                     apply_rope_cpu(&mut k_block[i * num_kv_heads * head_dim .. (i + 1) * num_kv_heads * head_dim], pos + i, num_kv_heads, head_dim, rope_theta);
                 }
-                
+
                 // Append KV to cache immediately (with Attention Sink eviction)
                 kv_caches[layer_idx].append_and_evict(&k_block, &v_block, num_kv_heads, head_dim);
-                
+
                 // Flash Attention Calculation
                 let context_block = flash_attention_cpu(
                     &q_block, &kv_caches[layer_idx].keys, &kv_caches[layer_idx].values,
                     block_size, pos + block_size,
                     num_q_heads, num_kv_heads, head_dim, pos
                 );
-                
+
                 // Output Projection
                 let attn_out_block = if block_size == 1 {
                     let (m_n, l_n) = if crate::inference::is_cpu_only() { (None, None) } else { (Some(model_name), Some(format!("model.layers.{}.self_attn.o_proj.weight", layer_idx))) };
@@ -2704,7 +2704,7 @@ async fn generate_cpu_inner_logits(
                     if let Some(b) = lw.o_proj_bias { for i in 0..block_size { for j in 0..hidden_size { o_proj[i * hidden_size + j] += b[j]; } } }
                     o_proj
                 };
-                
+
                 // Residual + MLP for block
                 for i in 0..block_size {
                     let x_row = &mut x_block[i * hidden_size .. (i + 1) * hidden_size];
@@ -2712,9 +2712,9 @@ async fn generate_cpu_inner_logits(
                     for d in 0..hidden_size {
                         x_row[d] += attn_row[d];
                     }
-                    
+
                     let h2 = rms_norm_cpu(x_row, lw.post_attention_layernorm_weight, rms_norm_eps);
-                    
+
                     run_mlp_into(
                         &h2,
                         &lw,
@@ -2735,7 +2735,7 @@ async fn generate_cpu_inner_logits(
             }
             pos += chunk_size;
         }
-        
+
         // Save computed prefix KV cache state to disk for future reuse
         let mut keys_to_save = Vec::new();
         let mut values_to_save = Vec::new();
@@ -2772,7 +2772,7 @@ async fn generate_cpu_inner_logits(
     let mut scratch_head = vec![0.0f32; head_dim]; // For flash attention per-head
 
     let is_cpu = crate::inference::is_cpu_only();
-    
+
     let db_speculative_path: Option<Vec<u32>> = None;
 
     while generated_tokens.len() < max_new_tokens {
@@ -2820,7 +2820,7 @@ async fn generate_cpu_inner_logits(
                 if is_black_hole_prompt {
                     continue;
                 }
-                
+
                 // Multi-tier storage runtime integration + Pipeline stage tracking
                 {
                     let db_read = db.tensor_db.read().await;
@@ -2834,7 +2834,7 @@ async fn generate_cpu_inner_logits(
                                 let _ = mt.access_layer(&format!("pipeline.stage.{}", slot_id));
                             }
                         }
-                        
+
                         if layer_idx + 1 < num_layers {
                             let next_layers = ((layer_idx + 1)..num_layers)
                                 .take(mt.config.prefetch_distance)
@@ -2847,7 +2847,7 @@ async fn generate_cpu_inner_logits(
                         }
                     }
                 }
-                
+
                 let cloned_pages = load_and_clone_layer_pages(&db, model_name, layer_idx).await?;
                 let lw = cloned_pages.resolve()?;
 
@@ -2876,7 +2876,7 @@ async fn generate_cpu_inner_logits(
                         Some(model_name), Some(&format!("model.layers.{}.self_attn.v_proj.weight", layer_idx)));
                     scratch_v.copy_from_slice(&v);
                 }
-                
+
                 if let Some(b) = lw.q_proj_bias { for j in 0..scratch_q.len() { scratch_q[j] += b[j]; } }
                 if let Some(b) = lw.k_proj_bias { for j in 0..scratch_k.len() { scratch_k[j] += b[j]; } }
                 if let Some(b) = lw.v_proj_bias { for j in 0..scratch_v.len() { scratch_v[j] += b[j]; } }
@@ -3026,7 +3026,7 @@ async fn generate_cpu_inner_logits(
             }
 
             if std::env::var("BRAMHA_TRACE").is_ok() {
-                println!("🔍 [Trace] Generation Step: {}, Token ID: {}, Temperature: {}", 
+                println!("🔍 [Trace] Generation Step: {}, Token ID: {}, Temperature: {}",
                          generated_tokens.len(), token_id, temperature);
             }
 
@@ -3053,23 +3053,23 @@ async fn generate_cpu_inner_logits(
         // ═══════════════════════════════════════════════════════════════
         let mut loop_tokens = vec![tokens[tokens.len() - 1]];
         loop_tokens.extend_from_slice(&speculated_tokens);
-        
+
         let mut next_generated_tokens = Vec::new();
         let mut accepted_count = 0;
-        
+
         let block_size = spec_len + 1;
         let mut x_block = vec![0.0f32; block_size * hidden_size];
         let mut spec_mlp_out = vec![0.0f32; hidden_size];
-        
+
         for step_idx in 0..block_size {
             let token_id = loop_tokens[step_idx];
             let safe_token_id = token_id as usize % vocab_size;
             let emb_slice = &embed_tokens[safe_token_id * hidden_size .. (safe_token_id + 1) * hidden_size];
             x_block[step_idx * hidden_size .. (step_idx + 1) * hidden_size].copy_from_slice(emb_slice);
         }
-        
+
         let start_pos = tokens.len() - 1;
-        
+
         for layer_idx in 0..num_layers {
             {
                 let db_read = db.tensor_db.read().await;
@@ -3080,13 +3080,13 @@ async fn generate_cpu_inner_logits(
 
             let cloned_pages = load_and_clone_layer_pages(&db, model_name, layer_idx).await?;
             let lw = cloned_pages.resolve()?;
-            
+
             let mut h_block = vec![0.0f32; block_size * hidden_size];
             for i in 0..block_size {
                 let row = rms_norm_cpu(&x_block[i * hidden_size .. (i + 1) * hidden_size], lw.input_layernorm_weight, rms_norm_eps);
                 h_block[i * hidden_size .. (i + 1) * hidden_size].copy_from_slice(&row);
             }
-            
+
             let mut q_block = gemm_cpu(&h_block, &lw.q_proj_weight, block_size, hidden_size, num_q_heads * head_dim);
             if let Some(b) = lw.q_proj_bias { for i in 0..block_size { for j in 0..(num_q_heads * head_dim) { q_block[i * (num_q_heads * head_dim) + j] += b[j]; } } }
 
@@ -3096,34 +3096,34 @@ async fn generate_cpu_inner_logits(
             let mut v_block = gemm_cpu(&h_block, &lw.v_proj_weight, block_size, hidden_size, num_kv_heads * head_dim);
             if let Some(b) = lw.v_proj_bias { for i in 0..block_size { for j in 0..(num_kv_heads * head_dim) { v_block[i * (num_kv_heads * head_dim) + j] += b[j]; } } }
 
-            
+
             for i in 0..block_size {
                 apply_rope_cpu(&mut q_block[i * num_q_heads * head_dim .. (i + 1) * num_q_heads * head_dim], start_pos + i, num_q_heads, head_dim, rope_theta);
                 apply_rope_cpu(&mut k_block[i * num_kv_heads * head_dim .. (i + 1) * num_kv_heads * head_dim], start_pos + i, num_kv_heads, head_dim, rope_theta);
             }
-            
+
             kv_caches[layer_idx].append_and_evict(&k_block, &v_block, num_kv_heads, head_dim);
-            
+
             let kv_len = kv_caches[layer_idx].keys.len() / (num_kv_heads * head_dim);
-            
+
             let context_block = flash_attention_cpu(
                 &q_block, &kv_caches[layer_idx].keys, &kv_caches[layer_idx].values,
                 block_size, kv_len,
                 num_q_heads, num_kv_heads, head_dim, start_pos
             );
-            
+
             let mut attn_out_block = gemm_cpu(&context_block, &lw.o_proj_weight, block_size, hidden_size, hidden_size);
             if let Some(b) = lw.o_proj_bias { for i in 0..block_size { for j in 0..hidden_size { attn_out_block[i * hidden_size + j] += b[j]; } } }
-            
+
             for i in 0..block_size {
                 let x_row = &mut x_block[i * hidden_size .. (i + 1) * hidden_size];
                 let attn_row = &attn_out_block[i * hidden_size .. (i + 1) * hidden_size];
                 for d in 0..hidden_size {
                     x_row[d] += attn_row[d];
                 }
-                
+
                 let h2 = rms_norm_cpu(x_row, lw.post_attention_layernorm_weight, rms_norm_eps);
-                
+
                 run_mlp_into(
                     &h2,
                     &lw,
@@ -3142,10 +3142,10 @@ async fn generate_cpu_inner_logits(
                 }
             }
         }
-        
+
         for step_idx in 0..=spec_len {
             let x_row = &x_block[step_idx * hidden_size .. (step_idx + 1) * hidden_size];
-            
+
             let final_x = rms_norm_cpu(x_row, norm_weight, rms_norm_eps);
             let mut current_logits = matvec_mul(&final_x, &lm_head_weight, vocab_size, Some(model_name), Some("lm_head.weight"));
 
@@ -3211,7 +3211,7 @@ async fn generate_cpu_inner_logits(
 
         let mut got_eos = false;
         let final_count = accepted_count + 1;
-        
+
         let final_processed_seq_len = tokens.len() + accepted_count;
         for layer_idx in 0..num_layers {
             kv_caches[layer_idx].keys.truncate(final_processed_seq_len * num_kv_heads * head_dim);

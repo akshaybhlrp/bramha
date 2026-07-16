@@ -2541,7 +2541,7 @@ pub async fn get_cognitive_graph(
     // 4. Add dynamic SubGoal/GoalGraph if a prompt is provided
     if let Some(ref prompt) = query.prompt {
         let graph = crate::cognitive::goal_graph::GoalGraph::new(prompt, 3);
-        
+
         // Add prompt node
         let prompt_id = "prompt_query".to_string();
         nodes.push(GraphNode {
@@ -2587,4 +2587,3 @@ pub async fn get_cognitive_graph(
 
     Ok(Json(GraphVisualizationResponse { nodes, edges }))
 }
-

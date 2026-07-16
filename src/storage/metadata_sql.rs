@@ -44,8 +44,10 @@ impl MetadataSqlStore {
     fn initialize_db(&self) -> Result<(), String> {
         let conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
         // Enable high-concurrency WAL mode and SQLite index creations
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
-            .map_err(|e| format!("SQLite pragma err: {}", e))?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
+        )
+        .map_err(|e| format!("SQLite pragma err: {}", e))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS planner_traces (

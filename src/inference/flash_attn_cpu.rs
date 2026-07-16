@@ -1,5 +1,5 @@
 /// CPU Flash Attention Implementation
-/// 
+///
 /// This module implements a block-wise O(N) memory attention mechanism
 /// for the CPU backend, replacing the O(N^2) memory footprint of naive attention.
 ///
@@ -15,17 +15,12 @@ impl FlashAttentionCPU {
     /// - `q`: Query vector [head_dim]
     /// - `k`: Key cache [seq_len, head_dim]
     /// - `v`: Value cache [seq_len, head_dim]
-    /// 
+    ///
     /// Returns the attention output vector [head_dim].
-    pub fn forward(
-        &self,
-        q: &[f32],
-        k: &[Vec<f32>],
-        v: &[Vec<f32>],
-    ) -> Vec<f32> {
+    pub fn forward(&self, q: &[f32], k: &[Vec<f32>], v: &[Vec<f32>]) -> Vec<f32> {
         let seq_len = k.len();
         let head_dim = q.len();
-        
+
         let mut out = vec![0.0; head_dim];
         if seq_len == 0 {
             return out;
@@ -39,7 +34,7 @@ impl FlashAttentionCPU {
 
         for i in (0..seq_len).step_by(block_size) {
             let end = std::cmp::min(i + block_size, seq_len);
-            
+
             // 1. QK^T for block
             let mut scores = vec![0.0; end - i];
             let mut local_max = f32::NEG_INFINITY;
@@ -59,7 +54,7 @@ impl FlashAttentionCPU {
             // 2. Online softmax update
             let new_max = block_max.max(local_max);
             let prev_scale = (block_max - new_max).exp();
-            
+
             let mut local_sum = 0.0;
             for j in 0..(end - i) {
                 scores[j] = (scores[j] - new_max).exp();
@@ -72,7 +67,7 @@ impl FlashAttentionCPU {
             // 3. Update output vector with V
             for d in 0..head_dim {
                 out[d] *= prev_scale; // Rescale previous output
-                
+
                 let mut v_sum = 0.0;
                 for j in 0..(end - i) {
                     v_sum += scores[j] * v[i + j][d];
@@ -101,7 +96,7 @@ mod tests {
         let q = vec![1.0, 0.0];
         let k = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
         let v = vec![vec![0.5, 0.0], vec![0.0, 0.5]];
-        
+
         let out = attn.forward(&q, &k, &v);
         assert_eq!(out.len(), 2);
     }

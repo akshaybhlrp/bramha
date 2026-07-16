@@ -31,13 +31,14 @@ impl EvidenceMapper {
             for (chunk_id, chunk_text) in retrieved_chunks {
                 let chunk_tokens: HashSet<&str> = chunk_text.split_whitespace().collect();
                 let intersection = sentence_tokens.intersection(&chunk_tokens).count();
-                
+
                 if sentence_tokens.is_empty() {
                     continue;
                 }
 
                 let score = intersection as f32 / sentence_tokens.len() as f32;
-                if score > 0.3 { // Threshold for considering it "supported"
+                if score > 0.3 {
+                    // Threshold for considering it "supported"
                     supporting_chunks.push(chunk_id.clone());
                     if score > best_score {
                         best_score = score;
@@ -71,11 +72,17 @@ mod tests {
     fn test_evidence_overlap_mapping_generation() {
         let mapper = EvidenceMapper::new();
         let chunks = vec![
-            ("chunk1".to_string(), "The quick brown fox jumps over the lazy dog".to_string()),
-            ("chunk2".to_string(), "Rust is a systems programming language".to_string()),
+            (
+                "chunk1".to_string(),
+                "The quick brown fox jumps over the lazy dog".to_string(),
+            ),
+            (
+                "chunk2".to_string(),
+                "Rust is a systems programming language".to_string(),
+            ),
         ];
         let completion = "The quick brown fox jumps. Rust is great.";
-        
+
         let maps = mapper.map_evidence(completion, &chunks);
         assert_eq!(maps.len(), 2);
         assert!(maps[0].supporting_chunk_ids.contains(&"chunk1".to_string()));

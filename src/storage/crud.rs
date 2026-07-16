@@ -1,5 +1,5 @@
 use super::metadata_sql::MetadataSqlStore;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
@@ -136,7 +136,9 @@ impl MetadataSqlStore {
     pub fn get_document(&self, id: &str) -> Result<Option<Document>, String> {
         let conn = Connection::open(self.db_path()).map_err(|e| e.to_string())?;
         let mut stmt = conn
-            .prepare("SELECT id, collection_id, name, content, created_at FROM documents WHERE id = ?1")
+            .prepare(
+                "SELECT id, collection_id, name, content, created_at FROM documents WHERE id = ?1",
+            )
             .map_err(|e| e.to_string())?;
         let mut rows = stmt.query(params![id]).map_err(|e| e.to_string())?;
 
@@ -316,7 +318,9 @@ impl MetadataSqlStore {
     pub fn get_model(&self, id: &str) -> Result<Option<Model>, String> {
         let conn = Connection::open(self.db_path()).map_err(|e| e.to_string())?;
         let mut stmt = conn
-            .prepare("SELECT id, architecture, parameters, path, created_at FROM models WHERE id = ?1")
+            .prepare(
+                "SELECT id, architecture, parameters, path, created_at FROM models WHERE id = ?1",
+            )
             .map_err(|e| e.to_string())?;
         let mut rows = stmt.query(params![id]).map_err(|e| e.to_string())?;
 
@@ -333,7 +337,13 @@ impl MetadataSqlStore {
         }
     }
 
-    pub fn update_model(&self, id: &str, architecture: &str, parameters: i64, path: &str) -> Result<(), String> {
+    pub fn update_model(
+        &self,
+        id: &str,
+        architecture: &str,
+        parameters: i64,
+        path: &str,
+    ) -> Result<(), String> {
         let conn = Connection::open(self.db_path()).map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE models SET architecture = ?1, parameters = ?2, path = ?3 WHERE id = ?4",

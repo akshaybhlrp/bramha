@@ -29,10 +29,7 @@ impl ResearchGraph {
     }
 
     /// Executes multi-hop retrieval by resolving goals in dependency order.
-    pub fn execute_multi_hop(
-        &self,
-        filters: &[MetadataFilter],
-    ) -> Result<Vec<String>, String> {
+    pub fn execute_multi_hop(&self, filters: &[MetadataFilter]) -> Result<Vec<String>, String> {
         let mut resolved = Vec::new();
         let mut pending = self.goals.values().collect::<Vec<_>>();
         let mut max_hops = 10; // Prevent infinite loops

@@ -56,7 +56,9 @@ pub fn randomized_svd(
     let svd = b.svd(true, true);
     let u_hat = svd.u.ok_or("Failed to compute SVD U-factor".to_string())?;
     let singular_values = svd.singular_values;
-    let v_t = svd.v_t.ok_or("Failed to compute SVD V^T-factor".to_string())?;
+    let v_t = svd
+        .v_t
+        .ok_or("Failed to compute SVD V^T-factor".to_string())?;
 
     // 6. Compute U = Q @ u_hat
     let u = q * u_hat;
@@ -101,16 +103,8 @@ mod tests {
         // Create a rank-2 matrix of shape 4x4
         // W = U_true @ V_true^T
         // U_true: 4x2, V_true^T: 2x4
-        let a_true = [
-            1.0, 2.0,
-            3.0, 4.0,
-            5.0, 6.0,
-            7.0, 8.0,
-        ];
-        let b_true = [
-            0.5, 1.5, -0.5, 2.0,
-            -1.0, 0.0, 1.0, 0.5,
-        ];
+        let a_true = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let b_true = [0.5, 1.5, -0.5, 2.0, -1.0, 0.0, 1.0, 0.5];
 
         let mut w = vec![0.0f32; 16];
         for r in 0..4 {
@@ -144,7 +138,14 @@ mod tests {
         // Compare reconstruction vs original
         for i in 0..16 {
             let diff = (w[i] - w_approx[i]).abs();
-            assert!(diff < 1e-3, "Index {}: expected {}, got {}, diff {}", i, w[i], w_approx[i], diff);
+            assert!(
+                diff < 1e-3,
+                "Index {}: expected {}, got {}, diff {}",
+                i,
+                w[i],
+                w_approx[i],
+                diff
+            );
         }
     }
 }

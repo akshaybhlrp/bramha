@@ -16,6 +16,7 @@ pub mod cache_db;
 pub mod caching;
 pub mod chunker;
 pub mod content_addressing;
+pub mod crud;
 pub mod data_organization;
 pub mod disk;
 pub mod indexing;

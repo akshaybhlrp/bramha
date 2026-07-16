@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 
 use crate::storage::atomic_write::atomic_write_file;
+use crate::storage::metadata_sql::MetadataSqlStore;
 use crate::storage::tensor_db::TensorDB;
 
 pub struct RegistryEntry {
@@ -189,6 +190,31 @@ pub async fn pull_model(model_id: &str, tensor_db: &mut TensorDB) -> Result<(), 
     model_table
         .load_safetensors("model.safetensors")
         .map_err(|e| format!("Ingestion sharding failed: {}", e))?;
+
+    // Persist model metadata to SQLite metadata DB
+    let metadata_store = MetadataSqlStore::new();
+    let architecture = if model_id.contains("qwen") {
+        "Qwen2"
+    } else if model_id.contains("mistral") {
+        "Mistral"
+    } else {
+        "Llama"
+    };
+    let params_count = if model_id.contains("0.5b") {
+        500_000_000
+    } else if model_id.contains("1.1b") {
+        1_100_000_000
+    } else if model_id.contains("7b") {
+        7_000_000_000
+    } else {
+        0
+    };
+    let _ = metadata_store.create_model(
+        model_id,
+        architecture,
+        params_count,
+        &model_dir.to_string_lossy(),
+    );
 
     // Cleanup raw safetensors file after ingestion completes
     let _ = std::fs::remove_file(final_model_path);

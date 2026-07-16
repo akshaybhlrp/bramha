@@ -1,3 +1,17 @@
+//! # SPANDA Engine
+//!
+//! SPANDA is a standalone sparse inference backend. It implements the query-conditional
+//! sparse paging architecture to overcome the memory wall for LLMs.
+//!
+//! ## Implemented Phases (v7 Plan)
+//! - Phase 0: Bare Sparse Paging
+//! - Phase 1: RAM Offload Fallback
+//! - Phase 2: 4-Bit Logarithmic Quantization
+//! - Phase 2.2: Trajectory Prefetch
+//! - Phase 3: Deferred
+//!
+//! For full architecture details, see `docs/SPANDA_Design.md`.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 

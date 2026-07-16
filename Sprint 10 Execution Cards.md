@@ -14,10 +14,10 @@ This document tracks the execution cards for Sprint 10, focusing on **Sparse Neu
 
 ---
 
-## Task S10-001: Phase 0 — Shadow Mode Entropy Scan
+## Task S10-001: Phase 0 — SPANDA-Bare Entropy Scan
 
 ### Title
-Implement Reference Block-Sparse Matmul & Shadow Mode Ingest Scan
+Implement Reference Block-Sparse Matmul & Bare Sparse Paging Ingest Scan
 
 ### Objective
 Build a reference static 2:4 block-sparse matmul kernel, verify its logit correctness offline against a golden dataset, and deploy a shadow mode predictor on 0.1% of traffic to evaluate safety before shipping.
@@ -65,7 +65,7 @@ Build a reference static 2:4 block-sparse matmul kernel, verify its logit correc
 
 ---
 
-## Task S10-002: Phase 1 — WGPU Armored Sparse Pager
+## Task S10-002: Phase 1 — RAM Offload Fallback
 
 ### Title
 Build WGPU 4x4 Block-Mask Pager with Checksum Guard and Circuit Breaker
@@ -211,7 +211,7 @@ Allow execution of models exceeding GPU VRAM by preloading weights to system RAM
 | Metric | Target | Status |
 |--------|--------|--------|
 | **P99 Latency Bound** | <= Dense Baseline + 15% | [x] Verified |
-| **Shadow Mode Agreement** | > 99% Top-1 Agreement | [x] Verified |
+| **Bare Sparse Paging Agreement** | > 99% Top-1 Agreement | [x] Verified |
 | **Prefetch Latency Win** | > 10.5% | [x] Verified |
 | **Gate Cosine Similarity** | >= 0.999 | [x] Verified |
 | **L3 Copy Latency** | <= 1.0ms | [x] Verified |

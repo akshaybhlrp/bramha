@@ -13,88 +13,60 @@
 
 ## 2. SPANDA Roadmap (Standalone)
 
-### Phase 0: Shadow Mode
-- **Objective**: Collect offline statistics on target production distributions.
-- **Deliverables**: Predictor component that runs shadow matmuls without routing.
-- **Gate**:
-  - Shadow mode runs on 0.1% traffic for 24h
-  - Top-1 token agreement > 99% on ≥95% of queries
-  - Zero impact to active model generation paths; predictor latency overhead < 2ms
-  - If gate fails: ship static 2:4 sparse, kill dynamic predictor
-- **Fallback**: Disable shadow mode instantly via runtime toggle.
-
-**Phase 0 Additional Gate — Memory Budget Validation** *(ds4-informed)*:
-> **Conversion-time memory budget validation.** The `spanda-tools` converter computes:
-> ```
-> pageable_cache_budget = 0.8 * target_gpu_mem - (resident_weights + kv_cache_max + activations + graph_scratch)
-> ```
-> If `pageable_cache_budget < minimum_working_set`, the conversion fails with a loud error. No runtime OOM guessing.
-
-**Why:** On a 4GB target, you cannot afford to discover at runtime that the model doesn't fit. ds4's startup log reports the lockable cache size and refuses to continue if `mlock` fails. SPANDA should be equally brutal at conversion time.
-
-**Phase 0/1 Cross-Gate — Golden Vector Regression Test** *(ds4-informed)*:
-> For the target model (Qwen2-0.5B initially), generate a reference logprob vector using a trusted reference (e.g., HuggingFace Transformers with greedy decoding). SPANDA must reproduce these logits within a defined tolerance on every commit. This test runs before any performance benchmark. If it drifts, the commit is rejected.
-
-**Why:** Phase 1's "decompressed weight MSE < 1e-5" is a weight-level check. You also need a **logit-level** check. ds4 validates at the logit layer because that's where quantization and paging bugs actually show up.
-
-### Phase 1: Armored WGPU Block-Sparse Pager (4x4 bitmasks, Checksum Guard)
-- **Objective**: Implement GPU-side page loader for block-sparse layers.
-- **Deliverables**: WGPU compute shader parsing 4x4 bitmasks. CRC32 checksum verification for blocks.
+### Phase 0: Bare Sparse Paging
+- **Objective**: Implement the foundational GPU-side page loader for query-conditional sparse paging. This supersedes the previous "Shadow Mode" and "Armored WGPU Block-Sparse Pager" as the initial step.
+- **Deliverables**: WGPU compute shader capable of handling sparse page faults and coalesced transfers.
 - **Gate**: Zero compilation errors; decompressed weight MSE < 1e-5 compared to raw tensors; golden vector logit tolerance passes.
-- **Fallback**: Route all inference to legacy full-dense mmap engine.
+- **Fallback**: Disable paging, load all weights statically.
 
-**Phase 1 Additional Gate — Tensor Classification** *(ds4-informed)*:
-> **Resident/Pageable classification must happen at conversion time, not runtime.** The `spanda-tools` converter tags each tensor:
-> - **Resident**: shared experts, projections, routing, attention — always in GPU memory, never evicted, highest precision.
-> - **Pageable**: routed MoE experts — conditionally accessed, lower precision, candidate for host/disk paging.
->
-> The inference engine refuses to page a `Resident` tensor. If the converter cannot classify a tensor, it defaults to `Resident` (conservative).
+### Phase 1: RAM Offload Fallback
+- **Objective**: Implement L3 RAM offloading as a fallback mechanism for when VRAM limits are reached.
+- **Deliverables**: Double-buffered swap chain utilizing async compute streams between host RAM and GPU VRAM.
+- **Gate**: P99 latency ≤ dense baseline +15%; Top-1 token agreement > 99% on golden dataset.
+- **Fallback**: Route all inference to legacy full-dense mmap engine or static sparse execution.
 
-**Why:** This prevents the "oops I paged the attention weights" bug that kills quality silently. ds4's 2-bit quants only hit routed experts for this exact reason.
+### Phase 2: 4-Bit Logarithmic Quantization
+- **Objective**: Implement fused dequantization for 4-bit logarithmic quants to reduce memory bandwidth.
+- **Deliverables**: Fused dequantization kernels within the pager.
+- **Gate**: Perplexity delta < 0.5% vs. 16-bit baseline; generation speedup > 1.2x.
+- **Fallback**: Ship Phase 1 only (unquantized sparse paging).
 
-### Phase 1.5: Simple Async Layer Prefetch *(ds4-informed)*
-- **Objective**: While GPU executes layer *i*, host async-copies `Pageable` tensors for layer *i+1* from storage into a pinned host buffer.
-- **Deliverables**: Async layer prefetcher with lookahead = 1. No trajectory prediction.
-- **Gate**: 80% of layer transitions have their next-layer weights ready before GPU sync.
-- **Fallback**: Synchronous lazy-loading with static hot-expert preload.
+### Phase 2.2: Trajectory Prefetch
+- **Objective**: Predict future layer accesses based on semantic caches and pre-stage pages.
+- **Deliverables**: A* trajectory prefetcher or simple async lookahead layer prefetch.
+- **Gate**: >80% hit rate for prefetched pages AND does not regress the P99 bound from Phase 1.
+- **Fallback**: Ship Phase 2 only (synchronous paging).
 
-**Why:** This is the prerequisite for Phase 2 A* prefetcher. If you cannot hide latency with a lookahead of 1, A* will not save you. ds4's prefetch is not A* — it is dead simple: while GPU runs layer *i*, CPU async-loads pageable tensors for layer *i+1* into host staging.
+### Phase 3: Self-Profiling, Dynamic Base, 3-bit Quant (Deferred / Never)
+- **Objective**: Advanced dynamic optimization and aggressive quantization.
+- **Status**: Deferred indefinitely to prioritize stability and core performance.
 
-### Phase 2: Prefetch Progression *(restructured, ds4-informed)*
+## Gate Discipline
 
-**Phase 2.0 — Static Hot-Expert Preload:**
-- Keep the top-N most frequently accessed expert pages resident in GPU memory. Page everything else on demand.
-- **Gate**: P99 latency ≤ dense baseline +15% with static preload.
-- **Fallback**: Ship Phase 1.5 only.
+**Rule:** Validate hypothesis before building. If a gate fails, ship the fallback. These gates are non-negotiable.
 
-**Phase 2.1 — Simple Async Prefetch:**
-- (Phase 1.5 gate must pass first.)
-- **Gate**: 80% of next-layer weights staged before GPU needs them.
-- **Fallback**: Ship Phase 2.0 only.
+| Phase | Gate Condition | Fallback if Failed |
+|---|---|---|
+| **Phase 0** | Bare sparse paging passes golden vector and MSE checks | Ship static 2:4 sparse or full-dense |
+| **Phase 1** | Latency ≤ baseline +15%, Top-1 agreement >99% | Ship Phase 0 only |
+| **Phase 2** | Perplexity delta < 0.5%, speedup > 1.2x | Ship Phase 1 only |
+| **Phase 2.2** | >80% prefetch hit rate, no latency regression | Ship Phase 2 only |
 
-**Phase 2.2 — A* Trajectory Prefetch:**
-- Only if Phase 2.0 and 2.1 gates pass.
-- A* pathfinder predicting future layer accesses based on semantic caches.
-- **Gate**: A* prefetcher achieves >80% hit rate AND does not regress the P99 bound from Phase 2.0.
-- **Fallback**: Ship highest passing phase. Do not proceed further.
+## 3. SPANDA Engine Deliverables
+- `spanda-convert` binary (converts models to the SPANDA format)
+- `spanda-calibrate` binary (calibration tool for sparsity and quantization)
+- `spanda-run` (or integrated `bramha-run`)
+- `model.spanda` file format specification
 
-**If any gate fails:** Ship the highest passing phase. Do not proceed to the next. ds4's fallback is `--ssd-streaming-preload-experts N` (static preload). SPANDA's fallback should be explicit static preload, not LRU.
+*Note*: The integration uses a Rust-only contract via the `spanda-engine` crate.
 
-### Phase 3: L3 RAM Offloading and Double-Buffered Swap
-- **Objective**: Coordinate memory swapping between host RAM, GPU VRAM, and L3 cache.
-- **Deliverables**: Double-buffered swap chain utilizing async compute streams.
-- **Gate**:
-  - P99 latency ≤ dense baseline +15%
-  - Top-1 token agreement > 99% on golden dataset
-  - Perplexity delta < 0.5% vs. dense
-- **Fallback**: Downgrade runtime to conservative static 2:4 sparse execution mode.
-
-## 3. Integration Contract
+## 3.1 Integration Contract
 - **Crate boundary**: `spanda-engine` vs `bramha-engine`
-- **API surface**: `spanda::InferenceSession` consumed by `bramha::InferenceOrchestrator`
+- **API surface**: `spanda::InferenceSession` consumed by `bramha::InferenceOrchestrator`. Public API like `generate()` exposed.
 - **Version pinning**: Bramha locks to a SPANDA release, not a branch
 
 ---
+
 
 ## 4. Bramha Neural Engine Roadmap (Standalone)
 

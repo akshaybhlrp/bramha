@@ -1,4 +1,4 @@
-/// WGPU Armored Sparse Pager
+/// WGPU Bare Sparse Paging
 /// Packs and unpacks 4x4 block masks into u16 bitmasks for efficient GPU memory transfers.
 
 pub struct SparseBlockMask {

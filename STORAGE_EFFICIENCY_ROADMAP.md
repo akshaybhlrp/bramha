@@ -478,14 +478,14 @@ Promote hot layers, demote cold layers in tiering system
 
 This track runs in parallel/sequence with Strategy 1.6 and 1.7 to integrate dynamic sparse weight prediction, optimized pagers, prefetching heuristics, and system RAM offloading.
 
-### Phase 0: Ingest & Entropy Scan (Shadow Mode)
+### Phase 0: Ingest & Entropy Scan (Bare Sparse Paging)
 - [ ] Build static 2:4 block-sparse reference matmul
 - [ ] Run golden dataset offline (verify top-1 agreement > 99% against dense baseline)
 - [ ] Shadow mode execution on 0.1% traffic for 24h
 - [ ] GATE: If cosine_similarity(dense_logits, sparse_logits) < 0.999 for > 5% of queries:
   - KILL dynamic sparse predictor, fallback to static 2:4 sparse model (Banker Mode).
 
-### Phase 1: The "Armored" Pager (Sparse GPU Loader)
+### Phase 1: RAM Offload Fallback
 - [ ] Build 4x4 block-mask pager in Rust + wgpu
 - [ ] Implement `crc32fast` checksum guard for hidden state validation
 - [ ] Implement circuit breaker + `bincode` compiler pipeline disk caching

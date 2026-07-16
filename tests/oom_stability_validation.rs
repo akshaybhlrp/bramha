@@ -80,6 +80,7 @@ mod tests {
         let req = hyper::Request::builder()
             .uri("http://localhost/api/stats")
             .method("GET")
+            .header("Authorization", "Bearer read_key")
             .body(http_body_util::Empty::<hyper::body::Bytes>::new())
             .expect("Request build failed");
 
@@ -106,7 +107,7 @@ mod tests {
                 // Submitting tasks directly to inference queue should succeed or fail cleanly with 429
                 let _ = db_clone
                     .inference_queue
-                    .submit("tinyllama".to_string(), prompt, 10, 0.0, None, None)
+                    .submit("tinyllama".to_string(), prompt, 10, 0.0, None, None, None)
                     .await;
             }));
         }

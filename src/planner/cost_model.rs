@@ -143,8 +143,15 @@ impl CostModel {
 mod tests {
     use super::*;
 
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_cost_model_relative_ordering() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        {
+            let mut params = CostModelParams::global().lock().unwrap();
+            *params = CostModelParams::default();
+        }
         let prompt = "Explain the heterogeneous scheduler in Bramha.";
         let max_tokens = 50;
         let complexity = 1.0;
@@ -249,6 +256,11 @@ mod tests {
 
     #[test]
     fn test_cost_model_recalibration_and_dynamic_routing() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        {
+            let mut params = CostModelParams::global().lock().unwrap();
+            *params = CostModelParams::default();
+        }
         let db_file = "storage/test_cost_model_recal.db";
         let _ = std::fs::remove_file(db_file);
 

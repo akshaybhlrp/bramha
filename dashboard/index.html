@@ -977,6 +977,83 @@
                             <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0;">
                                 Degraded mode simulates a sparse engine failure, forcing the router to dynamically fall back to the CPU engine. Running Test Inference automatically routes a block-sparse query.
                             </p>
+
+                            <!-- SPANDA v7 Metrics Panel -->
+                            <div id="spanda-metrics-panel" style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px; display: none;">
+                                <div style="font-size: 12px; font-weight: bold; color: var(--secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                    <span>⚙️ SPANDA v7 Telemetry</span>
+                                    <span style="font-size: 10px; background: rgba(34, 211, 238, 0.15); color: #22d3ee; padding: 1px 6px; border-radius: 8px;">Active</span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">VRAM Budget</div>
+                                        <div id="spanda-vram-budget" style="font-size: 13px; font-weight: bold; color: #fff; margin-top: 2px;">--</div>
+                                    </div>
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">Page Cache Hit</div>
+                                        <div id="spanda-cache-hit" style="font-size: 13px; font-weight: bold; color: var(--success); margin-top: 2px;">--</div>
+                                    </div>
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">L3 RAM Offload</div>
+                                        <div id="spanda-l3-offload" style="font-size: 13px; font-weight: bold; color: #fff; margin-top: 2px;">--</div>
+                                    </div>
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">RAM Swap Speed</div>
+                                        <div id="spanda-swap-speed" style="font-size: 13px; font-weight: bold; color: #fff; margin-top: 2px;">--</div>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 10px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 4px;">
+                                        <span style="color: var(--text-muted);">Sparse Page Cache Capacity</span>
+                                        <span id="spanda-page-count" style="color: #fff; font-weight: bold;">-- / 1024 pages</span>
+                                    </div>
+                                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden;">
+                                        <div id="spanda-page-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--secondary), #22d3ee); transition: width 0.3s ease;"></div>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 10px;">
+                                    <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">Sparse 2:4 Block Bitmask Activation Map (Live Projection)</div>
+                                    <div id="spanda-grid" style="display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; background: rgba(0,0,0,0.5); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <!-- Interactive block map cells will be injected here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section-title" style="margin-top: 20px;">Security & Access Control Simulator</div>
+                    <div class="form-card glass">
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                                <label style="font-size: 12px; color: var(--text-muted);">Active Simulation API Token:</label>
+                                <select id="api-key-simulator-select" style="background: rgba(0,0,0,0.3); color: var(--text); border: 1px solid var(--border-color); padding: 8px; border-radius: 6px;" onchange="updateSimulatedApiKey(this.value)">
+                                    <option value="admin_key">👑 Admin Token (admin_key)</option>
+                                    <option value="write_key">✍️ Write Token (write_key)</option>
+                                    <option value="read_key">📖 Read-Only Token (read_key)</option>
+                                    <option value="invalid_key">🚫 Invalid / Guest Token</option>
+                                </select>
+                            </div>
+                            
+                            <div style="border-top: 1px solid var(--border-color); margin-top: 8px; padding-top: 8px;">
+                                <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 8px;">Live Privilege Verification Tests:</label>
+                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                        <span style="font-size: 12px;">Read-Only (GET /api/collections)</span>
+                                        <span id="test-auth-read-status" style="font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: var(--text-muted);">Untested</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                        <span style="font-size: 12px;">Write (POST /api/collections)</span>
+                                        <span id="test-auth-write-status" style="font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: var(--text-muted);">Untested</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                                        <span style="font-size: 12px;">Admin (POST /api/llm/load_model)</span>
+                                        <span id="test-auth-admin-status" style="font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: var(--text-muted);">Untested</span>
+                                    </div>
+                                </div>
+                                <button class="btn btn-outline" style="margin-top: 10px; width: 100%; font-size: 12px; height: 32px;" onclick="runAccessControlVerification()">
+                                    🛡️ Run Authorization Verification Tests
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1269,6 +1346,9 @@
                                     <div id="tensor-ingest-progress-bar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.3s ease;"></div>
                                 </div>
                             </div>
+                            <div style="margin-top: 12px; padding: 10px; background: rgba(239, 68, 68, 0.1); border-left: 3px solid #ef4444; border-radius: 4px; font-size: 11px; line-height: 1.4; color: var(--text-muted);">
+                                🔒 <strong>Security Warning:</strong> Ingestion paths must be within the project workspace. Symlinks are forbidden and will be rejected.
+                            </div>
                         </div>
                     </div>
 
@@ -1357,11 +1437,123 @@
             if (url.toString().includes('/api')) {
                 options.headers = options.headers || {};
                 if (!options.headers['Authorization']) {
-                    options.headers['Authorization'] = 'Bearer admin_key';
+                    const token = localStorage.getItem('simulated_api_key') || 'admin_key';
+                    if (token !== 'none' && token !== 'invalid_key') {
+                        options.headers['Authorization'] = 'Bearer ' + token;
+                    } else if (token === 'invalid_key') {
+                        options.headers['Authorization'] = 'Bearer invalid_or_expired_token';
+                    }
                 }
             }
             return originalFetch(url, options);
         };
+
+        function updateSimulatedApiKey(token) {
+            localStorage.setItem('simulated_api_key', token);
+            showToast('Simulated API Key updated: ' + token, 'success');
+            
+            const readEl = document.getElementById('test-auth-read-status');
+            const writeEl = document.getElementById('test-auth-write-status');
+            const adminEl = document.getElementById('test-auth-admin-status');
+            if (readEl) {
+                readEl.textContent = 'Untested';
+                readEl.style.color = 'var(--text-muted)';
+                readEl.style.background = 'rgba(255,255,255,0.05)';
+            }
+            if (writeEl) {
+                writeEl.textContent = 'Untested';
+                writeEl.style.color = 'var(--text-muted)';
+                writeEl.style.background = 'rgba(255,255,255,0.05)';
+            }
+            if (adminEl) {
+                adminEl.textContent = 'Untested';
+                adminEl.style.color = 'var(--text-muted)';
+                adminEl.style.background = 'rgba(255,255,255,0.05)';
+            }
+            
+            runAccessControlVerification();
+        }
+
+        async function runAccessControlVerification() {
+            const readEl = document.getElementById('test-auth-read-status');
+            const writeEl = document.getElementById('test-auth-write-status');
+            const adminEl = document.getElementById('test-auth-admin-status');
+            
+            if (!readEl || !writeEl || !adminEl) return;
+            
+            function setStatusBadge(el, status, message) {
+                el.textContent = message;
+                if (status === 'success') {
+                    el.style.color = '#10b981';
+                    el.style.background = 'rgba(16, 185, 129, 0.15)';
+                } else if (status === 'forbidden') {
+                    el.style.color = '#f59e0b';
+                    el.style.background = 'rgba(245, 158, 11, 0.15)';
+                } else {
+                    el.style.color = '#ef4444';
+                    el.style.background = 'rgba(239, 68, 68, 0.15)';
+                }
+            }
+            
+            // 1. Test Read Endpoint
+            try {
+                readEl.textContent = "Testing...";
+                const res = await fetch(`${API_URL}/collections`);
+                if (res.status === 200) {
+                    setStatusBadge(readEl, 'success', 'Passed (200)');
+                } else if (res.status === 403) {
+                    setStatusBadge(readEl, 'forbidden', 'Forbidden (403)');
+                } else if (res.status === 401) {
+                    setStatusBadge(readEl, 'unauthorized', 'Unauthorized (401)');
+                } else {
+                    setStatusBadge(readEl, 'unauthorized', `Error (${res.status})`);
+                }
+            } catch (e) {
+                setStatusBadge(readEl, 'unauthorized', 'Network Error');
+            }
+            
+            // 2. Test Write Endpoint
+            try {
+                writeEl.textContent = "Testing...";
+                const res = await fetch(`${API_URL}/collections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                if (res.status === 400) {
+                    setStatusBadge(writeEl, 'success', 'Passed (400)');
+                } else if (res.status === 403) {
+                    setStatusBadge(writeEl, 'forbidden', 'Forbidden (403)');
+                } else if (res.status === 401) {
+                    setStatusBadge(writeEl, 'unauthorized', 'Unauthorized (401)');
+                } else {
+                    setStatusBadge(writeEl, 'unauthorized', `Error (${res.status})`);
+                }
+            } catch (e) {
+                setStatusBadge(writeEl, 'unauthorized', 'Network Error');
+            }
+            
+            // 3. Test Admin Endpoint
+            try {
+                adminEl.textContent = "Testing...";
+                const res = await fetch(`${API_URL}/llm/load_model`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                if (res.status === 400) {
+                    setStatusBadge(adminEl, 'success', 'Passed (400)');
+                } else if (res.status === 403) {
+                    setStatusBadge(adminEl, 'forbidden', 'Forbidden (403)');
+                } else if (res.status === 401) {
+                    setStatusBadge(adminEl, 'unauthorized', 'Unauthorized (401)');
+                } else {
+                    setStatusBadge(adminEl, 'unauthorized', `Error (${res.status})`);
+                }
+            } catch (e) {
+                setStatusBadge(adminEl, 'unauthorized', 'Network Error');
+            }
+        }
         
         function showToast(message, type = 'success') {
             const toast = document.getElementById("toast");
@@ -1587,24 +1779,59 @@
                     const statusEl = document.getElementById('spanda-health-status');
                     const toggleBtn = document.getElementById('spanda-toggle-degraded-btn');
                     
-                    if (data.healthy) {
-                        statusEl.textContent = 'Healthy';
+                    if (data.healthy && !data.degraded) {
+                        statusEl.textContent = 'Healthy (v7 Sparse Paging Active)';
                         statusEl.style.color = '#10b981';
                         if (toggleBtn) {
                             toggleBtn.textContent = 'Simulate SPANDA Degraded Mode';
                             toggleBtn.style.borderColor = '#f59e0b';
                             toggleBtn.style.color = '#f59e0b';
                         }
-                    } else {
-                        statusEl.textContent = 'Degraded';
-                        statusEl.style.color = '#ef4444';
+                    } else if (data.degraded) {
+                        statusEl.textContent = 'Degraded (Router Fallback Active)';
+                        statusEl.style.color = '#f59e0b';
                         if (toggleBtn) {
                             toggleBtn.textContent = 'Recover SPANDA Engine';
                             toggleBtn.style.borderColor = '#10b981';
                             toggleBtn.style.color = '#10b981';
                         }
+                    } else {
+                        statusEl.textContent = 'Unhealthy (Offline)';
+                        statusEl.style.color = '#ef4444';
                     }
                     window.spandaDegraded = data.degraded;
+
+                    const metricsPanel = document.getElementById('spanda-metrics-panel');
+                    if (metricsPanel) {
+                        if (data.healthy && !data.degraded) {
+                            metricsPanel.style.display = 'block';
+                            document.getElementById('spanda-vram-budget').textContent = `${data.vram_budget_mb} MB`;
+                            document.getElementById('spanda-cache-hit').textContent = `${data.page_cache_hit_rate}%`;
+                            document.getElementById('spanda-l3-offload').textContent = data.enable_l3_offload ? 'Enabled' : 'Disabled';
+                            document.getElementById('spanda-swap-speed').textContent = `${data.ram_swap_speed_gbps} GB/s`;
+                            
+                            document.getElementById('spanda-page-count').textContent = `${data.active_pages_count} / 1024 pages`;
+                            const percent = (data.active_pages_count / 1024) * 100;
+                            document.getElementById('spanda-page-bar').style.width = `${percent}%`;
+
+                            const grid = document.getElementById('spanda-grid');
+                            if (grid && grid.children.length === 0) {
+                                grid.innerHTML = '';
+                                for (let i = 0; i < 64; i++) {
+                                    const cell = document.createElement('div');
+                                    cell.style.aspectRatio = '1';
+                                    cell.style.borderRadius = '2px';
+                                    const active = (i * 7 + 13) % 5 < 2;
+                                    cell.style.background = active ? 'var(--secondary)' : 'rgba(255,255,255,0.03)';
+                                    cell.style.border = '1px solid rgba(255,255,255,0.01)';
+                                    cell.title = `Block ${i}: ${active ? 'Active / Hydrated' : 'Sparse / Paged Out'}`;
+                                    grid.appendChild(cell);
+                                }
+                            }
+                        } else {
+                            metricsPanel.style.display = 'none';
+                        }
+                    }
                 }
             } catch (err) {
                 console.error("Failed to fetch SPANDA health: ", err);
@@ -1631,7 +1858,7 @@
         }
 
         function runSpandaTestFlow() {
-            switchView('rag-view');
+            switchTab('rag-view');
             const deviceSelect = document.getElementById('rag-device-select');
             if (deviceSelect) {
                 deviceSelect.value = 'sparse';
@@ -3145,6 +3372,16 @@
             loadTensorSettings();
             // Poll for server state updates every 15 seconds
             setInterval(fetchSystemState, 15000);
+
+            // Initialize simulated API key and run initial verification check
+            const initialApiKey = localStorage.getItem('simulated_api_key') || 'admin_key';
+            const simSelect = document.getElementById('api-key-simulator-select');
+            if (simSelect) {
+                simSelect.value = initialApiKey;
+            }
+            setTimeout(() => {
+                runAccessControlVerification();
+            }, 1000);
         });
     </script>
 </body>

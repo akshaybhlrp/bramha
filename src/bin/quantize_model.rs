@@ -1,7 +1,6 @@
 use bramha::models::quantization::quantize_to_int4;
 use bramha::storage::Database;
 use bramha::storage::storage_manifest::{CompressionFormat, LayerMetadata, ModelManifest};
-use nalgebra::DMatrix;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -187,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(k) = svd_rank {
                     if out_features > k && in_features > k {
                         print!(
-                            "\r[{}/{}] SVD Factorizing to rank {}: '{}'...",
+                            "\r[{}/{}] SVD Factorizing (Randomized) to rank {}: '{}'...",
                             i + 1,
                             source_manifest.layers.len(),
                             k,
@@ -195,38 +194,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                         std::io::stdout().flush().unwrap_or_default();
 
-                        let w_matrix = DMatrix::from_row_slice(out_features, in_features, f32_data);
-                        let svd = w_matrix.svd(true, true);
-                        let u = svd.u.unwrap();
-                        let vt = svd.v_t.unwrap();
-                        let s = svd.singular_values;
+                        let (a, b, actual_rank) = bramha::storage::factorization::randomized_svd(
+                            f32_data,
+                            out_features,
+                            in_features,
+                            k,
+                        )?;
 
-                        let u_k = u.columns(0, k);
-                        let vt_k = vt.rows(0, k);
-                        let s_k = s.rows(0, k);
-
-                        let sqrt_s = s_k.map(|x| x.sqrt());
-                        let mut a = DMatrix::<f32>::zeros(out_features, k);
-                        for r in 0..out_features {
-                            for c in 0..k {
-                                a[(r, c)] = u_k[(r, c)] * sqrt_s[c];
-                            }
-                        }
-
-                        let mut b = DMatrix::<f32>::zeros(k, in_features);
-                        for r in 0..k {
-                            for c in 0..in_features {
-                                b[(r, c)] = vt_k[(r, c)] * sqrt_s[r];
-                            }
-                        }
-
-                        let mut combined =
-                            Vec::with_capacity((out_features * k + k * in_features) * 4);
-
-                        let a_slice = a.as_slice();
-                        let b_slice = b.as_slice();
-                        combined.extend_from_slice(bytemuck::cast_slice(a_slice));
-                        combined.extend_from_slice(bytemuck::cast_slice(b_slice));
+                        let mut combined = Vec::with_capacity(
+                            (out_features * actual_rank + actual_rank * in_features) * 4,
+                        );
+                        combined.extend_from_slice(bytemuck::cast_slice(&a));
+                        combined.extend_from_slice(bytemuck::cast_slice(&b));
 
                         let file_name = format!("{}_svd.bin", name.replace(".", "_"));
                         let file_path = target_path.join(&file_name);
@@ -235,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
                         l_meta.quantization_bits = None;
                         l_meta.compression_format = CompressionFormat::Svd;
-                        l_meta.svd_rank = Some(k);
+                        l_meta.svd_rank = Some(actual_rank);
                         l_meta.stored_bytes = combined.len() as u64;
                         target_manifest.add_layer(l_meta);
                         continue;

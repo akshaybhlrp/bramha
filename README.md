@@ -88,6 +88,12 @@ exact decode → speculative decode → activation replay → cached answer → 
 - Model load time: 500ms → 50ms
 - First token latency: 1.2s → 300-400ms
 
+### SPANDA Sparse Inference Backend (v7 Architecture)
+**The Memory Wall Problem**: LLM inference on consumer hardware is constrained by memory bandwidth and VRAM capacity, not compute. Large models cannot fit in VRAM, and loading them token-by-token from storage is too slow.
+**SPANDA's Solution (Query-Conditional Sparse Paging)**: SPANDA introduces a database-native approach to inference. Instead of keeping the whole model in memory, it uses query-conditional sparse paging—loading only the necessary weight "pages" (experts) dynamically based on the query's path through the model. It includes:
+- **VRAM Page Caching & RAM Offload**: Keeps hot experts in VRAM and gracefully falls back to L3 host RAM offloading when limits are reached.
+- **Optional Quantization & Prefetch**: 4-bit logarithmic quantization and trajectory prefetching to hide memory latency and maximize generation speed.
+
 ### Retrieval & Evidence
 IVF/HNSW/BM25 hybrid retrieval, evidence mapping, citation grounding, multi-hop graph retrieval.
 
@@ -119,8 +125,11 @@ cd /home/akshay-bhalerao/.gemini/antigravity/scratch/bramha
 # Build (release)
 cargo build --release
 
+# Convert a model to the SPANDA sparse format (Required before ingestion)
+spanda-convert ./models/Qwen2-0.5B.safetensors -o ./models/Qwen2-0.5B.spanda
+
 # Ingest a model
-./target/release/bramha ingest ./models/Qwen2-0.5B.safetensors
+./target/release/bramha ingest ./models/Qwen2-0.5B.spanda
 
 # Start the server
 ./target/release/bramha serve --port 8000
@@ -170,6 +179,10 @@ See [Bramha Neural Engine — Master Roadmap v8.0.md](./Bramha%20Neural%20Engine
 - Sprint plan with task cards (Section 19)
 - Architecture invariants (Section 20)
 - Success criteria by version (Section 21)
+
+For detailed SPANDA architecture and design, see:
+- [SPANDA Design](./docs/SPANDA_Design.md)
+- [SPANDA Integration](./docs/SPANDA_Integration.md)
 
 ---
 

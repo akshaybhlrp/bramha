@@ -504,10 +504,10 @@ mod tests {
 
         // 1. Initial training should succeed and reduce loss
         let loss_start = manager
-            .train_on_activations(key, &inputs, &targets, 0.01, 1)
+            .train_on_activations(key, &inputs, &targets, 0.00001, 1)
             .unwrap();
         let loss_end = manager
-            .train_on_activations(key, &inputs, &targets, 0.01, 10)
+            .train_on_activations(key, &inputs, &targets, 0.00001, 10)
             .unwrap();
 
         assert!(

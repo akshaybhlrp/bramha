@@ -21,6 +21,10 @@ pub struct MemoryEntry {
     pub last_accessed_ms: u64,
     pub created_at_ms: u64,
     pub provenance: String,
+    #[serde(default)]
+    pub retracted: bool,
+    #[serde(default)]
+    pub retraction_reason: Option<String>,
 }
 
 pub struct MemoryManager {
@@ -102,6 +106,19 @@ impl MemoryManager {
         Ok(())
     }
 
+    /// Explicitly retract a memory entry and set its confidence to 0.0
+    pub fn retract_memory(&self, id: &str, reason: &str) -> Result<(), String> {
+        let mut memories = self.load_memories();
+        if let Some(entry) = memories.get_mut(id) {
+            entry.retracted = true;
+            entry.retraction_reason = Some(reason.to_string());
+            entry.confidence = 0.0;
+            self.save_memories(&memories)?;
+            println!("🛑 Memory '{}' retracted: {}", id, reason);
+        }
+        Ok(())
+    }
+
     /// Search memory tiers automatically, score candidates by relevance/recency/confidence,
     /// and silently inject the top ones into the prompt. Logs injection decisions.
     pub fn proactive_inject(&self, prompt: &str, now_ms: u64) -> (String, Vec<String>) {
@@ -118,6 +135,9 @@ impl MemoryManager {
             .collect();
 
         for entry in memories.values() {
+            if entry.retracted {
+                continue;
+            }
             // 1. Recency Decay calculation (without writing back to storage during inline search)
             let elapsed_sec = ((now_ms.saturating_sub(entry.last_accessed_ms)) as f64) / 1000.0;
             let decay_rate = match entry.tier {
@@ -236,11 +256,53 @@ impl MemoryManager {
             last_accessed_ms: now_ms,
             created_at_ms: now_ms,
             provenance: format!("session:{}", session_id),
+            retracted: false,
+            retraction_reason: None,
         };
 
         self.insert_memory(entry.clone())?;
         Ok(entry)
     }
+
+    /// Spawns a background task to periodically consolidate high-usage Episodic memories into Semantic ones.
+    pub fn spawn_consolidation_worker(manager: std::sync::Arc<Self>) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                println!("🧠 [Consolidation Worker] Running periodic memory promotion...");
+
+                let mut memories = manager.load_memories();
+                let mut promoted = 0;
+
+                for entry in memories.values_mut() {
+                    // Promote Episodic memories with high usage and high confidence
+                    if entry.tier == MemoryTier::Episodic
+                        && entry.usage_count >= 5
+                        && entry.confidence > 0.85
+                    {
+                        entry.tier = MemoryTier::Semantic;
+                        entry.confidence = 1.0; // Maximize confidence on promotion
+                        promoted += 1;
+                    }
+                }
+
+                if promoted > 0 {
+                    if let Err(e) = manager.save_memories(&memories) {
+                        eprintln!(
+                            "⚠️ [Consolidation Worker] Failed to save promoted memories: {}",
+                            e
+                        );
+                    } else {
+                        println!(
+                            "✅ [Consolidation Worker] Successfully promoted {} memories to Semantic Tier.",
+                            promoted
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     /// Detect contradictions against highly confident semantic memories
     pub fn detect_contradiction(&self, new_fact: &str) -> Option<MemoryEntry> {
         let memories = self.load_memories();
@@ -260,6 +322,9 @@ impl MemoryManager {
         }
 
         for entry in memories.values() {
+            if entry.retracted {
+                continue;
+            }
             if entry.tier == MemoryTier::Semantic && entry.confidence >= 0.8 {
                 let entry_clean = entry.content.to_lowercase();
                 let entry_words: std::collections::HashSet<String> = entry_clean
@@ -352,6 +417,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "test".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
         manager.insert_memory(entry).unwrap();
 
@@ -383,6 +450,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "test".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
 
         // 1. Insert
@@ -433,6 +502,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "docs".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
 
         manager.insert_memory(entry).unwrap();
@@ -443,6 +514,50 @@ mod tests {
         assert!(merged.contains("[Silently Injected Memory Context:"));
         assert!(merged.contains("The default sharding directory is storage/shards"));
         assert!(logs[0].contains("Injected memory"));
+
+        let _ = std::fs::remove_file(&manager.file_path);
+    }
+
+    #[test]
+    fn test_memory_retraction() {
+        let manager = MemoryManager {
+            file_path: PathBuf::from("storage/test_retraction_memory.json"),
+        };
+        let _ = std::fs::remove_file(&manager.file_path);
+
+        let now = 1000000;
+        let entry = MemoryEntry {
+            id: "mem_retract_test".to_string(),
+            content: "This is a fact to retract".to_string(),
+            tier: MemoryTier::Semantic,
+            confidence: 0.9,
+            usage_count: 1,
+            last_accessed_ms: now,
+            created_at_ms: now,
+            provenance: "user".to_string(),
+            retracted: false,
+            retraction_reason: None,
+        };
+        manager.insert_memory(entry).unwrap();
+
+        // Perform retraction
+        manager
+            .retract_memory("mem_retract_test", "Fact proven false")
+            .unwrap();
+
+        let memories = manager.load_memories();
+        let retracted_entry = memories.get("mem_retract_test").unwrap();
+        assert!(retracted_entry.retracted);
+        assert_eq!(retracted_entry.confidence, 0.0);
+        assert_eq!(
+            retracted_entry.retraction_reason.as_deref(),
+            Some("Fact proven false")
+        );
+
+        // Verify proactive inject skips it
+        let prompt = "Fact to retract";
+        let (merged, _logs) = manager.proactive_inject(prompt, now);
+        assert!(!merged.contains("This is a fact to retract"));
 
         let _ = std::fs::remove_file(&manager.file_path);
     }

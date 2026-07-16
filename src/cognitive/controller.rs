@@ -15,6 +15,7 @@ pub struct AdaptiveController {
     pub min_bounds: RuntimeProfile,
     pub max_bounds: RuntimeProfile,
     pub current_profile: RuntimeProfile,
+    pub workflows: std::collections::HashMap<String, WorkflowGraph>,
 }
 
 impl AdaptiveController {
@@ -51,6 +52,7 @@ impl AdaptiveController {
             min_bounds,
             max_bounds,
             current_profile: default_profile,
+            workflows: std::collections::HashMap::new(),
         }
     }
 
@@ -126,6 +128,35 @@ impl AdaptiveController {
             ),
         };
     }
+
+    pub fn parse_feedback_event(&mut self, event: FeedbackEvent) {
+        if event.success {
+            self.adapt_parameters(self.latency_target_ms * 0.5); // Tune up quality
+        } else {
+            self.adapt_parameters(self.latency_target_ms * 1.5); // Dial down for speed
+        }
+    }
+
+    pub fn save_workflow(&mut self, workflow: WorkflowGraph) {
+        self.workflows.insert(workflow.id.clone(), workflow);
+    }
+
+    pub fn get_workflow(&self, id: &str) -> Option<WorkflowGraph> {
+        self.workflows.get(id).cloned()
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FeedbackEvent {
+    pub workflow_id: String,
+    pub success: bool,
+    pub latency_ms: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WorkflowGraph {
+    pub id: String,
+    pub steps: Vec<String>,
 }
 
 #[cfg(test)]

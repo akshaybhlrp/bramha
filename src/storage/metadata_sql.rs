@@ -44,8 +44,10 @@ impl MetadataSqlStore {
     fn initialize_db(&self) -> Result<(), String> {
         let conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
         // Enable high-concurrency WAL mode and SQLite index creations
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
-            .map_err(|e| format!("SQLite pragma err: {}", e))?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;",
+        )
+        .map_err(|e| format!("SQLite pragma err: {}", e))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS planner_traces (
@@ -85,6 +87,64 @@ impl MetadataSqlStore {
             [],
         )
         .map_err(|e| format!("SQLite route_quality_stats table err: {}", e))?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS collections (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| format!("SQLite collections table err: {}", e))?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS documents (
+                id TEXT PRIMARY KEY,
+                collection_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(collection_id) REFERENCES collections(id) ON DELETE CASCADE
+            )",
+            [],
+        )
+        .map_err(|e| format!("SQLite documents table err: {}", e))?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS chunks (
+                id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )",
+            [],
+        )
+        .map_err(|e| format!("SQLite chunks table err: {}", e))?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| format!("SQLite sessions table err: {}", e))?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS models (
+                id TEXT PRIMARY KEY,
+                architecture TEXT NOT NULL,
+                parameters INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| format!("SQLite models table err: {}", e))?;
 
         Ok(())
     }

@@ -1,6 +1,31 @@
 [package]
 name = "spanda-engine"
-version = "0.1.0"
+version = "0.7.0"
 edition = "2024"
 
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+safetensors = "0.7.0"
+bytemuck = "1.25.0"
+half = { version = "2.7.1", features = ["bytemuck"] }
+wgpu = "0.19.4"
+tokio = { version = "1.39", features = ["full"] }
+pollster = "0.3.0"
+blake3 = "1.5"
+crc32fast = "1.4"
+bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
+rand = "0.8"
+rayon = "1.12.0"
+
+[[bin]]
+name = "spanda-convert"
+path = "src/bin/convert.rs"
+
+[[bin]]
+name = "spanda-calibrate"
+path = "src/bin/calibrate.rs"
+
+[[bin]]
+name = "spanda-run"
+path = "src/bin/run.rs"

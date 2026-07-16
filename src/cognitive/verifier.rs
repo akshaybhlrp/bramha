@@ -149,7 +149,7 @@ impl ModelVerifier {
 
         let status = if final_score >= 0.8 {
             VerificationStatus::Pass
-        } else if final_score >= 0.5 {
+        } else if final_score >= 0.5 && !self.policy.strict_mode {
             VerificationStatus::Flag
         } else {
             VerificationStatus::Fail

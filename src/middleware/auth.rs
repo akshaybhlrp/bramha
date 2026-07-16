@@ -36,7 +36,15 @@ impl AuthManager {
     /// Load all keys from storage, writing default keys if file doesn't exist
     pub fn load_keys(&self) -> HashMap<String, Role> {
         let path = Path::new(self.keys_file);
+        let env_is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production"
+            || std::env::var("BRAMHA_ENV").unwrap_or_default() == "production";
+
         if !path.exists() {
+            if env_is_prod {
+                panic!(
+                    "CRITICAL SECURITY FAILURE: Cannot generate default keys in a production environment!"
+                );
+            }
             let mut default_keys = HashMap::new();
             default_keys.insert("admin_key".to_string(), Role::Admin);
             default_keys.insert("write_key".to_string(), Role::Write);
@@ -46,7 +54,20 @@ impl AuthManager {
         }
 
         let data = std::fs::read_to_string(path).unwrap_or_else(|_| "{}".to_string());
-        serde_json::from_str(&data).unwrap_or_else(|_| HashMap::new())
+        let keys: HashMap<String, Role> =
+            serde_json::from_str(&data).unwrap_or_else(|_| HashMap::new());
+
+        if env_is_prod {
+            if keys.contains_key("admin_key")
+                || keys.contains_key("write_key")
+                || keys.contains_key("read_key")
+            {
+                panic!(
+                    "CRITICAL SECURITY FAILURE: Default API keys (admin_key/write_key/read_key) are active in a production environment!"
+                );
+            }
+        }
+        keys
     }
 
     /// Save keys dynamically to allow runtime key rotation
@@ -156,7 +177,7 @@ where
     }
 }
 
-fn extract_token_from_header(parts: &Parts) -> Result<String, (StatusCode, String)> {
+pub fn extract_token_from_header(parts: &Parts) -> Result<String, (StatusCode, String)> {
     if let Some(auth_header) = parts.headers.get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.starts_with("Bearer ") {
@@ -168,6 +189,26 @@ fn extract_token_from_header(parts: &Parts) -> Result<String, (StatusCode, Strin
         StatusCode::UNAUTHORIZED,
         "Unauthorized: Missing Authorization Bearer token header".to_string(),
     ))
+}
+
+/// Global fallback authentication middleware enforcing ReadOnly permission.
+pub async fn require_read_only_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let (parts, body) = req.into_parts();
+    let key = extract_token_from_header(&parts)?;
+    let manager = AuthManager::new();
+    let _info = manager.authorize(&key, Role::ReadOnly).map_err(|e| {
+        if e.starts_with("Forbidden") {
+            (StatusCode::FORBIDDEN, e)
+        } else {
+            (StatusCode::UNAUTHORIZED, e)
+        }
+    })?;
+    let req = axum::extract::Request::from_parts(parts, body);
+    let response = next.run(req).await;
+    Ok(response)
 }
 
 #[cfg(test)]

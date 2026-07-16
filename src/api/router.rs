@@ -9,12 +9,32 @@ use crate::api::handlers::*;
 
 /// Configures the Axum REST API router with thread-safe database state and CORS policies.
 pub fn create_router(state: SharedState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let allowed_origins = std::env::var("BRAMHA_CORS_ALLOWED_ORIGINS").ok();
+    let cors = if let Some(origins_str) = allowed_origins {
+        let mut origins = Vec::new();
+        for origin in origins_str.split(',') {
+            if let Ok(val) = origin.trim().parse::<axum::http::HeaderValue>() {
+                origins.push(val);
+            }
+        }
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        let is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production"
+            || std::env::var("BRAMHA_ENV").unwrap_or_default() == "production";
+        if is_prod {
+            CorsLayer::new().allow_methods(Any).allow_headers(Any)
+        } else {
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any)
+        }
+    };
 
-    Router::new()
+    let protected_routes = Router::new()
         // System Statistics
         .route("/api/stats", get(get_stats))
         // Collections CRUD & Vector operations
@@ -76,14 +96,49 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/api/system/heal", post(system_heal))
         .route("/api/system/spanda/status", get(get_spanda_status))
         .route("/api/system/spanda/degraded", post(set_spanda_degraded))
+        .route("/api/cognitive/retract", post(retract_memory_handler))
+        .route("/api/cognitive/graph", get(get_cognitive_graph))
         // Conversational Session history routes
         .route("/api/sessions", get(list_sessions).post(upsert_session))
         .route("/api/sessions/:session_id/export", get(export_session))
         .route("/api/sessions/import", post(import_session))
-        .fallback_service(ServeDir::new("dashboard"))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::auth::require_read_only_middleware,
+        ));
+
+    let public_routes = Router::new()
+        .route("/health", get(health_handler))
+        .route("/ready", get(ready_handler))
+        .route("/metrics", get(metrics_handler))
+        .fallback_service(ServeDir::new("dashboard"));
+
+    protected_routes
+        .merge(public_routes)
         .layer(cors)
         .layer(axum::middleware::from_fn(add_security_headers))
         .with_state(state)
+}
+
+async fn health_handler() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({ "status": "healthy" }))
+}
+
+async fn ready_handler() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({ "status": "ready" }))
+}
+
+async fn metrics_handler() -> axum::Json<serde_json::Value> {
+    let metrics = crate::api::handlers::ObservabilityMetrics::global();
+    let (q50, q95, q99) = metrics.get_query_percentiles();
+    let (g50, g95, g99) = metrics.get_generation_percentiles();
+    axum::Json(serde_json::json!({
+        "query_latency_p50_ms": q50,
+        "query_latency_p95_ms": q95,
+        "query_latency_p99_ms": q99,
+        "generation_latency_p50_ms": g50,
+        "generation_latency_p95_ms": g95,
+        "generation_latency_p99_ms": g99,
+    }))
 }
 
 async fn add_security_headers(

@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -46,7 +46,9 @@ impl BlockDB {
         let mmap = unsafe {
             let opts = memmap2::MmapOptions::new();
             if let Ok(m) = opts.map(&blob_file) {
-                Some(std::sync::Arc::new(crate::core::tensor::TensorData::Mmap(m)))
+                Some(std::sync::Arc::new(crate::core::tensor::TensorData::Mmap(
+                    m,
+                )))
             } else {
                 None
             }

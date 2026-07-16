@@ -57,13 +57,19 @@ impl ModelBuffers {
     }
 
     pub fn enforce_limits(&mut self, new_bytes: usize) {
-        while self.current_vram_bytes + new_bytes > self.max_vram_bytes && !self.access_order.is_empty() {
+        while self.current_vram_bytes + new_bytes > self.max_vram_bytes
+            && !self.access_order.is_empty()
+        {
             let key = self.access_order.remove(0);
             if let Some(size) = self.tensor_sizes.remove(&key) {
                 self.registry.remove(&key);
                 self.sparse_registry.remove(&key);
                 self.current_vram_bytes = self.current_vram_bytes.saturating_sub(size);
-                println!("🗑️ [WGPU Eviction] Freed persistent tensor '{}' ({:.2} MB) to stay under GPU VRAM cap.", key, size as f64 / 1_000_000.0);
+                println!(
+                    "🗑️ [WGPU Eviction] Freed persistent tensor '{}' ({:.2} MB) to stay under GPU VRAM cap.",
+                    key,
+                    size as f64 / 1_000_000.0
+                );
             }
         }
     }
@@ -202,61 +208,62 @@ impl WgpuComputePlane {
         });
 
         // Create the bind group layout for quantized GEMV (adds scales buffer)
-        let bind_group_layout_quant = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Quantized GEMV Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+        let bind_group_layout_quant =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Quantized GEMV Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("GEMV Pipeline Layout"),
@@ -264,83 +271,86 @@ impl WgpuComputePlane {
             push_constant_ranges: &[],
         });
 
-        let pipeline_layout_quant = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Quantized GEMV Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout_quant],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout_quant =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Quantized GEMV Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout_quant],
+                push_constant_ranges: &[],
+            });
 
-        let bind_group_layout_sparse = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Sparse GEMV Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+        let bind_group_layout_sparse =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Sparse GEMV Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                ],
+            });
 
-        let pipeline_layout_sparse = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Sparse GEMV Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout_sparse],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout_sparse =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Sparse GEMV Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout_sparse],
+                push_constant_ranges: &[],
+            });
 
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("GEMV Compute Pipeline"),
@@ -369,9 +379,12 @@ impl WgpuComputePlane {
         if cache_path.exists() {
             if let Ok(bytes) = std::fs::read(cache_path) {
                 let config = bincode::config::standard();
-                let decoded: Result<(String, u64), _> = bincode::serde::decode_from_slice(&bytes, config).map(|(val, _)| val);
+                let decoded: Result<(String, u64), _> =
+                    bincode::serde::decode_from_slice(&bytes, config).map(|(val, _)| val);
                 if decoded.is_err() {
-                    println!("⚠️ [WGPU] Cache load failed on boot. Triggering compilation circuit breaker.");
+                    println!(
+                        "⚠️ [WGPU] Cache load failed on boot. Triggering compilation circuit breaker."
+                    );
                     cache_load_failed = true;
                 }
             } else {
@@ -398,7 +411,10 @@ impl WgpuComputePlane {
         // Write cache if took > 200ms and load didn't fail
         if compile_duration.as_millis() > 200 && !cache_load_failed {
             let config = bincode::config::standard();
-            let entry = ("gemm_sparse_v1".to_string(), compile_duration.as_millis() as u64);
+            let entry = (
+                "gemm_sparse_v1".to_string(),
+                compile_duration.as_millis() as u64,
+            );
             if let Ok(encoded) = bincode::serde::encode_to_vec(&entry, config) {
                 let _ = std::fs::write(cache_path, encoded);
             }
@@ -436,7 +452,7 @@ impl WgpuComputePlane {
         row_offsets: &[u32],
     ) -> std::sync::Arc<PersistentSparseOp> {
         let op_key = format!("{}:{}:sparse", model_name, layer_name);
-        
+
         {
             let mut guard = self.model_buffers.lock().unwrap();
             let cached_op = guard.sparse_registry.get(&op_key).cloned();
@@ -451,58 +467,71 @@ impl WgpuComputePlane {
         let masks_bytes = masks.len() * 4;
         let values_bytes = values.len() * 4;
         let offsets_bytes = row_offsets.len() * 4;
-        let total_size_bytes = masks_bytes + values_bytes + offsets_bytes + 8 + in_bytes + out_bytes * 2;
+        let total_size_bytes =
+            masks_bytes + values_bytes + offsets_bytes + 8 + in_bytes + out_bytes * 2;
 
         {
             let mut guard = self.model_buffers.lock().unwrap();
             guard.enforce_limits(total_size_bytes);
         }
 
-        let masks_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Persistent Sparse Masks: {}", op_key)),
-            contents: bytemuck::cast_slice(masks),
-            usage: wgpu::BufferUsages::STORAGE,
-        }));
+        let masks_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Persistent Sparse Masks: {}", op_key)),
+                contents: bytemuck::cast_slice(masks),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        ));
 
-        let values_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Persistent Sparse Values: {}", op_key)),
-            contents: bytemuck::cast_slice(values),
-            usage: wgpu::BufferUsages::STORAGE,
-        }));
+        let values_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Persistent Sparse Values: {}", op_key)),
+                contents: bytemuck::cast_slice(values),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        ));
 
-        let row_offsets_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Persistent Sparse Offsets: {}", op_key)),
-            contents: bytemuck::cast_slice(row_offsets),
-            usage: wgpu::BufferUsages::STORAGE,
-        }));
+        let row_offsets_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Persistent Sparse Offsets: {}", op_key)),
+                contents: bytemuck::cast_slice(row_offsets),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        ));
 
-        let params_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Params: {}", op_key)),
-            size: 8,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let params_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Params: {}", op_key)),
+                size: 8,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
 
-        let input_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Input: {}", op_key)),
-            size: in_bytes as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let input_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Input: {}", op_key)),
+                size: in_bytes as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
 
-        let output_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Output: {}", op_key)),
-            size: out_bytes as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let output_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Output: {}", op_key)),
+                size: out_bytes as u64,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
 
-        let staging_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Staging: {}", op_key)),
-            size: out_bytes as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
+        let staging_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Staging: {}", op_key)),
+                size: out_bytes as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }));
 
         let op = std::sync::Arc::new(PersistentSparseOp {
             masks_buffer,
@@ -536,7 +565,7 @@ impl WgpuComputePlane {
         scales: Option<&[f32]>,
     ) -> std::sync::Arc<PersistentOp> {
         let op_key = format!("{}:{}", model_name, layer_name);
-        
+
         {
             let mut guard = self.model_buffers.lock().unwrap();
             let cached_op = guard.registry.get(&op_key).cloned();
@@ -557,57 +586,76 @@ impl WgpuComputePlane {
         }
 
         // Allocate persistent weight buffer
-        if weight_bytes.len() == 0 { panic!("weight_bytes is size 0 for {}", op_key); }
-        let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Persistent Weight: {}", op_key)),
-            contents: weight_bytes,
-            usage: wgpu::BufferUsages::STORAGE,
-        }));
-        
+        if weight_bytes.len() == 0 {
+            panic!("weight_bytes is size 0 for {}", op_key);
+        }
+        let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Persistent Weight: {}", op_key)),
+                contents: weight_bytes,
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        ));
+
         // Allocate scales buffer if needed
         let scales_buffer = scales.map(|s| {
-            if s.len() == 0 { panic!("scales slice is size 0 for {}", op_key); }
-            std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Persistent Scales: {}", op_key)),
-                contents: bytemuck::cast_slice(s),
-                usage: wgpu::BufferUsages::STORAGE,
-            }))
+            if s.len() == 0 {
+                panic!("scales slice is size 0 for {}", op_key);
+            }
+            std::sync::Arc::new(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("Persistent Scales: {}", op_key)),
+                        contents: bytemuck::cast_slice(s),
+                        usage: wgpu::BufferUsages::STORAGE,
+                    }),
+            )
         });
-        
+
         // Allocate parameters buffer
-        let params_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Params: {}", op_key)),
-            size: 8,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-        
+        let params_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Params: {}", op_key)),
+                size: 8,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+
         // Allocate input buffer
-        if in_bytes == 0 { panic!("in_bytes is 0 for {}", op_key); }
-        let input_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Input: {}", op_key)),
-            size: in_bytes as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-        
+        if in_bytes == 0 {
+            panic!("in_bytes is 0 for {}", op_key);
+        }
+        let input_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Input: {}", op_key)),
+                size: in_bytes as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+
         // Allocate output buffer
-        if out_bytes == 0 { panic!("out_bytes is 0 for {}", op_key); }
-        let output_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Output: {}", op_key)),
-            size: out_bytes as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-        
+        if out_bytes == 0 {
+            panic!("out_bytes is 0 for {}", op_key);
+        }
+        let output_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Output: {}", op_key)),
+                size: out_bytes as u64,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+
         // Allocate staging buffer
-        let staging_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Persistent Staging: {}", op_key)),
-            size: out_bytes as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
-        
+        let staging_buffer =
+            std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("Persistent Staging: {}", op_key)),
+                size: out_bytes as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }));
+
         let op = std::sync::Arc::new(PersistentOp {
             weight_buffer,
             scales_buffer,
@@ -616,7 +664,7 @@ impl WgpuComputePlane {
             output_buffer,
             staging_buffer,
         });
-        
+
         {
             let mut guard = self.model_buffers.lock().unwrap();
             guard.registry.insert(op_key.clone(), op.clone());
@@ -624,7 +672,7 @@ impl WgpuComputePlane {
             guard.current_vram_bytes += total_size_bytes;
             guard.record_access(&op_key);
         }
-        
+
         op
     }
 
@@ -638,7 +686,14 @@ impl WgpuComputePlane {
     }
 
     /// High-performance matrix-vector multiplication (GEMV) accelerated on the GPU.
-    pub fn matvec_mul(&self, h: &[f32], weight: &[f32], out_features: usize, model_name: Option<&str>, layer_name: Option<&str>) -> Result<Vec<f32>, String> {
+    pub fn matvec_mul(
+        &self,
+        h: &[f32],
+        weight: &[f32],
+        out_features: usize,
+        model_name: Option<&str>,
+        layer_name: Option<&str>,
+    ) -> Result<Vec<f32>, String> {
         let in_features = h.len();
         if in_features == 0 || out_features == 0 {
             return Ok(vec![0.0f32; out_features]);
@@ -655,40 +710,61 @@ impl WgpuComputePlane {
 
         // Get persistent or temporary op buffers (temporary only when model/layer name is missing)
         let op = if let (Some(m_name), Some(l_name)) = (model_name, layer_name) {
-            self.get_or_create_op(m_name, l_name, in_features, out_features, bytemuck::cast_slice(weight), None)
+            self.get_or_create_op(
+                m_name,
+                l_name,
+                in_features,
+                out_features,
+                bytemuck::cast_slice(weight),
+                None,
+            )
         } else {
-            if weight.len() == 0 { panic!("temp weight is 0"); }
-            let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("GEMV Weights Buffer"),
-                contents: bytemuck::cast_slice(weight),
-                usage: wgpu::BufferUsages::STORAGE,
-            }));
-            let params_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Params Buffer"),
-                size: 8,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            if in_features == 0 { panic!("temp in_features is 0"); }
-            let input_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Input Buffer"),
-                size: (in_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            if out_features == 0 { panic!("temp out_features is 0"); }
-            let output_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Output Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let staging_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Staging Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            }));
+            if weight.len() == 0 {
+                panic!("temp weight is 0");
+            }
+            let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("GEMV Weights Buffer"),
+                    contents: bytemuck::cast_slice(weight),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let params_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Params Buffer"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            if in_features == 0 {
+                panic!("temp in_features is 0");
+            }
+            let input_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Input Buffer"),
+                    size: (in_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            if out_features == 0 {
+                panic!("temp out_features is 0");
+            }
+            let output_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Output Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let staging_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Staging Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }));
             std::sync::Arc::new(PersistentOp {
                 weight_buffer,
                 scales_buffer: None,
@@ -702,8 +778,10 @@ impl WgpuComputePlane {
         // Write params and inputs using GPU queue writes (completely zero allocations)
         let in_features_vec4 = (in_features / 4) as u32;
         let params = [in_features_vec4, out_features as u32];
-        self.queue.write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
-        self.queue.write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
+        self.queue
+            .write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
+        self.queue
+            .write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
 
         // Create the bind group (thread-safe, isolated state)
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -730,9 +808,11 @@ impl WgpuComputePlane {
         });
 
         // Dispatch compute pass
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("GEMV Command Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("GEMV Command Encoder"),
+            });
 
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -746,7 +826,13 @@ impl WgpuComputePlane {
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
-        encoder.copy_buffer_to_buffer(&op.output_buffer, 0, &op.staging_buffer, 0, (out_features * 4) as u64);
+        encoder.copy_buffer_to_buffer(
+            &op.output_buffer,
+            0,
+            &op.staging_buffer,
+            0,
+            (out_features * 4) as u64,
+        );
         self.queue.submit(Some(encoder.finish()));
 
         // Map staging buffer and fetch results synchronously
@@ -772,7 +858,15 @@ impl WgpuComputePlane {
     }
 
     /// GPU-accelerated INT8 matrix-vector multiplication with on-the-fly dequantization.
-    pub fn matvec_mul_int8(&self, h: &[f32], q_weight: &[i8], scales: &[f32], out_features: usize, model_name: Option<&str>, layer_name: Option<&str>) -> Result<Vec<f32>, String> {
+    pub fn matvec_mul_int8(
+        &self,
+        h: &[f32],
+        q_weight: &[i8],
+        scales: &[f32],
+        out_features: usize,
+        model_name: Option<&str>,
+        layer_name: Option<&str>,
+    ) -> Result<Vec<f32>, String> {
         let in_features = h.len();
         if in_features == 0 || out_features == 0 {
             return Ok(vec![0.0f32; out_features]);
@@ -791,42 +885,59 @@ impl WgpuComputePlane {
 
         // Get persistent or temporary op buffers
         let op = if let (Some(m_name), Some(l_name)) = (model_name, layer_name) {
-            self.get_or_create_op(m_name, l_name, in_features, out_features, bytemuck::cast_slice(&aligned_u32), Some(scales))
+            self.get_or_create_op(
+                m_name,
+                l_name,
+                in_features,
+                out_features,
+                bytemuck::cast_slice(&aligned_u32),
+                Some(scales),
+            )
         } else {
-            let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("INT8 Quantized Weights Buffer"),
-                contents: bytemuck::cast_slice(&aligned_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            }));
-            let scales_buffer = Some(std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("INT8 Scales Buffer"),
-                contents: bytemuck::cast_slice(scales),
-                usage: wgpu::BufferUsages::STORAGE,
-            })));
-            let params_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Params Buffer"),
-                size: 8,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let input_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Input Buffer"),
-                size: (in_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let output_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Output Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let staging_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Staging Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            }));
+            let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("INT8 Quantized Weights Buffer"),
+                    contents: bytemuck::cast_slice(&aligned_u32),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let scales_buffer = Some(std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("INT8 Scales Buffer"),
+                    contents: bytemuck::cast_slice(scales),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            )));
+            let params_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Params Buffer"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let input_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Input Buffer"),
+                    size: (in_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let output_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Output Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let staging_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Staging Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }));
             std::sync::Arc::new(PersistentOp {
                 weight_buffer,
                 scales_buffer,
@@ -840,8 +951,10 @@ impl WgpuComputePlane {
         // Write params and inputs directly (completely zero allocations)
         let in_features_vec4 = (in_features / 4) as u32;
         let params = [in_features_vec4, out_features as u32];
-        self.queue.write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
-        self.queue.write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
+        self.queue
+            .write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
+        self.queue
+            .write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
 
         // Create the bind group (thread-safe, isolated state)
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -872,9 +985,11 @@ impl WgpuComputePlane {
         });
 
         // Dispatch compute pass
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("INT8 GEMV Command Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("INT8 GEMV Command Encoder"),
+            });
 
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -888,7 +1003,13 @@ impl WgpuComputePlane {
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
-        encoder.copy_buffer_to_buffer(&op.output_buffer, 0, &op.staging_buffer, 0, (out_features * 4) as u64);
+        encoder.copy_buffer_to_buffer(
+            &op.output_buffer,
+            0,
+            &op.staging_buffer,
+            0,
+            (out_features * 4) as u64,
+        );
         self.queue.submit(Some(encoder.finish()));
 
         // Map staging buffer and fetch results
@@ -914,7 +1035,15 @@ impl WgpuComputePlane {
     }
 
     /// GPU-accelerated INT4 (packed 4-bit) matrix-vector multiplication with on-the-fly dequantization.
-    pub fn matvec_mul_int4(&self, h: &[f32], q_weight: &[u8], scales: &[f32], out_features: usize, model_name: Option<&str>, layer_name: Option<&str>) -> Result<Vec<f32>, String> {
+    pub fn matvec_mul_int4(
+        &self,
+        h: &[f32],
+        q_weight: &[u8],
+        scales: &[f32],
+        out_features: usize,
+        model_name: Option<&str>,
+        layer_name: Option<&str>,
+    ) -> Result<Vec<f32>, String> {
         let in_features = h.len();
         if in_features == 0 || out_features == 0 {
             return Ok(vec![0.0f32; out_features]);
@@ -933,42 +1062,59 @@ impl WgpuComputePlane {
 
         // Get persistent or temporary op buffers
         let op = if let (Some(m_name), Some(l_name)) = (model_name, layer_name) {
-            self.get_or_create_op(m_name, l_name, in_features, out_features, bytemuck::cast_slice(&aligned_u32), Some(scales))
+            self.get_or_create_op(
+                m_name,
+                l_name,
+                in_features,
+                out_features,
+                bytemuck::cast_slice(&aligned_u32),
+                Some(scales),
+            )
         } else {
-            let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("INT4 Quantized Weights Buffer"),
-                contents: bytemuck::cast_slice(&aligned_u32),
-                usage: wgpu::BufferUsages::STORAGE,
-            }));
-            let scales_buffer = Some(std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("INT4 Scales Buffer"),
-                contents: bytemuck::cast_slice(scales),
-                usage: wgpu::BufferUsages::STORAGE,
-            })));
-            let params_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Params Buffer"),
-                size: 8,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let input_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Input Buffer"),
-                size: (in_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let output_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Output Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let staging_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Staging Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            }));
+            let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("INT4 Quantized Weights Buffer"),
+                    contents: bytemuck::cast_slice(&aligned_u32),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let scales_buffer = Some(std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("INT4 Scales Buffer"),
+                    contents: bytemuck::cast_slice(scales),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            )));
+            let params_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Params Buffer"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let input_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Input Buffer"),
+                    size: (in_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let output_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Output Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let staging_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Staging Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }));
             std::sync::Arc::new(PersistentOp {
                 weight_buffer,
                 scales_buffer,
@@ -982,8 +1128,10 @@ impl WgpuComputePlane {
         // Write params and inputs directly (completely zero allocations)
         let in_features_vec4 = (in_features / 4) as u32;
         let params = [in_features_vec4, out_features as u32];
-        self.queue.write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
-        self.queue.write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
+        self.queue
+            .write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
+        self.queue
+            .write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
 
         // Create the bind group (thread-safe, isolated state)
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1014,9 +1162,11 @@ impl WgpuComputePlane {
         });
 
         // Dispatch compute pass
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("INT4 GEMV Command Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("INT4 GEMV Command Encoder"),
+            });
 
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1030,7 +1180,13 @@ impl WgpuComputePlane {
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
-        encoder.copy_buffer_to_buffer(&op.output_buffer, 0, &op.staging_buffer, 0, (out_features * 4) as u64);
+        encoder.copy_buffer_to_buffer(
+            &op.output_buffer,
+            0,
+            &op.staging_buffer,
+            0,
+            (out_features * 4) as u64,
+        );
         self.queue.submit(Some(encoder.finish()));
 
         // Map staging buffer and fetch results
@@ -1069,7 +1225,10 @@ impl WgpuComputePlane {
         session_id: Option<&str>,
     ) -> Result<Vec<f32>, String> {
         // Fallback to dense if sparse pipeline is permanently disabled
-        if self.sparse_disabled.load(std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .sparse_disabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             if let Some(dw) = dense_weight {
                 return self.matvec_mul(h, dw, out_features, model_name, layer_name);
             } else {
@@ -1087,7 +1246,9 @@ impl WgpuComputePlane {
                     if let Some(dw) = dense_weight {
                         return self.matvec_mul(h, dw, out_features, model_name, layer_name);
                     } else {
-                        return Err("Layer blacklisted and no dense fallback weight provided".to_string());
+                        return Err(
+                            "Layer blacklisted and no dense fallback weight provided".to_string()
+                        );
                     }
                 }
             }
@@ -1101,7 +1262,10 @@ impl WgpuComputePlane {
                 if let Some(dw) = dense_weight {
                     return self.matvec_mul(h, dw, out_features, model_name, layer_name);
                 } else {
-                    return Err("Dense win fallback active and no dense fallback weight provided".to_string());
+                    return Err(
+                        "Dense win fallback active and no dense fallback weight provided"
+                            .to_string(),
+                    );
                 }
             }
         }
@@ -1121,19 +1285,23 @@ impl WgpuComputePlane {
         let mut session_state = None;
         if let Some(sess_id) = session_id {
             let mut states = self.session_states.lock().unwrap();
-            let stats = states.entry(sess_id.to_string()).or_insert_with(|| SessionStats {
-                state: DegradationState::Green,
-                total_requests: 0,
-                successful_hits: 0,
-                consecutive_slow_copies: 0,
-            });
-            
+            let stats = states
+                .entry(sess_id.to_string())
+                .or_insert_with(|| SessionStats {
+                    state: DegradationState::Green,
+                    total_requests: 0,
+                    successful_hits: 0,
+                    consecutive_slow_copies: 0,
+                });
+
             if stats.state == DegradationState::Red {
                 drop(states);
                 if let Some(dw) = dense_weight {
                     return self.matvec_mul(h, dw, out_features, model_name, layer_name);
                 } else {
-                    return Err("Session in RED degradation state and no dense weight provided".to_string());
+                    return Err(
+                        "Session in RED degradation state and no dense weight provided".to_string(),
+                    );
                 }
             }
             session_state = Some(stats.state);
@@ -1163,13 +1331,28 @@ impl WgpuComputePlane {
             let (res_sparse, res_dense) = std::thread::scope(|s| {
                 let sparse_handle = s.spawn(|| {
                     let start = std::time::Instant::now();
-                    let res = self.matvec_mul_sparse_inner(h, masks, values, row_offsets, out_features, model_name, layer_name, session_id);
+                    let res = self.matvec_mul_sparse_inner(
+                        h,
+                        masks,
+                        values,
+                        row_offsets,
+                        out_features,
+                        model_name,
+                        layer_name,
+                        session_id,
+                    );
                     duration_sparse = start.elapsed();
                     res
                 });
                 let dense_handle = s.spawn(|| {
                     let start = std::time::Instant::now();
-                    let res = self.matvec_mul(h, dense_weight.unwrap(), out_features, model_name, layer_name);
+                    let res = self.matvec_mul(
+                        h,
+                        dense_weight.unwrap(),
+                        out_features,
+                        model_name,
+                        layer_name,
+                    );
                     duration_dense = start.elapsed();
                     res
                 });
@@ -1201,7 +1384,16 @@ impl WgpuComputePlane {
                 Ok(sparse_result)
             }
         } else {
-            self.matvec_mul_sparse_inner(h, masks, values, row_offsets, out_features, model_name, layer_name, session_id)
+            self.matvec_mul_sparse_inner(
+                h,
+                masks,
+                values,
+                row_offsets,
+                out_features,
+                model_name,
+                layer_name,
+                session_id,
+            )
         };
 
         // Update degradation statistics
@@ -1251,47 +1443,67 @@ impl WgpuComputePlane {
 
         // Get persistent or temporary op buffers
         let op = if let (Some(m_name), Some(l_name)) = (model_name, layer_name) {
-            self.get_or_create_sparse_op(m_name, l_name, in_features, out_features, masks, values, row_offsets)
+            self.get_or_create_sparse_op(
+                m_name,
+                l_name,
+                in_features,
+                out_features,
+                masks,
+                values,
+                row_offsets,
+            )
         } else {
-            let masks_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Sparse Masks Buffer"),
-                contents: bytemuck::cast_slice(masks),
-                usage: wgpu::BufferUsages::STORAGE,
-            }));
-            let values_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Sparse Values Buffer"),
-                contents: bytemuck::cast_slice(values),
-                usage: wgpu::BufferUsages::STORAGE,
-            }));
-            let row_offsets_buffer = std::sync::Arc::new(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Sparse Offsets Buffer"),
-                contents: bytemuck::cast_slice(row_offsets),
-                usage: wgpu::BufferUsages::STORAGE,
-            }));
-            let params_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Params Buffer"),
-                size: 8,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let input_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Input Buffer"),
-                size: (in_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let output_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Output Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            let staging_buffer = std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Staging Buffer"),
-                size: (out_features * 4) as u64,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            }));
+            let masks_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Sparse Masks Buffer"),
+                    contents: bytemuck::cast_slice(masks),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let values_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Sparse Values Buffer"),
+                    contents: bytemuck::cast_slice(values),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let row_offsets_buffer = std::sync::Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Sparse Offsets Buffer"),
+                    contents: bytemuck::cast_slice(row_offsets),
+                    usage: wgpu::BufferUsages::STORAGE,
+                },
+            ));
+            let params_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Params Buffer"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let input_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Input Buffer"),
+                    size: (in_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let output_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Output Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            let staging_buffer =
+                std::sync::Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Staging Buffer"),
+                    size: (out_features * 4) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }));
             std::sync::Arc::new(PersistentSparseOp {
                 masks_buffer,
                 values_buffer,
@@ -1306,11 +1518,14 @@ impl WgpuComputePlane {
         // Measure L3 copy write latency (RAM -> VRAM staging)
         let copy_start = std::time::Instant::now();
         let params = [in_features as u32, out_features as u32];
-        self.queue.write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
-        self.queue.write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
+        self.queue
+            .write_buffer(&op.params_buffer, 0, bytemuck::cast_slice(&params));
+        self.queue
+            .write_buffer(&op.input_buffer, 0, bytemuck::cast_slice(h));
         let copy_duration = copy_start.elapsed();
 
-        if copy_duration.as_micros() > 1000 { // > 1ms
+        if copy_duration.as_micros() > 1000 {
+            // > 1ms
             println!("⚠️ L3_SLOW: GPU memory copy took {:?}", copy_duration);
             self.device.poll(wgpu::Maintain::Wait); // Wait on GPU fence
 
@@ -1365,9 +1580,11 @@ impl WgpuComputePlane {
         });
 
         // Dispatch compute pass
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Sparse GEMV Command Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Sparse GEMV Command Encoder"),
+            });
 
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1381,7 +1598,13 @@ impl WgpuComputePlane {
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
-        encoder.copy_buffer_to_buffer(&op.output_buffer, 0, &op.staging_buffer, 0, (out_features * 4) as u64);
+        encoder.copy_buffer_to_buffer(
+            &op.output_buffer,
+            0,
+            &op.staging_buffer,
+            0,
+            (out_features * 4) as u64,
+        );
         self.queue.submit(Some(encoder.finish()));
 
         // Map staging buffer and fetch results
@@ -1459,7 +1682,10 @@ mod tests {
         let plane = match pollster::block_on(WgpuComputePlane::new()) {
             Ok(p) => p,
             Err(e) => {
-                println!("⚠️ Skipping WGPU GEMV test: WGPU not supported or device request failed ({})", e);
+                println!(
+                    "⚠️ Skipping WGPU GEMV test: WGPU not supported or device request failed ({})",
+                    e
+                );
                 return;
             }
         };
@@ -1467,10 +1693,14 @@ mod tests {
         let in_features = 128;
         let out_features = 64;
         let h: Vec<f32> = (0..in_features).map(|i| i as f32 * 0.01).collect();
-        let weight: Vec<f32> = (0..in_features * out_features).map(|i| i as f32 * 0.0001).collect();
+        let weight: Vec<f32> = (0..in_features * out_features)
+            .map(|i| i as f32 * 0.0001)
+            .collect();
 
         // GPU Result
-        let gpu_res = plane.matvec_mul(&h, &weight, out_features, None, None).expect("GPU matvec failed");
+        let gpu_res = plane
+            .matvec_mul(&h, &weight, out_features, None, None)
+            .expect("GPU matvec failed");
 
         // CPU Result (exact reference calculation)
         let mut cpu_res = vec![0.0f32; out_features];
@@ -1502,7 +1732,10 @@ mod tests {
         let plane = match pollster::block_on(WgpuComputePlane::new()) {
             Ok(p) => p,
             Err(e) => {
-                println!("⚠️ Skipping WGPU Sparse GEMV test: WGPU not supported or device request failed ({})", e);
+                println!(
+                    "⚠️ Skipping WGPU Sparse GEMV test: WGPU not supported or device request failed ({})",
+                    e
+                );
                 return;
             }
         };
@@ -1510,13 +1743,9 @@ mod tests {
         let in_features = 128;
         let out_features = 64;
         let h: Vec<f32> = (0..in_features).map(|i| i as f32 * 0.01).collect();
-        let weight: Vec<f32> = (0..in_features * out_features).map(|i| {
-            if i % 2 == 0 {
-                i as f32 * 0.0001
-            } else {
-                0.0
-            }
-        }).collect();
+        let weight: Vec<f32> = (0..in_features * out_features)
+            .map(|i| if i % 2 == 0 { i as f32 * 0.0001 } else { 0.0 })
+            .collect();
 
         // Pack weight as sparse
         let mut masks = Vec::new();
@@ -1540,17 +1769,19 @@ mod tests {
         }
 
         // Run sparse GPU Gemv
-        let gpu_sparse_res = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            None,
-            None,
-            Some(&weight),
-            None,
-        ).expect("GPU Sparse matvec failed");
+        let gpu_sparse_res = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                None,
+                None,
+                Some(&weight),
+                None,
+            )
+            .expect("GPU Sparse matvec failed");
 
         // CPU Result (exact reference calculation)
         let mut cpu_res = vec![0.0f32; out_features];
@@ -1582,7 +1813,10 @@ mod tests {
         let plane = match pollster::block_on(WgpuComputePlane::new()) {
             Ok(p) => p,
             Err(e) => {
-                println!("⚠️ Skipping WGPU Sparse circuit breaker test: WGPU not supported ({})", e);
+                println!(
+                    "⚠️ Skipping WGPU Sparse circuit breaker test: WGPU not supported ({})",
+                    e
+                );
                 return;
             }
         };
@@ -1617,17 +1851,19 @@ mod tests {
         // Test checksum guard and blacklisting
         // Pass a mismatched dense weight to trigger a mismatch
         let layer_name = "test_layer_for_blacklist";
-        let _ = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            Some("test_model"),
-            Some(layer_name),
-            Some(&mismatched_dense_weight),
-            None,
-        ).unwrap();
+        let _ = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                Some("test_model"),
+                Some(layer_name),
+                Some(&mismatched_dense_weight),
+                None,
+            )
+            .unwrap();
 
         // The blacklist should now contain the layer with remaining requests count = 100
         {
@@ -1636,17 +1872,19 @@ mod tests {
         }
 
         // Next call should route to dense and decrement the count
-        let _ = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            Some("test_model"),
-            Some(layer_name),
-            Some(&weight), // Correct weight now
-            None,
-        ).unwrap();
+        let _ = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                Some("test_model"),
+                Some(layer_name),
+                Some(&weight), // Correct weight now
+                None,
+            )
+            .unwrap();
 
         {
             let blacklist_guard = plane.blacklist.lock().unwrap();
@@ -1666,17 +1904,19 @@ mod tests {
         };
         assert_eq!(count_before, 0);
 
-        let _ = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            Some("test_model"),
-            Some(winner_layer),
-            Some(&weight),
-            None,
-        ).unwrap();
+        let _ = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                Some("test_model"),
+                Some(winner_layer),
+                Some(&weight),
+                None,
+            )
+            .unwrap();
 
         let count_after = {
             let count_guard = plane.verification_count.lock().unwrap();
@@ -1689,12 +1929,18 @@ mod tests {
         std::fs::write(cache_path, b"corrupted bytes here").unwrap();
 
         let plane_corrupted = pollster::block_on(WgpuComputePlane::new()).unwrap();
-        assert!(plane_corrupted.sparse_disabled.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(
+            plane_corrupted
+                .sparse_disabled
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
 
         // Clean up the temporary test cache
         let _ = std::fs::remove_file(cache_path);
 
-        println!("✅ Checksum guard, blacklisting, dense win bypass, and compilation circuit breaker all passed perfectly!");
+        println!(
+            "✅ Checksum guard, blacklisting, dense win bypass, and compilation circuit breaker all passed perfectly!"
+        );
     }
 
     #[test]
@@ -1710,17 +1956,19 @@ mod tests {
         let out_features = 1;
 
         // 1. Initial request on new session should initialize stats to Green
-        let res = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            Some("test_model"),
-            Some("degrad_layer"),
-            Some(&weight),
-            Some(session_id),
-        ).unwrap();
+        let res = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                Some("test_model"),
+                Some("degrad_layer"),
+                Some(&weight),
+                Some(session_id),
+            )
+            .unwrap();
         assert_eq!(res.len(), 1);
 
         {
@@ -1732,17 +1980,19 @@ mod tests {
         }
 
         // 2. Test Golden Dataset exclusion
-        let res_ex = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            Some("test_model"),
-            Some("degrad_layer"),
-            Some(&weight),
-            Some("exclude_session_id"),
-        ).unwrap();
+        let res_ex = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                Some("test_model"),
+                Some("degrad_layer"),
+                Some(&weight),
+                Some("exclude_session_id"),
+            )
+            .unwrap();
         assert_eq!(res_ex.len(), 1);
 
         {
@@ -1757,17 +2007,20 @@ mod tests {
             stats.state = DegradationState::Red;
         }
 
-        let res_red = plane.matvec_mul_sparse(
-            &h,
-            &masks,
-            &values,
-            &row_offsets,
-            out_features,
-            Some("test_model"),
-            Some("degrad_layer"),
-            Some(&weight),
-            Some(session_id),
-        ).unwrap();
+        let res_red = plane
+            .matvec_mul_sparse(
+                &h,
+                &masks,
+                &values,
+                &row_offsets,
+                out_features,
+                Some("test_model"),
+                Some("degrad_layer"),
+                Some(&weight),
+                Some(session_id),
+            )
+            .unwrap();
         assert_eq!(res_red.len(), 1);
     }
 }
+

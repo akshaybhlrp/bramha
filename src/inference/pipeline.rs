@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 /// Phase 5 — Pipeline Parallelism & Dynamic Tensor Sharding
 ///
 /// # Design: Devices as DB Replicas
@@ -18,9 +19,7 @@
 /// - GPU stages reuse the existing WGPU path in `engine.rs`.
 /// - If only a single slot is present, execution is identical to the original monolithic loop.
 /// - Degrades gracefully on any hardware configuration.
-
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Device Topology
@@ -140,7 +139,9 @@ pub fn get_system_ram_bytes() -> u64 {
         }
 
         // Try reading cgroup v1 limit
-        if let Ok(limit_str) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
+        if let Ok(limit_str) =
+            std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+        {
             if let Ok(limit) = limit_str.trim().parse::<u64>() {
                 // A value of 9223372036854771712 or similar means unlimited in cgroup v1
                 if limit > 0 && limit < 9000000000000000000 {
@@ -172,7 +173,9 @@ impl DeviceMesh {
         DeviceMesh {
             slots: vec![DeviceSlot::new(
                 "cpu:0",
-                DeviceKind::CpuPool { num_threads: threads },
+                DeviceKind::CpuPool {
+                    num_threads: threads,
+                },
                 get_capped_system_ram_bytes(),
             )],
         }
@@ -184,8 +187,20 @@ impl DeviceMesh {
         let budget = get_capped_system_ram_bytes() / 2;
         DeviceMesh {
             slots: vec![
-                DeviceSlot::new("cpu:0", DeviceKind::CpuPool { num_threads: threads_per_stage }, budget),
-                DeviceSlot::new("cpu:1", DeviceKind::CpuPool { num_threads: threads_per_stage }, budget),
+                DeviceSlot::new(
+                    "cpu:0",
+                    DeviceKind::CpuPool {
+                        num_threads: threads_per_stage,
+                    },
+                    budget,
+                ),
+                DeviceSlot::new(
+                    "cpu:1",
+                    DeviceKind::CpuPool {
+                        num_threads: threads_per_stage,
+                    },
+                    budget,
+                ),
             ],
         }
     }
@@ -195,7 +210,13 @@ impl DeviceMesh {
     pub fn cpu_gpu(cpu_threads: usize) -> Self {
         DeviceMesh {
             slots: vec![
-                DeviceSlot::new("cpu:0", DeviceKind::CpuPool { num_threads: cpu_threads }, get_capped_system_ram_bytes()),
+                DeviceSlot::new(
+                    "cpu:0",
+                    DeviceKind::CpuPool {
+                        num_threads: cpu_threads,
+                    },
+                    get_capped_system_ram_bytes(),
+                ),
                 DeviceSlot::new("wgpu:0", DeviceKind::Wgpu, 4 * 1024 * 1024 * 1024),
             ],
         }
@@ -222,11 +243,15 @@ impl DeviceMesh {
 
         let budget = get_capped_system_ram_bytes() / stages as u64;
         let slots = (0..stages)
-            .map(|i| DeviceSlot::new(
-                format!("cpu:{}", i),
-                DeviceKind::CpuPool { num_threads: threads },
-                budget,
-            ))
+            .map(|i| {
+                DeviceSlot::new(
+                    format!("cpu:{}", i),
+                    DeviceKind::CpuPool {
+                        num_threads: threads,
+                    },
+                    budget,
+                )
+            })
             .collect();
         DeviceMesh { slots }
     }
@@ -289,7 +314,10 @@ impl ShardingPlanner {
 
         let num_slots = mesh.slots.len();
         if num_slots == 0 || num_layers == 0 {
-            return LayerAssignment { map: HashMap::new(), stages: Vec::new() };
+            return LayerAssignment {
+                map: HashMap::new(),
+                stages: Vec::new(),
+            };
         }
 
         // If only one slot, trivially assign everything to it
@@ -318,11 +346,13 @@ impl ShardingPlanner {
         let mut slot_layer_counts = vec![0usize; num_slots];
 
         for layer_idx in 0..num_layers {
-            let size = layer_sizes_bytes.get(layer_idx).copied().unwrap_or(avg_size);
+            let size = layer_sizes_bytes
+                .get(layer_idx)
+                .copied()
+                .unwrap_or(avg_size);
 
             // Move to next slot if current is full (and there is a next slot)
-            if slot_idx + 1 < num_slots
-                && slot_used + size > mesh.slots[slot_idx].dram_budget_bytes
+            if slot_idx + 1 < num_slots && slot_used + size > mesh.slots[slot_idx].dram_budget_bytes
             {
                 stage_starts[slot_idx + 1] = layer_idx;
                 slot_idx += 1;
@@ -356,12 +386,17 @@ impl ShardingPlanner {
         manifest: &crate::storage::storage_manifest::ModelManifest,
     ) -> LayerAssignment {
         // Collect per-layer byte sizes in layer order
-        let mut sizes: Vec<(usize, u64)> = manifest.layers.values()
+        let mut sizes: Vec<(usize, u64)> = manifest
+            .layers
+            .values()
             .filter_map(|meta| {
                 // Extract layer index from names like "model.layers.5.self_attn..."
                 let parts: Vec<&str> = meta.layer_id.split('.').collect();
                 if parts.len() >= 3 && parts[1] == "layers" {
-                    parts[2].parse::<usize>().ok().map(|idx| (idx, meta.stored_bytes))
+                    parts[2]
+                        .parse::<usize>()
+                        .ok()
+                        .map(|idx| (idx, meta.stored_bytes))
                 } else {
                     None
                 }
@@ -411,9 +446,12 @@ impl PipelineExecutor {
 
     /// Returns a summary of the pipeline configuration for logging.
     pub fn describe(&self) -> String {
-        let parts: Vec<String> = self.assignment.stages.iter().map(|(slot_id, range)| {
-            format!("{}: layers {}..{}", slot_id, range.start, range.end)
-        }).collect();
+        let parts: Vec<String> = self
+            .assignment
+            .stages
+            .iter()
+            .map(|(slot_id, range)| format!("{}: layers {}..{}", slot_id, range.start, range.end))
+            .collect();
         format!("Pipeline[{}]", parts.join(" | "))
     }
 
@@ -479,8 +517,16 @@ mod tests {
         let budget_per_slot = 6 * 500 * 1024 * 1024u64;
         let mut mesh = DeviceMesh {
             slots: vec![
-                DeviceSlot::new("cpu:0", DeviceKind::CpuPool { num_threads: 4 }, budget_per_slot),
-                DeviceSlot::new("cpu:1", DeviceKind::CpuPool { num_threads: 4 }, budget_per_slot),
+                DeviceSlot::new(
+                    "cpu:0",
+                    DeviceKind::CpuPool { num_threads: 4 },
+                    budget_per_slot,
+                ),
+                DeviceSlot::new(
+                    "cpu:1",
+                    DeviceKind::CpuPool { num_threads: 4 },
+                    budget_per_slot,
+                ),
             ],
         };
         // 12 layers, 500MB each
@@ -514,7 +560,9 @@ mod tests {
             // Simulate: each layer adds 1.0 to every element
             let mut out = act;
             for _layer in range.clone() {
-                for v in out.iter_mut() { *v += 1.0; }
+                for v in out.iter_mut() {
+                    *v += 1.0;
+                }
             }
             Ok(out)
         });
@@ -527,7 +575,9 @@ mod tests {
             assert!(
                 (v - (i as f32 + num_layers as f32)).abs() < 1e-5,
                 "Mismatch at index {}: expected {}, got {}",
-                i, i as f32 + num_layers as f32, v
+                i,
+                i as f32 + num_layers as f32,
+                v
             );
         }
     }
@@ -541,7 +591,10 @@ mod tests {
         // ── Single-stage reference ──────────────────────────────────────────
         let mut single_mesh = DeviceMesh::single_cpu();
         let single_assignment = ShardingPlanner::plan(&mut single_mesh, num_layers, &[]);
-        let single_executor = PipelineExecutor { mesh: single_mesh, assignment: single_assignment };
+        let single_executor = PipelineExecutor {
+            mesh: single_mesh,
+            assignment: single_assignment,
+        };
 
         let initial: Vec<f32> = (0..hidden_size).map(|i| i as f32 * 0.5).collect();
 
@@ -550,12 +603,16 @@ mod tests {
             for layer_idx in range.clone() {
                 // Deterministic: multiply element j by (1.0 + 0.01 * layer_idx)
                 let scale = 1.0 + 0.01 * layer_idx as f32;
-                for v in out.iter_mut() { *v *= scale; }
+                for v in out.iter_mut() {
+                    *v *= scale;
+                }
             }
             Ok(out)
         };
 
-        let reference = single_executor.execute_step(initial.clone(), layer_fn).unwrap();
+        let reference = single_executor
+            .execute_step(initial.clone(), layer_fn)
+            .unwrap();
 
         // ── Two-stage pipeline ──────────────────────────────────────────────
         // Budget forces split at layer 4 (half)
@@ -568,18 +625,25 @@ mod tests {
         };
         let sizes = vec![500 * 1024 * 1024u64; num_layers];
         let dual_assignment = ShardingPlanner::plan(&mut dual_mesh, num_layers, &sizes);
-        let dual_executor = PipelineExecutor { mesh: dual_mesh, assignment: dual_assignment };
+        let dual_executor = PipelineExecutor {
+            mesh: dual_mesh,
+            assignment: dual_assignment,
+        };
 
         assert!(dual_executor.is_multi_stage(), "Expected 2 stages");
 
-        let dual_result = dual_executor.execute_step(initial.clone(), |act, range, _slot| {
-            let mut out = act;
-            for layer_idx in range.clone() {
-                let scale = 1.0 + 0.01 * layer_idx as f32;
-                for v in out.iter_mut() { *v *= scale; }
-            }
-            Ok(out)
-        }).unwrap();
+        let dual_result = dual_executor
+            .execute_step(initial.clone(), |act, range, _slot| {
+                let mut out = act;
+                for layer_idx in range.clone() {
+                    let scale = 1.0 + 0.01 * layer_idx as f32;
+                    for v in out.iter_mut() {
+                        *v *= scale;
+                    }
+                }
+                Ok(out)
+            })
+            .unwrap();
 
         // Both must produce identical activations (pipeline is mathematically equivalent)
         assert_eq!(reference.len(), dual_result.len());
@@ -587,7 +651,9 @@ mod tests {
             assert!(
                 (ref_v - dual_v).abs() < 1e-4,
                 "Mismatch at index {}: reference={}, pipeline={}",
-                i, ref_v, dual_v
+                i,
+                ref_v,
+                dual_v
             );
         }
     }

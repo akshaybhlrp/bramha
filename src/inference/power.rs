@@ -23,11 +23,11 @@ pub fn throttle_power(work_time: Duration) {
     if limit >= 100 || limit == 0 {
         return;
     }
-    
+
     let work_ns = work_time.as_nanos() as f64;
     let total_ns = work_ns / (limit as f64 / 100.0);
     let sleep_ns = total_ns - work_ns;
-    
+
     if sleep_ns > 0.0 {
         std::thread::sleep(Duration::from_nanos(sleep_ns as u64));
     }

@@ -1,19 +1,18 @@
+use crate::inference::engine::{InferenceLogger, InferenceResult, estimate_query_complexity};
+use crate::inference::prefetcher::Prefetcher;
+use crate::inference::tokenizer::BramhaTokenizer;
+use crate::storage::Database;
+use rayon::prelude::*;
+use std::collections::HashMap;
+use std::io::Write;
 /// Pure CPU High-Performance Inference Engine — Zero GPU dependency.
 ///
 /// Uses direct Memory-Mapped flat f32 slices, Rayon parallelism,
 /// and CPU-optimized SIMD loops to bypass all tensor library allocation overhead.
 /// Like SQL Server: highly optimized cache-friendly buffer page operations.
 /// Delivers extreme CPU speeds (50+ tokens/sec) on standard multi-core hardware.
-
-use std::sync::{Arc, OnceLock, Mutex};
-use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
-use std::io::Write;
-use rayon::prelude::*;
-use crate::inference::tokenizer::BramhaTokenizer;
-use crate::inference::engine::{InferenceResult, InferenceLogger, estimate_query_complexity};
-use crate::inference::prefetcher::Prefetcher;
-use crate::storage::Database;
 
 tokio::task_local! {
     pub static IS_SPARSE_PATH: bool;
@@ -33,28 +32,34 @@ fn get_dequantized_weight(
 ) -> Result<Arc<Vec<f32>>, String> {
     let cache = DEQUANTIZED_WEIGHTS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let cache_key = format!("{}:{}", model.name, name);
-    
+
     {
         let map = cache.lock().unwrap();
         if let Some(cached) = map.get(&cache_key) {
             return Ok(cached.clone());
         }
     }
-    
+
     // Cache miss: load and dequantize
-    let page = model.layers.get(name)
+    let page = model
+        .layers
+        .get(name)
         .ok_or_else(|| format!("Weight not found in sharded DB: {}", name))?;
-        
+
     let dequantized = match page.dtype {
         crate::core::tensor::DType::I8 => {
-            let scale_page = model.layers.get(&format!("{}.scale", name))
+            let scale_page = model
+                .layers
+                .get(&format!("{}.scale", name))
                 .ok_or_else(|| format!("Scale not found for quantized weight: {}", name))?;
             let scales: &[f32] = bytemuck::cast_slice(scale_page.as_bytes());
             let q_weight: &[i8] = bytemuck::cast_slice(page.as_bytes());
             crate::models::quantization::dequantize_int8(q_weight, scales, page.shape[1])
         }
         crate::core::tensor::DType::U4 => {
-            let scale_page = model.layers.get(&format!("{}.scale", name))
+            let scale_page = model
+                .layers
+                .get(&format!("{}.scale", name))
                 .ok_or_else(|| format!("Scale not found for quantized weight: {}", name))?;
             let scales: &[f32] = bytemuck::cast_slice(scale_page.as_bytes());
             crate::models::quantization::dequantize_int4(page.as_bytes(), scales, page.shape[1])
@@ -64,7 +69,7 @@ fn get_dequantized_weight(
             f32_slice.to_vec()
         }
     };
-    
+
     let arc_weight = Arc::new(dequantized);
     {
         let mut map = cache.lock().unwrap();
@@ -74,7 +79,7 @@ fn get_dequantized_weight(
         }
         map.insert(cache_key, arc_weight.clone());
     }
-    
+
     Ok(arc_weight)
 }
 
@@ -125,12 +130,16 @@ fn get_weight_tensor<'a>(
     model: &'a crate::storage::tensor_db::ModelTable,
     name: &str,
 ) -> Result<WeightTensor<'a>, String> {
-    let page = model.layers.get(name)
+    let page = model
+        .layers
+        .get(name)
         .ok_or_else(|| format!("Weight not found in sharded DB: {}", name))?;
-    
+
     match page.dtype {
         crate::core::tensor::DType::I8 => {
-            let scale_page = model.layers.get(&format!("{}.scale", name))
+            let scale_page = model
+                .layers
+                .get(&format!("{}.scale", name))
                 .ok_or_else(|| format!("Scale not found for quantized weight: {}", name))?;
             Ok(WeightTensor::QuantizedI8 {
                 q_weight: bytemuck::cast_slice(page.as_bytes()),
@@ -138,7 +147,9 @@ fn get_weight_tensor<'a>(
             })
         }
         crate::core::tensor::DType::U4 => {
-            let scale_page = model.layers.get(&format!("{}.scale", name))
+            let scale_page = model
+                .layers
+                .get(&format!("{}.scale", name))
                 .ok_or_else(|| format!("Scale not found for quantized weight: {}", name))?;
             Ok(WeightTensor::QuantizedU4 {
                 q_weight: page.as_bytes(),
@@ -166,14 +177,9 @@ fn get_weight_tensor<'a>(
             }
             let dict: &[f32] = bytemuck::cast_slice(&bytes[0..1024]);
             let indices = &bytes[1024..];
-            Ok(WeightTensor::ColumnarDict {
-                dict,
-                indices,
-            })
+            Ok(WeightTensor::ColumnarDict { dict, indices })
         }
-        _ => {
-            Ok(WeightTensor::Float(bytemuck::cast_slice(page.as_bytes())))
-        }
+        _ => Ok(WeightTensor::Float(bytemuck::cast_slice(page.as_bytes()))),
     }
 }
 
@@ -194,14 +200,18 @@ fn get_weight_tensor_from_page<'a>(
 ) -> Result<WeightTensor<'a>, String> {
     match page.dtype {
         crate::core::tensor::DType::I8 => {
-            let sp = scale_page.ok_or_else(|| format!("Scale page not found for quantized weight: {}", page.name))?;
+            let sp = scale_page.ok_or_else(|| {
+                format!("Scale page not found for quantized weight: {}", page.name)
+            })?;
             Ok(WeightTensor::QuantizedI8 {
                 q_weight: bytemuck::cast_slice(page.as_bytes()),
                 scales: bytemuck::cast_slice(sp.as_bytes()),
             })
         }
         crate::core::tensor::DType::U4 => {
-            let sp = scale_page.ok_or_else(|| format!("Scale page not found for quantized weight: {}", page.name))?;
+            let sp = scale_page.ok_or_else(|| {
+                format!("Scale page not found for quantized weight: {}", page.name)
+            })?;
             Ok(WeightTensor::QuantizedU4 {
                 q_weight: page.as_bytes(),
                 scales: bytemuck::cast_slice(sp.as_bytes()),
@@ -228,14 +238,14 @@ fn get_weight_tensor_from_page<'a>(
             }
             let dict = safe_cast_to_f32(&bytes[0..1024]);
             let indices = &bytes[1024..];
-            Ok(WeightTensor::ColumnarDict {
-                dict,
-                indices,
-            })
+            Ok(WeightTensor::ColumnarDict { dict, indices })
         }
         _ => {
             if page.as_bytes().len() == 0 {
-                println!("WARNING: get_weight_tensor_from_page called on 0-byte page: {}", page.name);
+                println!(
+                    "WARNING: get_weight_tensor_from_page called on 0-byte page: {}",
+                    page.name
+                );
             }
             Ok(WeightTensor::Float(safe_cast_to_f32(page.as_bytes())))
         }
@@ -270,18 +280,35 @@ struct ClonedLayerPages {
 impl ClonedLayerPages {
     fn resolve(&self) -> Result<LayerWeights<'_>, String> {
         let input_layernorm_weight = safe_cast_to_f32(self.input_layernorm.as_bytes());
-        let post_attention_layernorm_weight = safe_cast_to_f32(self.post_attention_layernorm.as_bytes());
-        
-        let q_proj_bias = self.q_proj_bias.as_ref().map(|p| safe_cast_to_f32(p.as_bytes())).filter(|s| !s.is_empty());
-        let k_proj_bias = self.k_proj_bias.as_ref().map(|p| safe_cast_to_f32(p.as_bytes())).filter(|s| !s.is_empty());
-        let v_proj_bias = self.v_proj_bias.as_ref().map(|p| safe_cast_to_f32(p.as_bytes())).filter(|s| !s.is_empty());
-        let o_proj_bias = self.o_proj_bias.as_ref().map(|p| safe_cast_to_f32(p.as_bytes())).filter(|s| !s.is_empty());
-        
+        let post_attention_layernorm_weight =
+            safe_cast_to_f32(self.post_attention_layernorm.as_bytes());
+
+        let q_proj_bias = self
+            .q_proj_bias
+            .as_ref()
+            .map(|p| safe_cast_to_f32(p.as_bytes()))
+            .filter(|s| !s.is_empty());
+        let k_proj_bias = self
+            .k_proj_bias
+            .as_ref()
+            .map(|p| safe_cast_to_f32(p.as_bytes()))
+            .filter(|s| !s.is_empty());
+        let v_proj_bias = self
+            .v_proj_bias
+            .as_ref()
+            .map(|p| safe_cast_to_f32(p.as_bytes()))
+            .filter(|s| !s.is_empty());
+        let o_proj_bias = self
+            .o_proj_bias
+            .as_ref()
+            .map(|p| safe_cast_to_f32(p.as_bytes()))
+            .filter(|s| !s.is_empty());
+
         let q_proj_weight = get_weight_tensor_from_page(&self.q_proj, self.q_proj_scale.as_ref())?;
         let k_proj_weight = get_weight_tensor_from_page(&self.k_proj, self.k_proj_scale.as_ref())?;
         let v_proj_weight = get_weight_tensor_from_page(&self.v_proj, self.v_proj_scale.as_ref())?;
         let o_proj_weight = get_weight_tensor_from_page(&self.o_proj, self.o_proj_scale.as_ref())?;
-        
+
         let gate_proj_weight = if let Some(ref p) = self.gate_proj {
             get_weight_tensor_from_page(p, self.gate_proj_scale.as_ref())?
         } else {
@@ -322,12 +349,16 @@ impl ClonedLayerPages {
     }
 }
 
-
-
 /// Thread-safe parallelized Matrix-Vector multiplication (GEMV).
 /// Autovectorizes to AVX2/FMA instructions for maximum CPU hardware performance.
 /// Uses adaptive thread scheduling based on feature dimension.
-fn matvec_mul(h: &[f32], weight: &WeightTensor, out_features: usize, name: Option<&str>, layer_name: Option<&str>) -> Vec<f32> {
+fn matvec_mul(
+    h: &[f32],
+    weight: &WeightTensor,
+    out_features: usize,
+    name: Option<&str>,
+    layer_name: Option<&str>,
+) -> Vec<f32> {
     let in_features = h.len();
     let mut out = vec![0.0f32; out_features];
 
@@ -362,44 +393,71 @@ fn matvec_mul(h: &[f32], weight: &WeightTensor, out_features: usize, name: Optio
             let scheduler = crate::planner::scheduler::HeterogeneousScheduler::new();
             let tensor_size = in_features * out_features;
 
-            if scheduler.route_op(tensor_size, "gemv") == crate::planner::scheduler::BackendTarget::Gpu {
+            if scheduler.route_op(tensor_size, "gemv")
+                == crate::planner::scheduler::BackendTarget::Gpu
+            {
                 if let Some(plane) = crate::compute::wgpu_backend::get_wgpu_plane() {
-                match weight {
-                    WeightTensor::Float(w) => {
-                        match plane.matvec_mul(h, w, out_features, name, layer_name) {
-                            Ok(gpu_out) => return gpu_out,
-                            Err(e) => {
-                                eprintln!("⚠️ [WGPU] GPU execution error: {}. Falling back to CPU SIMD...", e);
+                    match weight {
+                        WeightTensor::Float(w) => {
+                            match plane.matvec_mul(h, w, out_features, name, layer_name) {
+                                Ok(gpu_out) => return gpu_out,
+                                Err(e) => {
+                                    eprintln!(
+                                        "⚠️ [WGPU] GPU execution error: {}. Falling back to CPU SIMD...",
+                                        e
+                                    );
+                                }
                             }
                         }
-                    }
-                    WeightTensor::QuantizedI8 { q_weight, scales } => {
-                        match plane.matvec_mul_int8(h, q_weight, scales, out_features, name, layer_name) {
-                            Ok(gpu_out) => return gpu_out,
-                            Err(e) => {
-                                eprintln!("⚠️ [WGPU] GPU execution error (INT8): {}. Falling back to CPU SIMD...", e);
+                        WeightTensor::QuantizedI8 { q_weight, scales } => {
+                            match plane.matvec_mul_int8(
+                                h,
+                                q_weight,
+                                scales,
+                                out_features,
+                                name,
+                                layer_name,
+                            ) {
+                                Ok(gpu_out) => return gpu_out,
+                                Err(e) => {
+                                    eprintln!(
+                                        "⚠️ [WGPU] GPU execution error (INT8): {}. Falling back to CPU SIMD...",
+                                        e
+                                    );
+                                }
                             }
                         }
-                    }
-                    WeightTensor::QuantizedU4 { q_weight, scales } => {
-                        match plane.matvec_mul_int4(h, q_weight, scales, out_features, name, layer_name) {
-                            Ok(gpu_out) => return gpu_out,
-                            Err(e) => {
-                                eprintln!("⚠️ [WGPU] GPU execution error (INT4): {}. Falling back to CPU SIMD...", e);
+                        WeightTensor::QuantizedU4 { q_weight, scales } => {
+                            match plane.matvec_mul_int4(
+                                h,
+                                q_weight,
+                                scales,
+                                out_features,
+                                name,
+                                layer_name,
+                            ) {
+                                Ok(gpu_out) => return gpu_out,
+                                Err(e) => {
+                                    eprintln!(
+                                        "⚠️ [WGPU] GPU execution error (INT4): {}. Falling back to CPU SIMD...",
+                                        e
+                                    );
+                                }
                             }
                         }
+                        WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
+                            unimplemented!("SVD not implemented for this operation")
+                        }
                     }
-                    WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => unimplemented!("SVD not implemented for this operation"),
-
                 }
             }
         }
     }
-}
 
     if out_features >= 128 {
-        out.par_iter_mut().enumerate().for_each(|(j, out_val)| {
-            match weight {
+        out.par_iter_mut()
+            .enumerate()
+            .for_each(|(j, out_val)| match weight {
                 WeightTensor::Float(w) => {
                     let offset = j * in_features;
                     let weight_slice = &w[offset..offset + in_features];
@@ -440,8 +498,7 @@ fn matvec_mul(h: &[f32], weight: &WeightTensor, out_features: usize, name: Optio
                     *out_val = sum;
                 }
                 &WeightTensor::ColumnarDict { .. } => unimplemented!("Not supported yet"),
-            }
-        });
+            });
     } else {
         for j in 0..out_features {
             match weight {
@@ -492,7 +549,13 @@ fn matvec_mul(h: &[f32], weight: &WeightTensor, out_features: usize, name: Optio
 }
 
 /// Block-matrix multiplication (GEMM) for Flash Attention prefill.
-fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_features: usize, out_features: usize) -> Vec<f32> {
+fn gemm_cpu(
+    h_block: &[f32],
+    weight: &WeightTensor,
+    block_size: usize,
+    in_features: usize,
+    out_features: usize,
+) -> Vec<f32> {
     let mut out = vec![0.0f32; block_size * out_features];
     let is_cpu = true;
 
@@ -504,7 +567,7 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
                     let offset = j * in_features;
                     let weight_slice = &w[offset..offset + in_features];
                     for b in 0..block_size {
-                        let h_row = &h_block[b * in_features .. (b + 1) * in_features];
+                        let h_row = &h_block[b * in_features..(b + 1) * in_features];
                         let mut sum = 0.0f32;
                         for i in 0..in_features {
                             sum += h_row[i] * weight_slice[i];
@@ -519,7 +582,7 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
                     let weight_slice = &q_weight[offset..offset + in_features];
                     let scale = scales[j];
                     for b in 0..block_size {
-                        let h_row = &h_block[b * in_features .. (b + 1) * in_features];
+                        let h_row = &h_block[b * in_features..(b + 1) * in_features];
                         let mut sum = 0.0f32;
                         for i in 0..in_features {
                             sum += h_row[i] * weight_slice[i] as f32;
@@ -535,19 +598,19 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
                     let row_bytes = &q_weight[offset..offset + half_in];
                     let scale = scales[j];
                     for b in 0..block_size {
-                        let h_row = &h_block[b * in_features .. (b + 1) * in_features];
-                        
+                        let h_row = &h_block[b * in_features..(b + 1) * in_features];
+
                         let mut sum0 = 0.0f32;
                         let mut sum1 = 0.0f32;
                         let mut sum2 = 0.0f32;
                         let mut sum3 = 0.0f32;
-                        
+
                         let chunks = half_in / 8;
-                        
+
                         for c in 0..chunks {
                             let base_b = c * 8;
                             let base_h = c * 16;
-                            
+
                             let b0 = row_bytes[base_b];
                             let b1 = row_bytes[base_b + 1];
                             let b2 = row_bytes[base_b + 2];
@@ -556,22 +619,31 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
                             let b5 = row_bytes[base_b + 5];
                             let b6 = row_bytes[base_b + 6];
                             let b7 = row_bytes[base_b + 7];
-                            
-                            sum0 += h_row[base_h] * LUT_Q1[b0 as usize] + h_row[base_h + 1] * LUT_Q2[b0 as usize];
-                            sum1 += h_row[base_h + 2] * LUT_Q1[b1 as usize] + h_row[base_h + 3] * LUT_Q2[b1 as usize];
-                            sum2 += h_row[base_h + 4] * LUT_Q1[b2 as usize] + h_row[base_h + 5] * LUT_Q2[b2 as usize];
-                            sum3 += h_row[base_h + 6] * LUT_Q1[b3 as usize] + h_row[base_h + 7] * LUT_Q2[b3 as usize];
-                            
-                            sum0 += h_row[base_h + 8] * LUT_Q1[b4 as usize] + h_row[base_h + 9] * LUT_Q2[b4 as usize];
-                            sum1 += h_row[base_h + 10] * LUT_Q1[b5 as usize] + h_row[base_h + 11] * LUT_Q2[b5 as usize];
-                            sum2 += h_row[base_h + 12] * LUT_Q1[b6 as usize] + h_row[base_h + 13] * LUT_Q2[b6 as usize];
-                            sum3 += h_row[base_h + 14] * LUT_Q1[b7 as usize] + h_row[base_h + 15] * LUT_Q2[b7 as usize];
+
+                            sum0 += h_row[base_h] * LUT_Q1[b0 as usize]
+                                + h_row[base_h + 1] * LUT_Q2[b0 as usize];
+                            sum1 += h_row[base_h + 2] * LUT_Q1[b1 as usize]
+                                + h_row[base_h + 3] * LUT_Q2[b1 as usize];
+                            sum2 += h_row[base_h + 4] * LUT_Q1[b2 as usize]
+                                + h_row[base_h + 5] * LUT_Q2[b2 as usize];
+                            sum3 += h_row[base_h + 6] * LUT_Q1[b3 as usize]
+                                + h_row[base_h + 7] * LUT_Q2[b3 as usize];
+
+                            sum0 += h_row[base_h + 8] * LUT_Q1[b4 as usize]
+                                + h_row[base_h + 9] * LUT_Q2[b4 as usize];
+                            sum1 += h_row[base_h + 10] * LUT_Q1[b5 as usize]
+                                + h_row[base_h + 11] * LUT_Q2[b5 as usize];
+                            sum2 += h_row[base_h + 12] * LUT_Q1[b6 as usize]
+                                + h_row[base_h + 13] * LUT_Q2[b6 as usize];
+                            sum3 += h_row[base_h + 14] * LUT_Q1[b7 as usize]
+                                + h_row[base_h + 15] * LUT_Q2[b7 as usize];
                         }
-                        
+
                         let mut sum = sum0 + sum1 + sum2 + sum3;
                         for i in (chunks * 8)..half_in {
                             let byte = row_bytes[i];
-                            sum += h_row[i * 2] * LUT_Q1[byte as usize] + h_row[i * 2 + 1] * LUT_Q2[byte as usize];
+                            sum += h_row[i * 2] * LUT_Q1[byte as usize]
+                                + h_row[i * 2 + 1] * LUT_Q2[byte as usize];
                         }
                         out[b * out_features + j] = sum * scale;
                     }
@@ -579,8 +651,8 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
             }
             WeightTensor::Svd { a, b: b_wt, rank } => {
                 for b in 0..block_size {
-                    let h_row = &h_block[b * in_features .. (b + 1) * in_features];
-                    
+                    let h_row = &h_block[b * in_features..(b + 1) * in_features];
+
                     // 1. h_prime = B * x
                     let mut h_p = vec![0.0f32; *rank];
                     for r in 0..*rank {
@@ -591,7 +663,7 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
                         }
                         h_p[r] = sum;
                     }
-                    
+
                     // 2. y = A * h_prime
                     for j in 0..out_features {
                         let a_offset = j * *rank;
@@ -603,191 +675,227 @@ fn gemm_cpu(h_block: &[f32], weight: &WeightTensor, block_size: usize, in_featur
                     }
                 }
             }
-            WeightTensor::ColumnarDict { .. } => unimplemented!("ColumnarDict not implemented for this operation"),
+            WeightTensor::ColumnarDict { .. } => {
+                unimplemented!("ColumnarDict not implemented for this operation")
+            }
         }
         return out;
     }
 
-    out.par_chunks_mut(out_features).enumerate().for_each(|(b, out_row)| {
-        let h_row = &h_block[b * in_features .. (b + 1) * in_features];
-        
-        // Fast path for SVD: Precompute h_prime for the row before distributing to threads
-        let h_prime = if let WeightTensor::Svd { a: _, b: b_wt, rank } = weight {
-            let mut h_p = vec![0.0f32; *rank];
-            for r in 0..*rank {
-                let b_offset = r * in_features;
-                let mut sum = 0.0;
-                for i in 0..in_features {
-                    sum += h_row[i] * b_wt[b_offset + i];
-                }
-                h_p[r] = sum;
-            }
-            Some(h_p)
-        } else {
-            None
-        };
+    out.par_chunks_mut(out_features)
+        .enumerate()
+        .for_each(|(b, out_row)| {
+            let h_row = &h_block[b * in_features..(b + 1) * in_features];
 
-        if out_features >= 128 {
-            out_row.par_iter_mut().enumerate().with_min_len(256).for_each(|(j, y_val)| {
-                match weight {
-                    WeightTensor::Svd { a, b: _, rank } => {
-                        let a_offset = j * *rank;
-                        let mut sum = 0.0f32;
-                        let h_p = h_prime.as_ref().unwrap();
-                        for r in 0..*rank {
-                            sum += h_p[r] * a[a_offset + r];
-                        }
-                        *y_val = sum;
+            // Fast path for SVD: Precompute h_prime for the row before distributing to threads
+            let h_prime = if let WeightTensor::Svd {
+                a: _,
+                b: b_wt,
+                rank,
+            } = weight
+            {
+                let mut h_p = vec![0.0f32; *rank];
+                for r in 0..*rank {
+                    let b_offset = r * in_features;
+                    let mut sum = 0.0;
+                    for i in 0..in_features {
+                        sum += h_row[i] * b_wt[b_offset + i];
                     }
-                    WeightTensor::Float(w) => {
-                        let offset = j * in_features;
-                        let weight_slice = &w[offset..offset + in_features];
-                        let mut sum = 0.0f32;
-                        for i in 0..in_features {
-                            sum += h_row[i] * weight_slice[i];
-                        }
-                        *y_val = sum;
-                    }
-                    WeightTensor::QuantizedI8 { q_weight, scales } => {
-                        let offset = j * in_features;
-                        let weight_slice = &q_weight[offset..offset + in_features];
-                        let mut sum = 0.0f32;
-                        for i in 0..in_features {
-                            sum += h_row[i] * weight_slice[i] as f32;
-                        }
-                        *y_val = sum * scales[j];
-                    }
-                    WeightTensor::QuantizedU4 { q_weight, scales } => {
-                        let half_in = in_features / 2;
-                        let offset = j * half_in;
-                        let row_bytes = &q_weight[offset..offset + half_in];
-                        
-                        let mut sum0 = 0.0f32;
-                        let mut sum1 = 0.0f32;
-                        let mut sum2 = 0.0f32;
-                        let mut sum3 = 0.0f32;
-                        
-                        let chunks = half_in / 8;
-                        
-                        for c in 0..chunks {
-                            let base_b = c * 8;
-                            let base_h = c * 16;
-                            
-                            let b0 = row_bytes[base_b];
-                            let b1 = row_bytes[base_b + 1];
-                            let b2 = row_bytes[base_b + 2];
-                            let b3 = row_bytes[base_b + 3];
-                            let b4 = row_bytes[base_b + 4];
-                            let b5 = row_bytes[base_b + 5];
-                            let b6 = row_bytes[base_b + 6];
-                            let b7 = row_bytes[base_b + 7];
-                            
-                            sum0 += h_row[base_h] * LUT_Q1[b0 as usize] + h_row[base_h + 1] * LUT_Q2[b0 as usize];
-                            sum1 += h_row[base_h + 2] * LUT_Q1[b1 as usize] + h_row[base_h + 3] * LUT_Q2[b1 as usize];
-                            sum2 += h_row[base_h + 4] * LUT_Q1[b2 as usize] + h_row[base_h + 5] * LUT_Q2[b2 as usize];
-                            sum3 += h_row[base_h + 6] * LUT_Q1[b3 as usize] + h_row[base_h + 7] * LUT_Q2[b3 as usize];
-                            
-                            sum0 += h_row[base_h + 8] * LUT_Q1[b4 as usize] + h_row[base_h + 9] * LUT_Q2[b4 as usize];
-                            sum1 += h_row[base_h + 10] * LUT_Q1[b5 as usize] + h_row[base_h + 11] * LUT_Q2[b5 as usize];
-                            sum2 += h_row[base_h + 12] * LUT_Q1[b6 as usize] + h_row[base_h + 13] * LUT_Q2[b6 as usize];
-                            sum3 += h_row[base_h + 14] * LUT_Q1[b7 as usize] + h_row[base_h + 15] * LUT_Q2[b7 as usize];
-                        }
-                        
-                        let mut sum = sum0 + sum1 + sum2 + sum3;
-                        for i in (chunks * 8)..half_in {
-                            let byte = row_bytes[i];
-                            sum += h_row[i * 2] * LUT_Q1[byte as usize] + h_row[i * 2 + 1] * LUT_Q2[byte as usize];
-                        }
-                        *y_val = sum * scales[j];
-                    }
-                    WeightTensor::ColumnarDict { .. } => unreachable!("Handled above"),
+                    h_p[r] = sum;
                 }
-            });
-        } else {
-            for j in 0..out_features {
-                match weight {
-                    WeightTensor::Svd { a, b: _, rank } => {
-                        let a_offset = j * *rank;
-                        let mut sum = 0.0f32;
-                        let h_p = h_prime.as_ref().unwrap();
-                        for r in 0..*rank {
-                            sum += h_p[r] * a[a_offset + r];
+                Some(h_p)
+            } else {
+                None
+            };
+
+            if out_features >= 128 {
+                out_row
+                    .par_iter_mut()
+                    .enumerate()
+                    .with_min_len(256)
+                    .for_each(|(j, y_val)| match weight {
+                        WeightTensor::Svd { a, b: _, rank } => {
+                            let a_offset = j * *rank;
+                            let mut sum = 0.0f32;
+                            let h_p = h_prime.as_ref().unwrap();
+                            for r in 0..*rank {
+                                sum += h_p[r] * a[a_offset + r];
+                            }
+                            *y_val = sum;
                         }
-                        out_row[j] = sum;
+                        WeightTensor::Float(w) => {
+                            let offset = j * in_features;
+                            let weight_slice = &w[offset..offset + in_features];
+                            let mut sum = 0.0f32;
+                            for i in 0..in_features {
+                                sum += h_row[i] * weight_slice[i];
+                            }
+                            *y_val = sum;
+                        }
+                        WeightTensor::QuantizedI8 { q_weight, scales } => {
+                            let offset = j * in_features;
+                            let weight_slice = &q_weight[offset..offset + in_features];
+                            let mut sum = 0.0f32;
+                            for i in 0..in_features {
+                                sum += h_row[i] * weight_slice[i] as f32;
+                            }
+                            *y_val = sum * scales[j];
+                        }
+                        WeightTensor::QuantizedU4 { q_weight, scales } => {
+                            let half_in = in_features / 2;
+                            let offset = j * half_in;
+                            let row_bytes = &q_weight[offset..offset + half_in];
+
+                            let mut sum0 = 0.0f32;
+                            let mut sum1 = 0.0f32;
+                            let mut sum2 = 0.0f32;
+                            let mut sum3 = 0.0f32;
+
+                            let chunks = half_in / 8;
+
+                            for c in 0..chunks {
+                                let base_b = c * 8;
+                                let base_h = c * 16;
+
+                                let b0 = row_bytes[base_b];
+                                let b1 = row_bytes[base_b + 1];
+                                let b2 = row_bytes[base_b + 2];
+                                let b3 = row_bytes[base_b + 3];
+                                let b4 = row_bytes[base_b + 4];
+                                let b5 = row_bytes[base_b + 5];
+                                let b6 = row_bytes[base_b + 6];
+                                let b7 = row_bytes[base_b + 7];
+
+                                sum0 += h_row[base_h] * LUT_Q1[b0 as usize]
+                                    + h_row[base_h + 1] * LUT_Q2[b0 as usize];
+                                sum1 += h_row[base_h + 2] * LUT_Q1[b1 as usize]
+                                    + h_row[base_h + 3] * LUT_Q2[b1 as usize];
+                                sum2 += h_row[base_h + 4] * LUT_Q1[b2 as usize]
+                                    + h_row[base_h + 5] * LUT_Q2[b2 as usize];
+                                sum3 += h_row[base_h + 6] * LUT_Q1[b3 as usize]
+                                    + h_row[base_h + 7] * LUT_Q2[b3 as usize];
+
+                                sum0 += h_row[base_h + 8] * LUT_Q1[b4 as usize]
+                                    + h_row[base_h + 9] * LUT_Q2[b4 as usize];
+                                sum1 += h_row[base_h + 10] * LUT_Q1[b5 as usize]
+                                    + h_row[base_h + 11] * LUT_Q2[b5 as usize];
+                                sum2 += h_row[base_h + 12] * LUT_Q1[b6 as usize]
+                                    + h_row[base_h + 13] * LUT_Q2[b6 as usize];
+                                sum3 += h_row[base_h + 14] * LUT_Q1[b7 as usize]
+                                    + h_row[base_h + 15] * LUT_Q2[b7 as usize];
+                            }
+
+                            let mut sum = sum0 + sum1 + sum2 + sum3;
+                            for i in (chunks * 8)..half_in {
+                                let byte = row_bytes[i];
+                                sum += h_row[i * 2] * LUT_Q1[byte as usize]
+                                    + h_row[i * 2 + 1] * LUT_Q2[byte as usize];
+                            }
+                            *y_val = sum * scales[j];
+                        }
+                        WeightTensor::ColumnarDict { .. } => unreachable!("Handled above"),
+                    });
+            } else {
+                for j in 0..out_features {
+                    match weight {
+                        WeightTensor::Svd { a, b: _, rank } => {
+                            let a_offset = j * *rank;
+                            let mut sum = 0.0f32;
+                            let h_p = h_prime.as_ref().unwrap();
+                            for r in 0..*rank {
+                                sum += h_p[r] * a[a_offset + r];
+                            }
+                            out_row[j] = sum;
+                        }
+                        WeightTensor::Float(w) => {
+                            let offset = j * in_features;
+                            let weight_slice = &w[offset..offset + in_features];
+                            let mut sum = 0.0f32;
+                            for i in 0..in_features {
+                                sum += h_row[i] * weight_slice[i];
+                            }
+                            out_row[j] = sum;
+                        }
+                        WeightTensor::QuantizedI8 { q_weight, scales } => {
+                            let offset = j * in_features;
+                            let weight_slice = &q_weight[offset..offset + in_features];
+                            let mut sum = 0.0f32;
+                            for i in 0..in_features {
+                                sum += h_row[i] * weight_slice[i] as f32;
+                            }
+                            out_row[j] = sum * scales[j];
+                        }
+                        WeightTensor::QuantizedU4 { q_weight, scales } => {
+                            let half_in = in_features / 2;
+                            let offset = j * half_in;
+                            let row_bytes = &q_weight[offset..offset + half_in];
+
+                            let mut sum0 = 0.0f32;
+                            let mut sum1 = 0.0f32;
+                            let mut sum2 = 0.0f32;
+                            let mut sum3 = 0.0f32;
+
+                            let chunks = half_in / 8;
+
+                            for c in 0..chunks {
+                                let base_b = c * 8;
+                                let base_h = c * 16;
+
+                                let b0 = row_bytes[base_b];
+                                let b1 = row_bytes[base_b + 1];
+                                let b2 = row_bytes[base_b + 2];
+                                let b3 = row_bytes[base_b + 3];
+                                let b4 = row_bytes[base_b + 4];
+                                let b5 = row_bytes[base_b + 5];
+                                let b6 = row_bytes[base_b + 6];
+                                let b7 = row_bytes[base_b + 7];
+
+                                sum0 += h_row[base_h] * LUT_Q1[b0 as usize]
+                                    + h_row[base_h + 1] * LUT_Q2[b0 as usize];
+                                sum1 += h_row[base_h + 2] * LUT_Q1[b1 as usize]
+                                    + h_row[base_h + 3] * LUT_Q2[b1 as usize];
+                                sum2 += h_row[base_h + 4] * LUT_Q1[b2 as usize]
+                                    + h_row[base_h + 5] * LUT_Q2[b2 as usize];
+                                sum3 += h_row[base_h + 6] * LUT_Q1[b3 as usize]
+                                    + h_row[base_h + 7] * LUT_Q2[b3 as usize];
+
+                                sum0 += h_row[base_h + 8] * LUT_Q1[b4 as usize]
+                                    + h_row[base_h + 9] * LUT_Q2[b4 as usize];
+                                sum1 += h_row[base_h + 10] * LUT_Q1[b5 as usize]
+                                    + h_row[base_h + 11] * LUT_Q2[b5 as usize];
+                                sum2 += h_row[base_h + 12] * LUT_Q1[b6 as usize]
+                                    + h_row[base_h + 13] * LUT_Q2[b6 as usize];
+                                sum3 += h_row[base_h + 14] * LUT_Q1[b7 as usize]
+                                    + h_row[base_h + 15] * LUT_Q2[b7 as usize];
+                            }
+
+                            let mut sum = sum0 + sum1 + sum2 + sum3;
+                            for i in (chunks * 8)..half_in {
+                                let byte = row_bytes[i];
+                                sum += h_row[i * 2] * LUT_Q1[byte as usize]
+                                    + h_row[i * 2 + 1] * LUT_Q2[byte as usize];
+                            }
+                            out_row[j] = sum * scales[j];
+                        }
+                        WeightTensor::ColumnarDict { .. } => {
+                            unimplemented!("SVD not implemented for this operation")
+                        }
                     }
-                    WeightTensor::Float(w) => {
-                        let offset = j * in_features;
-                        let weight_slice = &w[offset..offset + in_features];
-                        let mut sum = 0.0f32;
-                        for i in 0..in_features {
-                            sum += h_row[i] * weight_slice[i];
-                        }
-                        out_row[j] = sum;
-                    }
-                    WeightTensor::QuantizedI8 { q_weight, scales } => {
-                        let offset = j * in_features;
-                        let weight_slice = &q_weight[offset..offset + in_features];
-                        let mut sum = 0.0f32;
-                        for i in 0..in_features {
-                            sum += h_row[i] * weight_slice[i] as f32;
-                        }
-                        out_row[j] = sum * scales[j];
-                    }
-                    WeightTensor::QuantizedU4 { q_weight, scales } => {
-                        let half_in = in_features / 2;
-                        let offset = j * half_in;
-                        let row_bytes = &q_weight[offset..offset + half_in];
-                        
-                        let mut sum0 = 0.0f32;
-                        let mut sum1 = 0.0f32;
-                        let mut sum2 = 0.0f32;
-                        let mut sum3 = 0.0f32;
-                        
-                        let chunks = half_in / 8;
-                        
-                        for c in 0..chunks {
-                            let base_b = c * 8;
-                            let base_h = c * 16;
-                            
-                            let b0 = row_bytes[base_b];
-                            let b1 = row_bytes[base_b + 1];
-                            let b2 = row_bytes[base_b + 2];
-                            let b3 = row_bytes[base_b + 3];
-                            let b4 = row_bytes[base_b + 4];
-                            let b5 = row_bytes[base_b + 5];
-                            let b6 = row_bytes[base_b + 6];
-                            let b7 = row_bytes[base_b + 7];
-                            
-                            sum0 += h_row[base_h] * LUT_Q1[b0 as usize] + h_row[base_h + 1] * LUT_Q2[b0 as usize];
-                            sum1 += h_row[base_h + 2] * LUT_Q1[b1 as usize] + h_row[base_h + 3] * LUT_Q2[b1 as usize];
-                            sum2 += h_row[base_h + 4] * LUT_Q1[b2 as usize] + h_row[base_h + 5] * LUT_Q2[b2 as usize];
-                            sum3 += h_row[base_h + 6] * LUT_Q1[b3 as usize] + h_row[base_h + 7] * LUT_Q2[b3 as usize];
-                            
-                            sum0 += h_row[base_h + 8] * LUT_Q1[b4 as usize] + h_row[base_h + 9] * LUT_Q2[b4 as usize];
-                            sum1 += h_row[base_h + 10] * LUT_Q1[b5 as usize] + h_row[base_h + 11] * LUT_Q2[b5 as usize];
-                            sum2 += h_row[base_h + 12] * LUT_Q1[b6 as usize] + h_row[base_h + 13] * LUT_Q2[b6 as usize];
-                            sum3 += h_row[base_h + 14] * LUT_Q1[b7 as usize] + h_row[base_h + 15] * LUT_Q2[b7 as usize];
-                        }
-                        
-                        let mut sum = sum0 + sum1 + sum2 + sum3;
-                        for i in (chunks * 8)..half_in {
-                            let byte = row_bytes[i];
-                            sum += h_row[i * 2] * LUT_Q1[byte as usize] + h_row[i * 2 + 1] * LUT_Q2[byte as usize];
-                        }
-                        out_row[j] = sum * scales[j];
-                    }
-                    WeightTensor::ColumnarDict { .. } => unimplemented!("SVD not implemented for this operation"),
                 }
             }
-        }
-    });
+        });
 
     out
 }
 
 /// Sparse matrix-vector multiplication skipping computation for near-zero activations.
 #[allow(dead_code)]
-fn sparse_matvec_mul(h_sparse: &[(usize, f32)], weight: &WeightTensor, in_features: usize, out_features: usize) -> Vec<f32> {
+fn sparse_matvec_mul(
+    h_sparse: &[(usize, f32)],
+    weight: &WeightTensor,
+    in_features: usize,
+    out_features: usize,
+) -> Vec<f32> {
     let mut out = vec![0.0f32; out_features];
     let is_cpu = true;
 
@@ -824,14 +932,17 @@ fn sparse_matvec_mul(h_sparse: &[(usize, f32)], weight: &WeightTensor, in_featur
                     }
                     out[j] = sum * scales[j];
                 }
-                WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => unimplemented!("SVD not implemented for this operation"),
+                WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
+                    unimplemented!("SVD not implemented for this operation")
+                }
             }
         }
         return out;
     }
 
-    out.par_iter_mut().enumerate().for_each(|(j, out_val)| {
-        match weight {
+    out.par_iter_mut()
+        .enumerate()
+        .for_each(|(j, out_val)| match weight {
             WeightTensor::Float(w) => {
                 let offset = j * in_features;
                 let mut sum = 0.0;
@@ -862,134 +973,158 @@ fn sparse_matvec_mul(h_sparse: &[(usize, f32)], weight: &WeightTensor, in_featur
                 }
                 *out_val = sum * scales[j];
             }
-            WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => unimplemented!("SVD not implemented for this operation"),
-        }
-    });
+            WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
+                unimplemented!("SVD not implemented for this operation")
+            }
+        });
     out
 }
 
 /// Sparse Block-matrix multiplication (GEMM) for micro-batched decoding.
-pub fn sparse_gemm_cpu(h_sparse_block: &[Vec<(usize, f32)>], weight: &WeightTensor, block_size: usize, in_features: usize, out_features: usize) -> Vec<f32> {
+pub fn sparse_gemm_cpu(
+    h_sparse_block: &[Vec<(usize, f32)>],
+    weight: &WeightTensor,
+    block_size: usize,
+    in_features: usize,
+    out_features: usize,
+) -> Vec<f32> {
     let mut out = vec![0.0f32; block_size * out_features];
-    out.par_chunks_mut(out_features).enumerate().for_each(|(b, out_row)| {
-        let h_sparse = &h_sparse_block[b];
-        
-        let h_prime = if let WeightTensor::Svd { a: _, b: b_wt, rank } = weight {
-            let mut h_p = vec![0.0f32; *rank];
-            for r in 0..*rank {
-                let b_offset = r * in_features;
-                let mut sum = 0.0;
-                for &(idx, val) in h_sparse {
-                    sum += val * b_wt[b_offset + idx];
+    out.par_chunks_mut(out_features)
+        .enumerate()
+        .for_each(|(b, out_row)| {
+            let h_sparse = &h_sparse_block[b];
+
+            let h_prime = if let WeightTensor::Svd {
+                a: _,
+                b: b_wt,
+                rank,
+            } = weight
+            {
+                let mut h_p = vec![0.0f32; *rank];
+                for r in 0..*rank {
+                    let b_offset = r * in_features;
+                    let mut sum = 0.0;
+                    for &(idx, val) in h_sparse {
+                        sum += val * b_wt[b_offset + idx];
+                    }
+                    h_p[r] = sum;
                 }
-                h_p[r] = sum;
+                Some(h_p)
+            } else {
+                None
+            };
+
+            if out_features >= 512 {
+                out_row
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(j, out_val)| match weight {
+                        WeightTensor::Svd { a, b: _, rank } => {
+                            let a_offset = j * *rank;
+                            let mut sum = 0.0f32;
+                            let h_p = h_prime.as_ref().unwrap();
+                            for r in 0..*rank {
+                                sum += h_p[r] * a[a_offset + r];
+                            }
+                            *out_val = sum;
+                        }
+                        WeightTensor::Float(w) => {
+                            let offset = j * in_features;
+                            let mut sum = 0.0;
+                            for &(idx, val) in h_sparse {
+                                sum += val * w[offset + idx];
+                            }
+                            *out_val = sum;
+                        }
+                        WeightTensor::QuantizedI8 { q_weight, scales } => {
+                            let offset = j * in_features;
+                            let mut sum = 0.0;
+                            for &(idx, val) in h_sparse {
+                                sum += val * q_weight[offset + idx] as f32;
+                            }
+                            *out_val = sum * scales[j];
+                        }
+                        WeightTensor::QuantizedU4 { q_weight, scales } => {
+                            let offset = j * (in_features / 2);
+                            let mut sum = 0.0;
+                            for &(idx, val) in h_sparse {
+                                let byte = q_weight[offset + idx / 2];
+                                let q = if idx % 2 == 0 {
+                                    ((byte >> 4) & 0x0F) as f32 - 8.0
+                                } else {
+                                    (byte & 0x0F) as f32 - 8.0
+                                };
+                                sum += val * q;
+                            }
+                            *out_val = sum * scales[j];
+                        }
+                        WeightTensor::ColumnarDict { .. } => {
+                            unimplemented!("ColumnarDict not implemented for this operation")
+                        }
+                    });
+            } else {
+                for j in 0..out_features {
+                    match weight {
+                        WeightTensor::Svd { a, b: _, rank } => {
+                            let a_offset = j * *rank;
+                            let mut sum = 0.0f32;
+                            let h_p = h_prime.as_ref().unwrap();
+                            for r in 0..*rank {
+                                sum += h_p[r] * a[a_offset + r];
+                            }
+                            out_row[j] = sum;
+                        }
+                        WeightTensor::Float(w) => {
+                            let offset = j * in_features;
+                            let mut sum = 0.0;
+                            for &(idx, val) in h_sparse {
+                                sum += val * w[offset + idx];
+                            }
+                            out_row[j] = sum;
+                        }
+                        WeightTensor::QuantizedI8 { q_weight, scales } => {
+                            let offset = j * in_features;
+                            let mut sum = 0.0;
+                            for &(idx, val) in h_sparse {
+                                sum += val * q_weight[offset + idx] as f32;
+                            }
+                            out_row[j] = sum * scales[j];
+                        }
+                        WeightTensor::QuantizedU4 { q_weight, scales } => {
+                            let offset = j * (in_features / 2);
+                            let mut sum = 0.0;
+                            for &(idx, val) in h_sparse {
+                                let byte = q_weight[offset + idx / 2];
+                                let q = if idx % 2 == 0 {
+                                    ((byte >> 4) & 0x0F) as f32 - 8.0
+                                } else {
+                                    (byte & 0x0F) as f32 - 8.0
+                                };
+                                sum += val * q;
+                            }
+                            out_row[j] = sum * scales[j];
+                        }
+                        WeightTensor::ColumnarDict { .. } => {
+                            unimplemented!("ColumnarDict not implemented for this operation")
+                        }
+                    }
+                }
             }
-            Some(h_p)
-        } else {
-            None
-        };
-        
-        if out_features >= 512 {
-            out_row.par_iter_mut().enumerate().for_each(|(j, out_val)| {
-                match weight {
-                    WeightTensor::Svd { a, b: _, rank } => {
-                        let a_offset = j * *rank;
-                        let mut sum = 0.0f32;
-                        let h_p = h_prime.as_ref().unwrap();
-                        for r in 0..*rank {
-                            sum += h_p[r] * a[a_offset + r];
-                        }
-                        *out_val = sum;
-                    }
-                    WeightTensor::Float(w) => {
-                        let offset = j * in_features;
-                        let mut sum = 0.0;
-                        for &(idx, val) in h_sparse {
-                            sum += val * w[offset + idx];
-                        }
-                        *out_val = sum;
-                    }
-                    WeightTensor::QuantizedI8 { q_weight, scales } => {
-                        let offset = j * in_features;
-                        let mut sum = 0.0;
-                        for &(idx, val) in h_sparse {
-                            sum += val * q_weight[offset + idx] as f32;
-                        }
-                        *out_val = sum * scales[j];
-                    }
-                    WeightTensor::QuantizedU4 { q_weight, scales } => {
-                        let offset = j * (in_features / 2);
-                        let mut sum = 0.0;
-                        for &(idx, val) in h_sparse {
-                            let byte = q_weight[offset + idx / 2];
-                            let q = if idx % 2 == 0 {
-                                ((byte >> 4) & 0x0F) as f32 - 8.0
-                            } else {
-                                (byte & 0x0F) as f32 - 8.0
-                            };
-                            sum += val * q;
-                        }
-                        *out_val = sum * scales[j];
-                    }
-                    WeightTensor::ColumnarDict { .. } => unimplemented!("ColumnarDict not implemented for this operation"),
-                }
-            });
-        } else {
-            for j in 0..out_features {
-                match weight {
-                    WeightTensor::Svd { a, b: _, rank } => {
-                        let a_offset = j * *rank;
-                        let mut sum = 0.0f32;
-                        let h_p = h_prime.as_ref().unwrap();
-                        for r in 0..*rank {
-                            sum += h_p[r] * a[a_offset + r];
-                        }
-                        out_row[j] = sum;
-                    }
-                    WeightTensor::Float(w) => {
-                        let offset = j * in_features;
-                        let mut sum = 0.0;
-                        for &(idx, val) in h_sparse {
-                            sum += val * w[offset + idx];
-                        }
-                        out_row[j] = sum;
-                    }
-                    WeightTensor::QuantizedI8 { q_weight, scales } => {
-                        let offset = j * in_features;
-                        let mut sum = 0.0;
-                        for &(idx, val) in h_sparse {
-                            sum += val * q_weight[offset + idx] as f32;
-                        }
-                        out_row[j] = sum * scales[j];
-                    }
-                    WeightTensor::QuantizedU4 { q_weight, scales } => {
-                        let offset = j * (in_features / 2);
-                        let mut sum = 0.0;
-                        for &(idx, val) in h_sparse {
-                            let byte = q_weight[offset + idx / 2];
-                            let q = if idx % 2 == 0 {
-                                ((byte >> 4) & 0x0F) as f32 - 8.0
-                            } else {
-                                (byte & 0x0F) as f32 - 8.0
-                            };
-                            sum += val * q;
-                        }
-                        out_row[j] = sum * scales[j];
-                    }
-                    WeightTensor::ColumnarDict { .. } => unimplemented!("ColumnarDict not implemented for this operation"),
-                }
-            }
-        }
-    });
+        });
     out
 }
 
 /// Tiled CPU Flash Attention (Online Softmax) avoiding O(N^2) memory allocation.
 fn flash_attention_cpu(
-    q_block: &[f32], k_cache: &[f32], v_cache: &[f32],
-    block_size: usize, _seq_len: usize, 
-    num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
-    start_pos: usize
+    q_block: &[f32],
+    k_cache: &[f32],
+    v_cache: &[f32],
+    block_size: usize,
+    _seq_len: usize,
+    num_q_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    start_pos: usize,
 ) -> Vec<f32> {
     let mut out = vec![0.0f32; block_size * num_q_heads * head_dim];
     let scale = 1.0 / (head_dim as f32).sqrt();
@@ -997,7 +1132,7 @@ fn flash_attention_cpu(
 
     if is_cpu || block_size == 1 {
         for b in 0..block_size {
-            let out_row = &mut out[b * num_q_heads * head_dim .. (b + 1) * num_q_heads * head_dim];
+            let out_row = &mut out[b * num_q_heads * head_dim..(b + 1) * num_q_heads * head_dim];
             let pos = start_pos + b; // Absolute position of the token
             let kv_len = pos + 1; // Can only attend to tokens up to its own position
 
@@ -1005,7 +1140,7 @@ fn flash_attention_cpu(
                 let kv_head = head / (num_q_heads / num_kv_heads);
                 let q_offset = b * num_q_heads * head_dim + head * head_dim;
                 let q_head = &q_block[q_offset..q_offset + head_dim];
-                
+
                 let mut m = f32::NEG_INFINITY;
                 let mut l = 0.0f32;
                 let mut o = vec![0.0f32; head_dim];
@@ -1014,26 +1149,28 @@ fn flash_attention_cpu(
                 for t in 0..kv_len {
                     let k_offset = t * num_kv_heads * head_dim + kv_head * head_dim;
                     let k_head = &k_cache[k_offset..k_offset + head_dim];
-                    
+
                     let mut dot = 0.0f32;
                     for d in 0..head_dim {
                         dot += q_head[d] * k_head[d];
                     }
                     let score = dot * scale;
-                    
+
                     if score > m {
                         let max_diff = m - score;
                         let exp_diff = max_diff.exp();
                         l = l * exp_diff + 1.0;
                         for d in 0..head_dim {
-                            o[d] = o[d] * exp_diff + v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
+                            o[d] = o[d] * exp_diff
+                                + v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
                         }
                         m = score;
                     } else {
                         let exp_diff = (score - m).exp();
                         l += exp_diff;
                         for d in 0..head_dim {
-                            o[d] += exp_diff * v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
+                            o[d] += exp_diff
+                                * v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
                         }
                     }
                 }
@@ -1046,53 +1183,57 @@ fn flash_attention_cpu(
         }
         return out;
     }
-    out.par_chunks_mut(num_q_heads * head_dim).enumerate().for_each(|(b, out_row)| {
-        let pos = start_pos + b; // Absolute position of the token
-        let kv_len = pos + 1; // Can only attend to tokens up to its own position
+    out.par_chunks_mut(num_q_heads * head_dim)
+        .enumerate()
+        .for_each(|(b, out_row)| {
+            let pos = start_pos + b; // Absolute position of the token
+            let kv_len = pos + 1; // Can only attend to tokens up to its own position
 
-        for head in 0..num_q_heads {
-            let kv_head = head / (num_q_heads / num_kv_heads);
-            let q_offset = b * num_q_heads * head_dim + head * head_dim;
-            let q_head = &q_block[q_offset..q_offset + head_dim];
-            
-            let mut m = f32::NEG_INFINITY;
-            let mut l = 0.0f32;
-            let mut o = vec![0.0f32; head_dim];
+            for head in 0..num_q_heads {
+                let kv_head = head / (num_q_heads / num_kv_heads);
+                let q_offset = b * num_q_heads * head_dim + head * head_dim;
+                let q_head = &q_block[q_offset..q_offset + head_dim];
 
-            // Online Softmax over kv_len
-            for t in 0..kv_len {
-                let k_offset = t * num_kv_heads * head_dim + kv_head * head_dim;
-                let k_head = &k_cache[k_offset..k_offset + head_dim];
-                
-                let mut dot = 0.0f32;
+                let mut m = f32::NEG_INFINITY;
+                let mut l = 0.0f32;
+                let mut o = vec![0.0f32; head_dim];
+
+                // Online Softmax over kv_len
+                for t in 0..kv_len {
+                    let k_offset = t * num_kv_heads * head_dim + kv_head * head_dim;
+                    let k_head = &k_cache[k_offset..k_offset + head_dim];
+
+                    let mut dot = 0.0f32;
+                    for d in 0..head_dim {
+                        dot += q_head[d] * k_head[d];
+                    }
+                    let score = dot * scale;
+
+                    if score > m {
+                        let max_diff = m - score;
+                        let exp_diff = max_diff.exp();
+                        l = l * exp_diff + 1.0;
+                        for d in 0..head_dim {
+                            o[d] = o[d] * exp_diff
+                                + v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
+                        }
+                        m = score;
+                    } else {
+                        let exp_diff = (score - m).exp();
+                        l += exp_diff;
+                        for d in 0..head_dim {
+                            o[d] += exp_diff
+                                * v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
+                        }
+                    }
+                }
+
+                let out_offset = head * head_dim;
                 for d in 0..head_dim {
-                    dot += q_head[d] * k_head[d];
-                }
-                let score = dot * scale;
-                
-                if score > m {
-                    let max_diff = m - score;
-                    let exp_diff = max_diff.exp();
-                    l = l * exp_diff + 1.0;
-                    for d in 0..head_dim {
-                        o[d] = o[d] * exp_diff + v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
-                    }
-                    m = score;
-                } else {
-                    let exp_diff = (score - m).exp();
-                    l += exp_diff;
-                    for d in 0..head_dim {
-                        o[d] += exp_diff * v_cache[t * num_kv_heads * head_dim + kv_head * head_dim + d];
-                    }
+                    out_row[out_offset + d] = o[d] / l;
                 }
             }
-
-            let out_offset = head * head_dim;
-            for d in 0..head_dim {
-                out_row[out_offset + d] = o[d] / l;
-            }
-        }
-    });
+        });
 
     out
 }
@@ -1105,7 +1246,7 @@ fn rms_norm_cpu(x: &[f32], weight: &[f32], eps: f32) -> Vec<f32> {
     }
     variance /= x.len() as f32;
     let scale = 1.0 / (variance + eps).sqrt();
-    
+
     let mut out = vec![0.0f32; x.len()];
     for i in 0..x.len() {
         out[i] = x[i] * scale * weight[i];
@@ -1135,88 +1276,106 @@ fn matvec_mul_into(h: &[f32], weight: &WeightTensor, out: &mut [f32]) {
 
     match weight {
         WeightTensor::Float(w) => {
-            out.par_iter_mut().enumerate().with_min_len(256).for_each(|(j, val)| {
-                let offset = j * in_features;
-                let weight_slice = &w[offset..offset + in_features];
-                let mut sum0 = 0.0f32;
-                let mut sum1 = 0.0f32;
-                let mut sum2 = 0.0f32;
-                let mut sum3 = 0.0f32;
-                let chunks = in_features / 4;
-                let remainder = in_features % 4;
-                for i in 0..chunks {
-                    let base = i * 4;
-                    sum0 += h[base] * weight_slice[base];
-                    sum1 += h[base + 1] * weight_slice[base + 1];
-                    sum2 += h[base + 2] * weight_slice[base + 2];
-                    sum3 += h[base + 3] * weight_slice[base + 3];
-                }
-                for i in (chunks * 4)..(chunks * 4 + remainder) {
-                    sum0 += h[i] * weight_slice[i];
-                }
-                *val = sum0 + sum1 + sum2 + sum3;
-            });
+            out.par_iter_mut()
+                .enumerate()
+                .with_min_len(256)
+                .for_each(|(j, val)| {
+                    let offset = j * in_features;
+                    let weight_slice = &w[offset..offset + in_features];
+                    let mut sum0 = 0.0f32;
+                    let mut sum1 = 0.0f32;
+                    let mut sum2 = 0.0f32;
+                    let mut sum3 = 0.0f32;
+                    let chunks = in_features / 4;
+                    let remainder = in_features % 4;
+                    for i in 0..chunks {
+                        let base = i * 4;
+                        sum0 += h[base] * weight_slice[base];
+                        sum1 += h[base + 1] * weight_slice[base + 1];
+                        sum2 += h[base + 2] * weight_slice[base + 2];
+                        sum3 += h[base + 3] * weight_slice[base + 3];
+                    }
+                    for i in (chunks * 4)..(chunks * 4 + remainder) {
+                        sum0 += h[i] * weight_slice[i];
+                    }
+                    *val = sum0 + sum1 + sum2 + sum3;
+                });
         }
         WeightTensor::QuantizedI8 { q_weight, scales } => {
-            out.par_iter_mut().enumerate().with_min_len(256).for_each(|(j, val)| {
-                let offset = j * in_features;
-                let weight_slice = &q_weight[offset..offset + in_features];
-                let mut sum0 = 0.0f32;
-                let mut sum1 = 0.0f32;
-                let mut sum2 = 0.0f32;
-                let mut sum3 = 0.0f32;
-                let chunks = in_features / 4;
-                let remainder = in_features % 4;
-                for i in 0..chunks {
-                    let base = i * 4;
-                    sum0 += h[base] * weight_slice[base] as f32;
-                    sum1 += h[base + 1] * weight_slice[base + 1] as f32;
-                    sum2 += h[base + 2] * weight_slice[base + 2] as f32;
-                    sum3 += h[base + 3] * weight_slice[base + 3] as f32;
-                }
-                for i in (chunks * 4)..(chunks * 4 + remainder) {
-                    sum0 += h[i] * weight_slice[i] as f32;
-                }
-                *val = (sum0 + sum1 + sum2 + sum3) * scales[j];
-            });
+            out.par_iter_mut()
+                .enumerate()
+                .with_min_len(256)
+                .for_each(|(j, val)| {
+                    let offset = j * in_features;
+                    let weight_slice = &q_weight[offset..offset + in_features];
+                    let mut sum0 = 0.0f32;
+                    let mut sum1 = 0.0f32;
+                    let mut sum2 = 0.0f32;
+                    let mut sum3 = 0.0f32;
+                    let chunks = in_features / 4;
+                    let remainder = in_features % 4;
+                    for i in 0..chunks {
+                        let base = i * 4;
+                        sum0 += h[base] * weight_slice[base] as f32;
+                        sum1 += h[base + 1] * weight_slice[base + 1] as f32;
+                        sum2 += h[base + 2] * weight_slice[base + 2] as f32;
+                        sum3 += h[base + 3] * weight_slice[base + 3] as f32;
+                    }
+                    for i in (chunks * 4)..(chunks * 4 + remainder) {
+                        sum0 += h[i] * weight_slice[i] as f32;
+                    }
+                    *val = (sum0 + sum1 + sum2 + sum3) * scales[j];
+                });
         }
         WeightTensor::QuantizedU4 { q_weight, scales } => {
             let half_in = in_features / 2;
-            out.par_iter_mut().enumerate().with_min_len(256).for_each(|(j, val)| {
-                let offset = j * half_in;
-                let row_bytes = &q_weight[offset..offset + half_in];
-                let mut sum0 = 0.0f32;
-                let mut sum1 = 0.0f32;
-                let mut sum2 = 0.0f32;
-                let mut sum3 = 0.0f32;
-                let chunks = half_in / 8;
-                for c in 0..chunks {
-                    let base_b = c * 8;
-                    let base_h = c * 16;
-                    let b0 = row_bytes[base_b];
-                    let b1 = row_bytes[base_b + 1];
-                    let b2 = row_bytes[base_b + 2];
-                    let b3 = row_bytes[base_b + 3];
-                    let b4 = row_bytes[base_b + 4];
-                    let b5 = row_bytes[base_b + 5];
-                    let b6 = row_bytes[base_b + 6];
-                    let b7 = row_bytes[base_b + 7];
-                    sum0 += h[base_h] * LUT_Q1[b0 as usize] + h[base_h + 1] * LUT_Q2[b0 as usize];
-                    sum1 += h[base_h + 2] * LUT_Q1[b1 as usize] + h[base_h + 3] * LUT_Q2[b1 as usize];
-                    sum2 += h[base_h + 4] * LUT_Q1[b2 as usize] + h[base_h + 5] * LUT_Q2[b2 as usize];
-                    sum3 += h[base_h + 6] * LUT_Q1[b3 as usize] + h[base_h + 7] * LUT_Q2[b3 as usize];
-                    sum0 += h[base_h + 8] * LUT_Q1[b4 as usize] + h[base_h + 9] * LUT_Q2[b4 as usize];
-                    sum1 += h[base_h + 10] * LUT_Q1[b5 as usize] + h[base_h + 11] * LUT_Q2[b5 as usize];
-                    sum2 += h[base_h + 12] * LUT_Q1[b6 as usize] + h[base_h + 13] * LUT_Q2[b6 as usize];
-                    sum3 += h[base_h + 14] * LUT_Q1[b7 as usize] + h[base_h + 15] * LUT_Q2[b7 as usize];
-                }
-                let mut sum = sum0 + sum1 + sum2 + sum3;
-                for i in (chunks * 8)..half_in {
-                    let byte = row_bytes[i];
-                    sum += h[i * 2] * LUT_Q1[byte as usize] + h[i * 2 + 1] * LUT_Q2[byte as usize];
-                }
-                *val = sum * scales[j];
-            });
+            out.par_iter_mut()
+                .enumerate()
+                .with_min_len(256)
+                .for_each(|(j, val)| {
+                    let offset = j * half_in;
+                    let row_bytes = &q_weight[offset..offset + half_in];
+                    let mut sum0 = 0.0f32;
+                    let mut sum1 = 0.0f32;
+                    let mut sum2 = 0.0f32;
+                    let mut sum3 = 0.0f32;
+                    let chunks = half_in / 8;
+                    for c in 0..chunks {
+                        let base_b = c * 8;
+                        let base_h = c * 16;
+                        let b0 = row_bytes[base_b];
+                        let b1 = row_bytes[base_b + 1];
+                        let b2 = row_bytes[base_b + 2];
+                        let b3 = row_bytes[base_b + 3];
+                        let b4 = row_bytes[base_b + 4];
+                        let b5 = row_bytes[base_b + 5];
+                        let b6 = row_bytes[base_b + 6];
+                        let b7 = row_bytes[base_b + 7];
+                        sum0 +=
+                            h[base_h] * LUT_Q1[b0 as usize] + h[base_h + 1] * LUT_Q2[b0 as usize];
+                        sum1 += h[base_h + 2] * LUT_Q1[b1 as usize]
+                            + h[base_h + 3] * LUT_Q2[b1 as usize];
+                        sum2 += h[base_h + 4] * LUT_Q1[b2 as usize]
+                            + h[base_h + 5] * LUT_Q2[b2 as usize];
+                        sum3 += h[base_h + 6] * LUT_Q1[b3 as usize]
+                            + h[base_h + 7] * LUT_Q2[b3 as usize];
+                        sum0 += h[base_h + 8] * LUT_Q1[b4 as usize]
+                            + h[base_h + 9] * LUT_Q2[b4 as usize];
+                        sum1 += h[base_h + 10] * LUT_Q1[b5 as usize]
+                            + h[base_h + 11] * LUT_Q2[b5 as usize];
+                        sum2 += h[base_h + 12] * LUT_Q1[b6 as usize]
+                            + h[base_h + 13] * LUT_Q2[b6 as usize];
+                        sum3 += h[base_h + 14] * LUT_Q1[b7 as usize]
+                            + h[base_h + 15] * LUT_Q2[b7 as usize];
+                    }
+                    let mut sum = sum0 + sum1 + sum2 + sum3;
+                    for i in (chunks * 8)..half_in {
+                        let byte = row_bytes[i];
+                        sum +=
+                            h[i * 2] * LUT_Q1[byte as usize] + h[i * 2 + 1] * LUT_Q2[byte as usize];
+                    }
+                    *val = sum * scales[j];
+                });
         }
         WeightTensor::Svd { a, b, rank } => {
             let mut h_p = vec![0.0f32; *rank];
@@ -1228,7 +1387,7 @@ fn matvec_mul_into(h: &[f32], weight: &WeightTensor, out: &mut [f32]) {
                 }
                 h_p[r] = sum;
             }
-            
+
             out.par_iter_mut().enumerate().for_each(|(j, val)| {
                 let a_offset = j * *rank;
                 let mut sum = 0.0f32;
@@ -1238,7 +1397,9 @@ fn matvec_mul_into(h: &[f32], weight: &WeightTensor, out: &mut [f32]) {
                 *val = sum;
             });
         }
-        WeightTensor::ColumnarDict { .. } => unimplemented!("ColumnarDict not implemented for this operation"),
+        WeightTensor::ColumnarDict { .. } => {
+            unimplemented!("ColumnarDict not implemented for this operation")
+        }
     }
 }
 
@@ -1247,9 +1408,13 @@ fn matvec_mul_into(h: &[f32], weight: &WeightTensor, out: &mut [f32]) {
 /// Uses a fixed-size scratch array for the per-head output (head_dim <= 128).
 #[inline]
 fn flash_attention_single_into(
-    q: &[f32], k_cache: &[f32], v_cache: &[f32],
+    q: &[f32],
+    k_cache: &[f32],
+    v_cache: &[f32],
     kv_len: usize,
-    num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+    num_q_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
     out: &mut [f32],
     head_scratch: &mut [f32],
 ) {
@@ -1260,7 +1425,9 @@ fn flash_attention_single_into(
         let kv_head = head / heads_per_kv;
         let q_head = &q[head * head_dim..(head + 1) * head_dim];
         let o = &mut head_scratch[..head_dim];
-        for d in 0..head_dim { o[d] = 0.0; }
+        for d in 0..head_dim {
+            o[d] = 0.0;
+        }
 
         let mut m = f32::NEG_INFINITY;
         let mut l = 0.0f32;
@@ -1330,7 +1497,7 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
             out.par_iter_mut().enumerate().for_each(|(j, val)| {
                 let offset = j * in_features;
                 let row_slice = &w[offset..offset + in_features];
-                
+
                 let mut sum = 0.0f32;
                 let mut c = 0;
                 while c + 4 <= in_features {
@@ -1343,10 +1510,10 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
                     mags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     let idx1 = mags[0].0;
                     let idx2 = mags[1].0;
-                    
+
                     sum += row_slice[c + idx1] * h[c + idx1];
                     sum += row_slice[c + idx2] * h[c + idx2];
-                    
+
                     c += 4;
                 }
                 while c < in_features {
@@ -1361,7 +1528,7 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
                 let offset = j * in_features;
                 let row_slice = &q_weight[offset..offset + in_features];
                 let scale = scales[j];
-                
+
                 let mut sum = 0.0f32;
                 let mut c = 0;
                 while c + 4 <= in_features {
@@ -1374,10 +1541,10 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
                     mags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     let idx1 = mags[0].0;
                     let idx2 = mags[1].0;
-                    
+
                     sum += (row_slice[c + idx1] as f32) * h[c + idx1];
                     sum += (row_slice[c + idx2] as f32) * h[c + idx2];
-                    
+
                     c += 4;
                 }
                 while c < in_features {
@@ -1393,18 +1560,18 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
                 let offset = j * half_in;
                 let row_bytes = &q_weight[offset..offset + half_in];
                 let scale = scales[j];
-                
+
                 let mut sum = 0.0f32;
                 let mut c = 0;
                 while c + 4 <= in_features {
                     let byte0 = row_bytes[c / 2];
                     let byte1 = row_bytes[(c + 2) / 2];
-                    
+
                     let val0 = ((byte0 >> 4) & 0x0F) as f32 - 8.0;
                     let val1 = (byte0 & 0x0F) as f32 - 8.0;
                     let val2 = ((byte1 >> 4) & 0x0F) as f32 - 8.0;
                     let val3 = (byte1 & 0x0F) as f32 - 8.0;
-                    
+
                     let mut mags = [
                         (0, val0.abs()),
                         (1, val1.abs()),
@@ -1414,11 +1581,11 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
                     mags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     let idx1 = mags[0].0;
                     let idx2 = mags[1].0;
-                    
+
                     let vals = [val0, val1, val2, val3];
                     sum += vals[idx1] * h[c + idx1];
                     sum += vals[idx2] * h[c + idx2];
-                    
+
                     c += 4;
                 }
                 while c < in_features {
@@ -1473,7 +1640,6 @@ fn sparse_matvec_mul_2_4_tensor_into(h: &[f32], weight: &WeightTensor, out: &mut
 
 /// Fast inline Rotary Position Embedding (RoPE) application.
 fn apply_rope_cpu(vec: &mut [f32], pos: usize, num_heads: usize, head_dim: usize, rope_theta: f32) {
-
     let half_dim = head_dim / 2;
     let thetas = get_rope_thetas(head_dim, rope_theta);
     for h in 0..num_heads {
@@ -1482,10 +1648,10 @@ fn apply_rope_cpu(vec: &mut [f32], pos: usize, num_heads: usize, head_dim: usize
             let freq = pos as f32 * thetas[i];
             let cos_val = freq.cos();
             let sin_val = freq.sin();
-            
+
             let x1 = vec[head_offset + i];
             let x2 = vec[head_offset + i + half_dim];
-            
+
             vec[head_offset + i] = x1 * cos_val - x2 * sin_val;
             vec[head_offset + i + half_dim] = x2 * cos_val + x1 * sin_val;
         }
@@ -1510,7 +1676,6 @@ struct LayerWeights<'a> {
     router_weight: Option<WeightTensor<'a>>,
 }
 
-
 /// Struct representing the active key-value history for a decoder layer
 struct LayerKvCache {
     keys: Vec<f32>,   // Shape: [seq_len, num_kv_heads * head_dim]
@@ -1520,7 +1685,13 @@ struct LayerKvCache {
 impl LayerKvCache {
     /// Sprint 10 OPT-002: Attention Sink (4 tokens)
     /// Preserves the first 4 tokens (sink) for attention stability and evicts the middle tokens when max_context is exceeded.
-    fn append_and_evict(&mut self, new_k: &[f32], new_v: &[f32], num_kv_heads: usize, head_dim: usize) {
+    fn append_and_evict(
+        &mut self,
+        new_k: &[f32],
+        new_v: &[f32],
+        num_kv_heads: usize,
+        head_dim: usize,
+    ) {
         let max_context_tokens = 4096;
         let sink_tokens = 4;
         let head_size = num_kv_heads * head_dim;
@@ -1533,7 +1704,7 @@ impl LayerKvCache {
             let tokens_to_evict = current_tokens - max_context_tokens;
             let drain_start = sink_tokens * head_size;
             let drain_end = drain_start + (tokens_to_evict * head_size);
-            
+
             // Safety check: ensure we don't drain the very tokens we just added if max_context is somehow smaller than sink
             if drain_end < self.keys.len() {
                 self.keys.drain(drain_start..drain_end);
@@ -1577,7 +1748,10 @@ async fn run_mlp_into(
     let (num_experts, expert_routing_top_k) = {
         let db_read = db.tensor_db.read().await;
         if let Some(m) = db_read.models.get(model_name) {
-            (m.num_experts.unwrap_or(0), m.expert_routing_top_k.unwrap_or(2))
+            (
+                m.num_experts.unwrap_or(0),
+                m.expert_routing_top_k.unwrap_or(2),
+            )
         } else {
             (0, 2)
         }
@@ -1588,7 +1762,10 @@ async fn run_mlp_into(
             matvec_mul_into(h2, router_w, &mut router_logits);
         }
 
-        let max_logit = router_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max_logit = router_logits
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut exps = vec![0.0f32; num_experts];
         let mut sum_exp = 0.0f32;
         for i in 0..num_experts {
@@ -1603,7 +1780,8 @@ async fn run_mlp_into(
         }
 
         let top_k = expert_routing_top_k;
-        let mut indexed_probs: Vec<(usize, f32)> = router_probs.iter().copied().enumerate().collect();
+        let mut indexed_probs: Vec<(usize, f32)> =
+            router_probs.iter().copied().enumerate().collect();
         indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let active_experts = &indexed_probs[0..top_k.min(num_experts)];
 
@@ -1615,7 +1793,7 @@ async fn run_mlp_into(
             if weight <= 0.0 {
                 continue;
             }
-            
+
             let (is_hydrated, can_fast_path, pages) = {
                 let guard = db.tensor_db.read().await;
                 let mut hydrated = false;
@@ -1625,7 +1803,10 @@ async fn run_mlp_into(
                     if let Some(expert_map) = &m.expert_map {
                         hydrated = true;
                         let page_opts = &expert_map[layer_idx][expert_idx];
-                        if page_opts[0].is_some() && page_opts[2].is_some() && page_opts[4].is_some() {
+                        if page_opts[0].is_some()
+                            && page_opts[2].is_some()
+                            && page_opts[4].is_some()
+                        {
                             fast_path = true;
                             pages = Some(page_opts.clone());
                         }
@@ -1634,55 +1815,73 @@ async fn run_mlp_into(
                 (hydrated, fast_path, pages)
             };
 
-            let (gate_page, gate_scale, up_page, up_scale, down_page, down_scale) = if is_hydrated && can_fast_path {
-                let pages = pages.unwrap();
-                (
-                    pages[0].clone(),
-                    pages[1].clone(),
-                    pages[2].clone(),
-                    pages[3].clone(),
-                    pages[4].clone(),
-                    pages[5].clone()
-                )
-            } else {
-                // LEGACY PATH (If not hydrated or not aligned)
-                let gate_name = format!("model.layers.{}.mlp.experts.{}.gate_proj.weight", layer_idx, expert_idx);
-                let up_name = format!("model.layers.{}.mlp.experts.{}.up_proj.weight", layer_idx, expert_idx);
-                let down_name = format!("model.layers.{}.mlp.experts.{}.down_proj.weight", layer_idx, expert_idx);
-                {
-                    let tensor_db_guard = db.tensor_db.read().await;
-                    let mut mt = tensor_db_guard.multi_tier.lock().unwrap();
-                    let _ = mt.access_layer(&gate_name);
-                    let _ = mt.access_layer(&up_name);
-                    let _ = mt.access_layer(&down_name);
-                }
-
-                {
-                    let mut db_write = db.tensor_db.write().await;
-                    let crate::storage::tensor_db::TensorDB { models, block_db, .. } = &mut *db_write;
-                    let mut block_db_guard = block_db.lock().unwrap();
-                    if let Some(m) = models.get_mut(model_name) {
-                        m.load_tensor_chunks(&gate_name, &mut *block_db_guard).unwrap();
-                        m.load_tensor_chunks(&up_name, &mut *block_db_guard).unwrap();
-                        m.load_tensor_chunks(&down_name, &mut *block_db_guard).unwrap();
+            let (gate_page, gate_scale, up_page, up_scale, down_page, down_scale) =
+                if is_hydrated && can_fast_path {
+                    let pages = pages.unwrap();
+                    (
+                        pages[0].clone(),
+                        pages[1].clone(),
+                        pages[2].clone(),
+                        pages[3].clone(),
+                        pages[4].clone(),
+                        pages[5].clone(),
+                    )
+                } else {
+                    // LEGACY PATH (If not hydrated or not aligned)
+                    let gate_name = format!(
+                        "model.layers.{}.mlp.experts.{}.gate_proj.weight",
+                        layer_idx, expert_idx
+                    );
+                    let up_name = format!(
+                        "model.layers.{}.mlp.experts.{}.up_proj.weight",
+                        layer_idx, expert_idx
+                    );
+                    let down_name = format!(
+                        "model.layers.{}.mlp.experts.{}.down_proj.weight",
+                        layer_idx, expert_idx
+                    );
+                    {
+                        let tensor_db_guard = db.tensor_db.read().await;
+                        let mut mt = tensor_db_guard.multi_tier.lock().unwrap();
+                        let _ = mt.access_layer(&gate_name);
+                        let _ = mt.access_layer(&up_name);
+                        let _ = mt.access_layer(&down_name);
                     }
-                }
 
-                let db_read = db.tensor_db.read().await;
-                let m = db_read.models.get(model_name).unwrap();
-                (
-                    m.layers.get(&gate_name).cloned(),
-                    m.layers.get(&format!("{}.scale", gate_name)).cloned(),
-                    m.layers.get(&up_name).cloned(),
-                    m.layers.get(&format!("{}.scale", up_name)).cloned(),
-                    m.layers.get(&down_name).cloned(),
-                    m.layers.get(&format!("{}.scale", down_name)).cloned(),
-                )
-            };
+                    {
+                        let mut db_write = db.tensor_db.write().await;
+                        let crate::storage::tensor_db::TensorDB {
+                            models, block_db, ..
+                        } = &mut *db_write;
+                        let mut block_db_guard = block_db.lock().unwrap();
+                        if let Some(m) = models.get_mut(model_name) {
+                            m.load_tensor_chunks(&gate_name, &mut *block_db_guard)
+                                .unwrap();
+                            m.load_tensor_chunks(&up_name, &mut *block_db_guard)
+                                .unwrap();
+                            m.load_tensor_chunks(&down_name, &mut *block_db_guard)
+                                .unwrap();
+                        }
+                    }
 
-            let gate_proj = get_weight_tensor_from_page(gate_page.as_ref().unwrap(), gate_scale.as_ref())?;
-            let up_proj = get_weight_tensor_from_page(up_page.as_ref().unwrap(), up_scale.as_ref())?;
-            let down_proj = get_weight_tensor_from_page(down_page.as_ref().unwrap(), down_scale.as_ref())?;
+                    let db_read = db.tensor_db.read().await;
+                    let m = db_read.models.get(model_name).unwrap();
+                    (
+                        m.layers.get(&gate_name).cloned(),
+                        m.layers.get(&format!("{}.scale", gate_name)).cloned(),
+                        m.layers.get(&up_name).cloned(),
+                        m.layers.get(&format!("{}.scale", up_name)).cloned(),
+                        m.layers.get(&down_name).cloned(),
+                        m.layers.get(&format!("{}.scale", down_name)).cloned(),
+                    )
+                };
+
+            let gate_proj =
+                get_weight_tensor_from_page(gate_page.as_ref().unwrap(), gate_scale.as_ref())?;
+            let up_proj =
+                get_weight_tensor_from_page(up_page.as_ref().unwrap(), up_scale.as_ref())?;
+            let down_proj =
+                get_weight_tensor_from_page(down_page.as_ref().unwrap(), down_scale.as_ref())?;
 
             let mut expert_down = vec![0.0f32; hidden_size];
 
@@ -1710,20 +1909,41 @@ async fn run_mlp_into(
                 out_mlp[d] += expert_down[d] * weight;
             }
 
-            if let Some(p) = &gate_page { let _ = p.dont_need(); }
-            if let Some(p) = &gate_scale { let _ = p.dont_need(); }
-            if let Some(p) = &up_page { let _ = p.dont_need(); }
-            if let Some(p) = &up_scale { let _ = p.dont_need(); }
-            if let Some(p) = &down_page { let _ = p.dont_need(); }
-            if let Some(p) = &down_scale { let _ = p.dont_need(); }
+            if let Some(p) = &gate_page {
+                let _ = p.dont_need();
+            }
+            if let Some(p) = &gate_scale {
+                let _ = p.dont_need();
+            }
+            if let Some(p) = &up_page {
+                let _ = p.dont_need();
+            }
+            if let Some(p) = &up_scale {
+                let _ = p.dont_need();
+            }
+            if let Some(p) = &down_page {
+                let _ = p.dont_need();
+            }
+            if let Some(p) = &down_scale {
+                let _ = p.dont_need();
+            }
 
             if !is_hydrated {
                 let mut db_write = db.tensor_db.write().await;
                 if let Some(m) = db_write.models.get_mut(model_name) {
                     if m.expert_map.is_none() {
-                        let gate_name = format!("model.layers.{}.mlp.experts.{}.gate_proj.weight", layer_idx, expert_idx);
-                        let up_name = format!("model.layers.{}.mlp.experts.{}.up_proj.weight", layer_idx, expert_idx);
-                        let down_name = format!("model.layers.{}.mlp.experts.{}.down_proj.weight", layer_idx, expert_idx);
+                        let gate_name = format!(
+                            "model.layers.{}.mlp.experts.{}.gate_proj.weight",
+                            layer_idx, expert_idx
+                        );
+                        let up_name = format!(
+                            "model.layers.{}.mlp.experts.{}.up_proj.weight",
+                            layer_idx, expert_idx
+                        );
+                        let down_name = format!(
+                            "model.layers.{}.mlp.experts.{}.down_proj.weight",
+                            layer_idx, expert_idx
+                        );
                         m.unload_tensor_chunks(&gate_name);
                         m.unload_tensor_chunks(&up_name);
                         m.unload_tensor_chunks(&down_name);
@@ -1741,18 +1961,34 @@ async fn run_mlp_into(
             matvec_mul_into(h2, &lw.up_proj_weight, scratch_up);
         } else {
             let (gate, up) = rayon::join(
-                || matvec_mul(h2, &lw.gate_proj_weight, mlp_size, Some(model_name), Some(&format!("model.layers.{}.mlp.gate_proj.weight", layer_idx))),
-                || matvec_mul(h2, &lw.up_proj_weight, mlp_size, Some(model_name), Some(&format!("model.layers.{}.mlp.up_proj.weight", layer_idx)))
+                || {
+                    matvec_mul(
+                        h2,
+                        &lw.gate_proj_weight,
+                        mlp_size,
+                        Some(model_name),
+                        Some(&format!("model.layers.{}.mlp.gate_proj.weight", layer_idx)),
+                    )
+                },
+                || {
+                    matvec_mul(
+                        h2,
+                        &lw.up_proj_weight,
+                        mlp_size,
+                        Some(model_name),
+                        Some(&format!("model.layers.{}.mlp.up_proj.weight", layer_idx)),
+                    )
+                },
             );
             scratch_gate[..mlp_size].copy_from_slice(&gate);
             scratch_up[..mlp_size].copy_from_slice(&up);
         }
-        
+
         for d in 0..mlp_size {
             let silu_gate = scratch_gate[d] * (1.0 / (1.0 + (-scratch_gate[d]).exp()));
             scratch_mlp[d] = silu_gate * scratch_up[d];
         }
-        
+
         if is_sparse_path() {
             sparse_matvec_mul_2_4_tensor_into(scratch_mlp, &lw.down_proj_weight, out_mlp);
         } else {
@@ -1770,10 +2006,13 @@ async fn load_and_clone_layer_pages(
     // 1. Acquire write lock to load the current layer tensors and unload layer_idx - 2 tensors
     {
         let mut db_write = db.tensor_db.write().await;
-        let crate::storage::tensor_db::TensorDB { models, block_db, .. } = &mut *db_write;
+        let crate::storage::tensor_db::TensorDB {
+            models, block_db, ..
+        } = &mut *db_write;
         let mut block_db_guard = block_db.lock().unwrap();
         if let Some(m) = models.get_mut(model_name) {
-            m.load_layer_tensors(layer_idx, &mut *block_db_guard).map_err(|e| e.to_string())?;
+            m.load_layer_tensors(layer_idx, &mut *block_db_guard)
+                .map_err(|e| e.to_string())?;
             let is_capped = crate::inference::pipeline::get_system_resource_cap() < 1.0;
             if layer_idx >= 2 && (is_capped || std::env::var("BRAMHA_FORCE_STREAMING").is_ok()) {
                 m.unload_layer_tensors(layer_idx - 2);
@@ -1785,40 +2024,88 @@ async fn load_and_clone_layer_pages(
     // 2. Clone the pages under a read lock
     let pages = {
         let db_read = db.tensor_db.read().await;
-        let m = db_read.models.get(model_name)
+        let m = db_read
+            .models
+            .get(model_name)
             .ok_or_else(|| format!("Model {} not found", model_name))?;
-        
+
         let get_page = |name: &str| -> Result<crate::core::tensor::TensorPage, String> {
-            m.layers.get(name)
+            m.layers
+                .get(name)
                 .cloned()
                 .ok_or_else(|| format!("Layer page {} not found in ModelTable", name))
         };
-        let get_opt_page = |name: &str| -> Option<crate::core::tensor::TensorPage> {
-            m.layers.get(name).cloned()
-        };
+        let get_opt_page =
+            |name: &str| -> Option<crate::core::tensor::TensorPage> { m.layers.get(name).cloned() };
 
-        let input_layernorm = get_page(&format!("model.layers.{}.input_layernorm.weight", layer_idx))?;
-        let q_proj = get_page(&format!("model.layers.{}.self_attn.q_proj.weight", layer_idx))?;
-        let q_proj_scale = get_opt_page(&format!("model.layers.{}.self_attn.q_proj.weight.scale", layer_idx));
-        let k_proj = get_page(&format!("model.layers.{}.self_attn.k_proj.weight", layer_idx))?;
-        let k_proj_scale = get_opt_page(&format!("model.layers.{}.self_attn.k_proj.weight.scale", layer_idx));
-        let v_proj = get_page(&format!("model.layers.{}.self_attn.v_proj.weight", layer_idx))?;
-        let v_proj_scale = get_opt_page(&format!("model.layers.{}.self_attn.v_proj.weight.scale", layer_idx));
-        let o_proj = get_page(&format!("model.layers.{}.self_attn.o_proj.weight", layer_idx))?;
-        let o_proj_scale = get_opt_page(&format!("model.layers.{}.self_attn.o_proj.weight.scale", layer_idx));
-        let q_proj_bias = get_opt_page(&format!("model.layers.{}.self_attn.q_proj.bias", layer_idx));
-        let k_proj_bias = get_opt_page(&format!("model.layers.{}.self_attn.k_proj.bias", layer_idx));
-        let v_proj_bias = get_opt_page(&format!("model.layers.{}.self_attn.v_proj.bias", layer_idx));
-        let o_proj_bias = get_opt_page(&format!("model.layers.{}.self_attn.o_proj.bias", layer_idx));
-        let post_attention_layernorm = get_page(&format!("model.layers.{}.post_attention_layernorm.weight", layer_idx))?;
+        let input_layernorm = get_page(&format!(
+            "model.layers.{}.input_layernorm.weight",
+            layer_idx
+        ))?;
+        let q_proj = get_page(&format!(
+            "model.layers.{}.self_attn.q_proj.weight",
+            layer_idx
+        ))?;
+        let q_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.self_attn.q_proj.weight.scale",
+            layer_idx
+        ));
+        let k_proj = get_page(&format!(
+            "model.layers.{}.self_attn.k_proj.weight",
+            layer_idx
+        ))?;
+        let k_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.self_attn.k_proj.weight.scale",
+            layer_idx
+        ));
+        let v_proj = get_page(&format!(
+            "model.layers.{}.self_attn.v_proj.weight",
+            layer_idx
+        ))?;
+        let v_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.self_attn.v_proj.weight.scale",
+            layer_idx
+        ));
+        let o_proj = get_page(&format!(
+            "model.layers.{}.self_attn.o_proj.weight",
+            layer_idx
+        ))?;
+        let o_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.self_attn.o_proj.weight.scale",
+            layer_idx
+        ));
+        let q_proj_bias =
+            get_opt_page(&format!("model.layers.{}.self_attn.q_proj.bias", layer_idx));
+        let k_proj_bias =
+            get_opt_page(&format!("model.layers.{}.self_attn.k_proj.bias", layer_idx));
+        let v_proj_bias =
+            get_opt_page(&format!("model.layers.{}.self_attn.v_proj.bias", layer_idx));
+        let o_proj_bias =
+            get_opt_page(&format!("model.layers.{}.self_attn.o_proj.bias", layer_idx));
+        let post_attention_layernorm = get_page(&format!(
+            "model.layers.{}.post_attention_layernorm.weight",
+            layer_idx
+        ))?;
         let gate_proj = get_opt_page(&format!("model.layers.{}.mlp.gate_proj.weight", layer_idx));
-        let gate_proj_scale = get_opt_page(&format!("model.layers.{}.mlp.gate_proj.weight.scale", layer_idx));
+        let gate_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.mlp.gate_proj.weight.scale",
+            layer_idx
+        ));
         let up_proj = get_opt_page(&format!("model.layers.{}.mlp.up_proj.weight", layer_idx));
-        let up_proj_scale = get_opt_page(&format!("model.layers.{}.mlp.up_proj.weight.scale", layer_idx));
+        let up_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.mlp.up_proj.weight.scale",
+            layer_idx
+        ));
         let down_proj = get_opt_page(&format!("model.layers.{}.mlp.down_proj.weight", layer_idx));
-        let down_proj_scale = get_opt_page(&format!("model.layers.{}.mlp.down_proj.weight.scale", layer_idx));
+        let down_proj_scale = get_opt_page(&format!(
+            "model.layers.{}.mlp.down_proj.weight.scale",
+            layer_idx
+        ));
         let router = get_opt_page(&format!("model.layers.{}.mlp.router.weight", layer_idx));
-        let router_scale = get_opt_page(&format!("model.layers.{}.mlp.router.weight.scale", layer_idx));
+        let router_scale = get_opt_page(&format!(
+            "model.layers.{}.mlp.router.weight.scale",
+            layer_idx
+        ));
 
         ClonedLayerPages {
             input_layernorm,
@@ -1860,15 +2147,26 @@ pub async fn generate_cpu(
     let num_layers = {
         let db_read = db.tensor_db.read().await;
         if let Some(m) = db_read.models.get(model_name) {
-            m.layers.keys()
-                .filter(|k| k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight"))
+            m.layers
+                .keys()
+                .filter(|k| {
+                    k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight")
+                })
                 .count()
         } else {
             22 // safe fallback
         }
     };
 
-    let result_and_logits = generate_cpu_inner_logits(db.clone(), model_name, prompt, max_new_tokens, temperature, false).await;
+    let result_and_logits = generate_cpu_inner_logits(
+        db.clone(),
+        model_name,
+        prompt,
+        max_new_tokens,
+        temperature,
+        false,
+    )
+    .await;
 
     // Guaranteed post-generation memory/cache cleanup on success and error
     {
@@ -1887,7 +2185,7 @@ pub async fn generate_cpu(
     if let Ok((ref _result, ref dense_logits)) = result_and_logits {
         let spanda_shadow_env = std::env::var("SPANDA_SHADOW").unwrap_or_else(|_| "1".to_string());
         if spanda_shadow_env != "0" {
-            let is_shadow = rand::random::<f32>() < 0.001 
+            let is_shadow = rand::random::<f32>() < 0.001
                 || std::env::var("SPANDA_FORCE_SHADOW").is_ok()
                 || spanda_shadow_env == "force";
             if is_shadow {
@@ -1897,12 +2195,27 @@ pub async fn generate_cpu(
                 let max_tokens = max_new_tokens;
                 let temp = temperature;
                 let dense_logits_clone = dense_logits.clone();
-                
+
                 tokio::spawn(async move {
-                    if let Ok((_, sparse_logits)) = generate_cpu_inner_logits(db_clone, &model_str, &prompt_str, max_tokens, temp, true).await {
-                        let similarity = crate::inference::sparse_predictor::cosine_similarity(&dense_logits_clone, &sparse_logits);
-                        println!("📊 [Shadow Scan] Cosine Similarity for query: {:.4}", similarity);
-                        
+                    if let Ok((_, sparse_logits)) = generate_cpu_inner_logits(
+                        db_clone,
+                        &model_str,
+                        &prompt_str,
+                        max_tokens,
+                        temp,
+                        true,
+                    )
+                    .await
+                    {
+                        let similarity = crate::inference::sparse_predictor::cosine_similarity(
+                            &dense_logits_clone,
+                            &sparse_logits,
+                        );
+                        println!(
+                            "📊 [Shadow Scan] Cosine Similarity for query: {:.4}",
+                            similarity
+                        );
+
                         let sql_store = crate::storage::metadata_sql::MetadataSqlStore::new();
                         let conn_res = rusqlite::Connection::open(sql_store.db_path());
                         if let Ok(conn) = conn_res {
@@ -1915,12 +2228,15 @@ pub async fn generate_cpu(
                                 )",
                                 [],
                             );
-                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
                             let _ = conn.execute(
                                 "INSERT INTO shadow_scan_stats (prompt, cosine_similarity, timestamp_ms) VALUES (?1, ?2, ?3)",
                                 rusqlite::params![prompt_str, similarity, now],
                             );
-                            
+
                             // Check if cosine similarity is < 0.999 for > 5% of queries
                             if let Ok(mut stmt) = conn.prepare("SELECT cosine_similarity FROM shadow_scan_stats ORDER BY id DESC LIMIT 100") {
                                 if let Ok(mut rows) = stmt.query([]) {
@@ -1965,7 +2281,9 @@ async fn generate_cpu_inner(
     max_new_tokens: usize,
     temperature: f64,
 ) -> Result<InferenceResult, String> {
-    generate_cpu_inner_logits(db, model_name, prompt, max_new_tokens, temperature, false).await.map(|(res, _)| res)
+    generate_cpu_inner_logits(db, model_name, prompt, max_new_tokens, temperature, false)
+        .await
+        .map(|(res, _)| res)
 }
 
 async fn generate_cpu_inner_logits(
@@ -2993,7 +3311,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_cpu_inference_hi_speed_enforcer() {
         let db = Arc::new(Database::new(None, 1536));
-        
+
         let mut original_base_path = std::path::PathBuf::new();
         {
             let tensor_guard = db.tensor_db.read().await;
@@ -3061,14 +3379,35 @@ mod tests {
         write_dummy_weight("lm_head.weight", vocab_size * hidden_size);
         write_dummy_weight("model.norm.weight", hidden_size);
         write_dummy_weight("model.layers.0.input_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.q_proj.weight", (num_q_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.k_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.v_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.o_proj.weight", hidden_size * (num_q_heads * head_dim));
-        write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.mlp.gate_proj.weight", mlp_size * hidden_size);
+        write_dummy_weight(
+            "model.layers.0.self_attn.q_proj.weight",
+            (num_q_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.k_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.v_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.o_proj.weight",
+            hidden_size * (num_q_heads * head_dim),
+        );
+        write_dummy_weight(
+            "model.layers.0.post_attention_layernorm.weight",
+            hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.mlp.gate_proj.weight",
+            mlp_size * hidden_size,
+        );
         write_dummy_weight("model.layers.0.mlp.up_proj.weight", mlp_size * hidden_size);
-        write_dummy_weight("model.layers.0.mlp.down_proj.weight", hidden_size * mlp_size);
+        write_dummy_weight(
+            "model.layers.0.mlp.down_proj.weight",
+            hidden_size * mlp_size,
+        );
 
         // Build mock manifest
         crate::storage::storage_manifest::write_mock_manifest(
@@ -3091,10 +3430,10 @@ mod tests {
         // Run generation using "mock-model"
         let result = generate_cpu(db, "mock-model", "hi", 20, 0.0).await;
         assert!(result.is_ok(), "generate_cpu failed: {:?}", result.err());
-        
+
         let info = result.unwrap();
         println!("Test inference TPS: {}", info.tokens_per_second);
-        
+
         // Cleanup temp directory
         let _ = std::fs::remove_dir_all(temp_dir);
 
@@ -3102,7 +3441,12 @@ mod tests {
         if crate::inference::pipeline::get_system_resource_cap() <= 0.75 {
             min_tps = 1.0; // Relax TPS requirement when resource cap is active
         }
-        assert!(info.tokens_per_second >= min_tps, "CPU Inference speed dropped below {} tokens/sec. Actual: {}", min_tps, info.tokens_per_second);
+        assert!(
+            info.tokens_per_second >= min_tps,
+            "CPU Inference speed dropped below {} tokens/sec. Actual: {}",
+            min_tps,
+            info.tokens_per_second
+        );
     }
 
     #[test]
@@ -3111,7 +3455,7 @@ mod tests {
 
         let out_features = 64;
         let in_features = 128;
-        
+
         // 1. Generate some random float weights
         let mut original_weights = vec![0.0f32; out_features * in_features];
         for i in 0..original_weights.len() {
@@ -3130,20 +3474,36 @@ mod tests {
                 let orig = original_weights[j * in_features + i];
                 let deq = deq8[j * in_features + i];
                 let error = (orig - deq).abs();
-                assert!(error <= scale * 0.5 + 1e-5, "INT8 error at row {}, col {} is {}, expected <= {}", j, i, error, scale * 0.5);
+                assert!(
+                    error <= scale * 0.5 + 1e-5,
+                    "INT8 error at row {}, col {} is {}, expected <= {}",
+                    j,
+                    i,
+                    error,
+                    scale * 0.5
+                );
             }
         }
 
         // Verify quantized matvec_mul matches dequantized matvec_mul
         let weight_float = WeightTensor::Float(&deq8);
-        let weight_q8 = WeightTensor::QuantizedI8 { q_weight: &q8, scales: &scales8 };
+        let weight_q8 = WeightTensor::QuantizedI8 {
+            q_weight: &q8,
+            scales: &scales8,
+        };
 
         let res_float = matvec_mul(&h, &weight_float, out_features, None, None);
         let res_q8 = matvec_mul(&h, &weight_q8, out_features, None, None);
 
         for j in 0..out_features {
             let diff = (res_float[j] - res_q8[j]).abs();
-            assert!(diff < 1e-4, "INT8 CPU matvec mismatch at row {}: float = {}, q8 = {}", j, res_float[j], res_q8[j]);
+            assert!(
+                diff < 1e-4,
+                "INT8 CPU matvec mismatch at row {}: float = {}, q8 = {}",
+                j,
+                res_float[j],
+                res_q8[j]
+            );
         }
 
         // Verify quantized gemm_cpu matches dequantized gemm_cpu
@@ -3153,12 +3513,24 @@ mod tests {
             h_block[i] = (i as f32 * 0.23).sin();
         }
 
-        let gemm_float = gemm_cpu(&h_block, &weight_float, block_size, in_features, out_features);
+        let gemm_float = gemm_cpu(
+            &h_block,
+            &weight_float,
+            block_size,
+            in_features,
+            out_features,
+        );
         let gemm_q8 = gemm_cpu(&h_block, &weight_q8, block_size, in_features, out_features);
 
         for i in 0..gemm_float.len() {
             let diff = (gemm_float[i] - gemm_q8[i]).abs();
-            assert!(diff < 1e-4, "INT8 CPU GEMM mismatch at index {}: float = {}, q8 = {}", i, gemm_float[i], gemm_q8[i]);
+            assert!(
+                diff < 1e-4,
+                "INT8 CPU GEMM mismatch at index {}: float = {}, q8 = {}",
+                i,
+                gemm_float[i],
+                gemm_q8[i]
+            );
         }
 
         // 3. Validate INT4 asymmetric packed quantization correctness
@@ -3172,45 +3544,89 @@ mod tests {
                 let orig = original_weights[j * in_features + i];
                 let deq = deq4[j * in_features + i];
                 let error = (orig - deq).abs();
-                assert!(error <= scale * 0.5 + 1e-5, "INT4 error at row {}, col {} is {}, expected <= {}", j, i, error, scale * 0.5);
+                assert!(
+                    error <= scale * 0.5 + 1e-5,
+                    "INT4 error at row {}, col {} is {}, expected <= {}",
+                    j,
+                    i,
+                    error,
+                    scale * 0.5
+                );
             }
         }
 
         // Verify quantized matvec_mul matches dequantized matvec_mul
         let weight_float4 = WeightTensor::Float(&deq4);
-        let weight_q4 = WeightTensor::QuantizedU4 { q_weight: &q4, scales: &scales4 };
+        let weight_q4 = WeightTensor::QuantizedU4 {
+            q_weight: &q4,
+            scales: &scales4,
+        };
 
         let res_float4 = matvec_mul(&h, &weight_float4, out_features, None, None);
         let res_q4 = matvec_mul(&h, &weight_q4, out_features, None, None);
 
         for j in 0..out_features {
             let diff = (res_float4[j] - res_q4[j]).abs();
-            assert!(diff < 1e-4, "INT4 CPU matvec mismatch at row {}: float = {}, q4 = {}", j, res_float4[j], res_q4[j]);
+            assert!(
+                diff < 1e-4,
+                "INT4 CPU matvec mismatch at row {}: float = {}, q4 = {}",
+                j,
+                res_float4[j],
+                res_q4[j]
+            );
         }
 
         // Verify quantized gemm_cpu matches dequantized gemm_cpu
-        let gemm_float4 = gemm_cpu(&h_block, &weight_float4, block_size, in_features, out_features);
+        let gemm_float4 = gemm_cpu(
+            &h_block,
+            &weight_float4,
+            block_size,
+            in_features,
+            out_features,
+        );
         let gemm_q4 = gemm_cpu(&h_block, &weight_q4, block_size, in_features, out_features);
 
         for i in 0..gemm_float4.len() {
             let diff = (gemm_float4[i] - gemm_q4[i]).abs();
-            assert!(diff < 1e-4, "INT4 CPU GEMM mismatch at index {}: float = {}, q4 = {}", i, gemm_float4[i], gemm_q4[i]);
+            assert!(
+                diff < 1e-4,
+                "INT4 CPU GEMM mismatch at index {}: float = {}, q4 = {}",
+                i,
+                gemm_float4[i],
+                gemm_q4[i]
+            );
         }
 
         // 4. Validate GPU acceleration matches CPU reference if GPU compute plane is active
         if let Some(plane) = crate::compute::wgpu_backend::get_wgpu_plane() {
             // INT8 GPU Match
-            let res_gpu8 = plane.matvec_mul_int8(&h, &q8, &scales8, out_features, None, None).expect("INT8 GPU matvec failed");
+            let res_gpu8 = plane
+                .matvec_mul_int8(&h, &q8, &scales8, out_features, None, None)
+                .expect("INT8 GPU matvec failed");
             for j in 0..out_features {
                 let diff = (res_q8[j] - res_gpu8[j]).abs();
-                assert!(diff < 1e-4, "INT8 GPU mismatch at row {}: CPU = {}, GPU = {}", j, res_q8[j], res_gpu8[j]);
+                assert!(
+                    diff < 1e-4,
+                    "INT8 GPU mismatch at row {}: CPU = {}, GPU = {}",
+                    j,
+                    res_q8[j],
+                    res_gpu8[j]
+                );
             }
 
             // INT4 GPU Match
-            let res_gpu4 = plane.matvec_mul_int4(&h, &q4, &scales4, out_features, None, None).expect("INT4 GPU matvec failed");
+            let res_gpu4 = plane
+                .matvec_mul_int4(&h, &q4, &scales4, out_features, None, None)
+                .expect("INT4 GPU matvec failed");
             for j in 0..out_features {
                 let diff = (res_q4[j] - res_gpu4[j]).abs();
-                assert!(diff < 1e-4, "INT4 GPU mismatch at row {}: CPU = {}, GPU = {}", j, res_q4[j], res_gpu4[j]);
+                assert!(
+                    diff < 1e-4,
+                    "INT4 GPU mismatch at row {}: CPU = {}, GPU = {}",
+                    j,
+                    res_q4[j],
+                    res_gpu4[j]
+                );
             }
             println!("✅ WGPU INT8/INT4 GEMV matches CPU exact reference vector perfectly!");
         }
@@ -3221,7 +3637,7 @@ mod tests {
         let temp_db_dir = std::env::temp_dir().join("bramha_test_tensor_db_moe");
         let _ = std::fs::remove_dir_all(&temp_db_dir);
         let db = Arc::new(Database::new_with_dir(None, 1536, temp_db_dir));
-        
+
         let mut original_base_path = std::path::PathBuf::new();
         {
             let tensor_guard = db.tensor_db.read().await;
@@ -3293,20 +3709,47 @@ mod tests {
         write_dummy_weight("lm_head.weight", vocab_size * hidden_size);
         write_dummy_weight("model.norm.weight", hidden_size);
         write_dummy_weight("model.layers.0.input_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.q_proj.weight", (num_q_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.k_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.v_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.o_proj.weight", hidden_size * (num_q_heads * head_dim));
-        write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
+        write_dummy_weight(
+            "model.layers.0.self_attn.q_proj.weight",
+            (num_q_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.k_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.v_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.o_proj.weight",
+            hidden_size * (num_q_heads * head_dim),
+        );
+        write_dummy_weight(
+            "model.layers.0.post_attention_layernorm.weight",
+            hidden_size,
+        );
 
         // Router gate weights
-        write_dummy_weight("model.layers.0.mlp.router.weight", num_experts * hidden_size);
+        write_dummy_weight(
+            "model.layers.0.mlp.router.weight",
+            num_experts * hidden_size,
+        );
 
         // Expert chunks
         for e in 0..num_experts {
-            write_dummy_weight(&format!("model.layers.0.mlp.experts.{}.gate_proj.weight", e), mlp_size * hidden_size);
-            write_dummy_weight(&format!("model.layers.0.mlp.experts.{}.up_proj.weight", e), mlp_size * hidden_size);
-            write_dummy_weight(&format!("model.layers.0.mlp.experts.{}.down_proj.weight", e), hidden_size * mlp_size);
+            write_dummy_weight(
+                &format!("model.layers.0.mlp.experts.{}.gate_proj.weight", e),
+                mlp_size * hidden_size,
+            );
+            write_dummy_weight(
+                &format!("model.layers.0.mlp.experts.{}.up_proj.weight", e),
+                mlp_size * hidden_size,
+            );
+            write_dummy_weight(
+                &format!("model.layers.0.mlp.experts.{}.down_proj.weight", e),
+                hidden_size * mlp_size,
+            );
         }
 
         // Main MLP placeholder
@@ -3344,7 +3787,10 @@ mod tests {
         };
 
         // There should be hits or total accessed recorded on the expert layers
-        assert!(stats.total_accessed > 0, "No tier access recorded! MoE routing failed to register accesses.");
+        assert!(
+            stats.total_accessed > 0,
+            "No tier access recorded! MoE routing failed to register accesses."
+        );
 
         // Cleanup temp directory
         let _ = std::fs::remove_dir_all(temp_dir);
@@ -3353,7 +3799,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_shadow_mode_and_gate_check() {
         let db = Arc::new(Database::new(None, 1536));
-        
+
         // 1. Setup mock model
         let temp_dir = std::env::temp_dir().join("bramha_mock_shadow_model");
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -3401,14 +3847,35 @@ mod tests {
         write_dummy_weight("lm_head.weight", vocab_size * hidden_size);
         write_dummy_weight("model.norm.weight", hidden_size);
         write_dummy_weight("model.layers.0.input_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.q_proj.weight", (num_q_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.k_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.v_proj.weight", (num_kv_heads * head_dim) * hidden_size);
-        write_dummy_weight("model.layers.0.self_attn.o_proj.weight", hidden_size * (num_q_heads * head_dim));
-        write_dummy_weight("model.layers.0.post_attention_layernorm.weight", hidden_size);
-        write_dummy_weight("model.layers.0.mlp.gate_proj.weight", mlp_size * hidden_size);
+        write_dummy_weight(
+            "model.layers.0.self_attn.q_proj.weight",
+            (num_q_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.k_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.v_proj.weight",
+            (num_kv_heads * head_dim) * hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.self_attn.o_proj.weight",
+            hidden_size * (num_q_heads * head_dim),
+        );
+        write_dummy_weight(
+            "model.layers.0.post_attention_layernorm.weight",
+            hidden_size,
+        );
+        write_dummy_weight(
+            "model.layers.0.mlp.gate_proj.weight",
+            mlp_size * hidden_size,
+        );
         write_dummy_weight("model.layers.0.mlp.up_proj.weight", mlp_size * hidden_size);
-        write_dummy_weight("model.layers.0.mlp.down_proj.weight", hidden_size * mlp_size);
+        write_dummy_weight(
+            "model.layers.0.mlp.down_proj.weight",
+            hidden_size * mlp_size,
+        );
 
         crate::storage::storage_manifest::write_mock_manifest(
             &temp_dir,
@@ -3448,7 +3915,10 @@ mod tests {
                 [],
             );
             // Insert 25 records with low similarity
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
             for i in 0..25 {
                 conn.execute(
                     "INSERT INTO shadow_scan_stats (prompt, cosine_similarity, timestamp_ms) VALUES (?1, ?2, ?3)",
@@ -3467,7 +3937,9 @@ mod tests {
         for _ in 0..20 {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let conn = rusqlite::Connection::open(sql_store.db_path()).unwrap();
-            if let Ok(mut stmt) = conn.prepare("SELECT confidence_score FROM route_quality_stats WHERE decision = 'SpandaSparse'") {
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT confidence_score FROM route_quality_stats WHERE decision = 'SpandaSparse'",
+            ) {
                 if let Ok(mut rows) = stmt.query([]) {
                     if let Ok(Some(row)) = rows.next() {
                         let score: f64 = row.get(0).unwrap();
@@ -3480,13 +3952,15 @@ mod tests {
             }
         }
 
-        assert!(spanda_killed, "Gate check failed to kill dynamic sparse predictor!");
+        assert!(
+            spanda_killed,
+            "Gate check failed to kill dynamic sparse predictor!"
+        );
 
         // Cleanup
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
-
 
 #[cfg(test)]
 mod generic_architecture_tests {
@@ -3495,15 +3969,32 @@ mod generic_architecture_tests {
     fn test_dynamic_rope_theta_extraction() {
         // Create a mock JSON config map
         let mut config_map = serde_json::Map::new();
-        config_map.insert("rope_theta".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(1000000.0).unwrap()));
+        config_map.insert(
+            "rope_theta".to_string(),
+            serde_json::Value::Number(serde_json::Number::from_f64(1000000.0).unwrap()),
+        );
         config_map.insert("attention_bias".to_string(), serde_json::Value::Bool(true));
-        config_map.insert("rms_norm_eps".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(1e-6).unwrap()));
+        config_map.insert(
+            "rms_norm_eps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from_f64(1e-6).unwrap()),
+        );
 
         let cfg = serde_json::Value::Object(config_map);
 
-        let rope_theta = cfg.get("rope_theta").and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(10000.0);
-        let attention_bias = cfg.get("attention_bias").and_then(|v| v.as_bool()).unwrap_or(false);
-        let rms_norm_eps = cfg.get("rms_norm_eps").and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(1e-5);
+        let rope_theta = cfg
+            .get("rope_theta")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(10000.0);
+        let attention_bias = cfg
+            .get("attention_bias")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let rms_norm_eps = cfg
+            .get("rms_norm_eps")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(1e-5);
 
         assert_eq!(rope_theta, 1000000.0);
         assert_eq!(attention_bias, true);

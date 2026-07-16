@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerificationStatus {
@@ -45,8 +45,8 @@ impl ModelVerifier {
     /// Tokenize text into lowercase words, filtering out common stop words
     fn get_content_words(text: &str) -> Vec<String> {
         let stop_words = vec![
-            "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", 
-            "to", "of", "in", "on", "at", "for", "with", "by", "about", "as"
+            "the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "to", "of", "in",
+            "on", "at", "for", "with", "by", "about", "as",
         ];
         text.to_lowercase()
             .chars()
@@ -64,8 +64,11 @@ impl ModelVerifier {
         completion: &str,
         context_chunks: &[(String, String)],
     ) -> VerificationReport {
-        println!("🔍 Running Model Verifier on output ({} bytes) against {} context chunks...", 
-                 completion.len(), context_chunks.len());
+        println!(
+            "🔍 Running Model Verifier on output ({} bytes) against {} context chunks...",
+            completion.len(),
+            context_chunks.len()
+        );
 
         if completion.trim().is_empty() {
             return VerificationReport {
@@ -146,7 +149,7 @@ impl ModelVerifier {
 
         let status = if final_score >= 0.8 {
             VerificationStatus::Pass
-        } else if final_score >= 0.5 {
+        } else if final_score >= 0.5 && !self.policy.strict_mode {
             VerificationStatus::Flag
         } else {
             VerificationStatus::Fail
@@ -180,8 +183,15 @@ mod tests {
         let verifier = ModelVerifier::new(policy);
 
         let context = vec![
-            ("doc1".to_string(), "Bramha runs local intelligence natively on CPU and GPU.".to_string()),
-            ("doc2".to_string(), "The system achieves stable performance using zero-copy tensor mapping.".to_string()),
+            (
+                "doc1".to_string(),
+                "Bramha runs local intelligence natively on CPU and GPU.".to_string(),
+            ),
+            (
+                "doc2".to_string(),
+                "The system achieves stable performance using zero-copy tensor mapping."
+                    .to_string(),
+            ),
         ];
 
         let completion = "Bramha runs local intelligence on CPU. It uses zero-copy tensor mapping.";
@@ -201,12 +211,14 @@ mod tests {
         };
         let verifier = ModelVerifier::new(policy);
 
-        let context = vec![
-            ("doc1".to_string(), "Bramha runs local intelligence natively on CPU and GPU.".to_string()),
-        ];
+        let context = vec![(
+            "doc1".to_string(),
+            "Bramha runs local intelligence natively on CPU and GPU.".to_string(),
+        )];
 
         // The second sentence is a hallucination not grounded in the context
-        let completion = "Bramha runs local intelligence. It also connects to external cloud servers.";
+        let completion =
+            "Bramha runs local intelligence. It also connects to external cloud servers.";
         let report = verifier.verify(completion, &context);
 
         assert_eq!(report.status, VerificationStatus::Fail);

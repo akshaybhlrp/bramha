@@ -1,8 +1,8 @@
-use std::fs::{OpenOptions, File};
-use std::io::{Write, BufReader, BufRead};
-use serde::{Serialize, Deserialize};
-use crate::core::vector::Vector;
 use crate::core::collection::Collection;
+use crate::core::vector::Vector;
+use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WalOp {
@@ -18,7 +18,10 @@ impl WalManager {
     pub fn new(collection_name: &str) -> Self {
         let dir = std::env::current_dir().unwrap_or_default().join("wal_data");
         std::fs::create_dir_all(&dir).unwrap();
-        let file_path = dir.join(format!("{}.wal", collection_name)).to_string_lossy().to_string();
+        let file_path = dir
+            .join(format!("{}.wal", collection_name))
+            .to_string_lossy()
+            .to_string();
         WalManager { file_path }
     }
 
@@ -29,16 +32,17 @@ impl WalManager {
             .append(true)
             .open(&self.file_path)
             .map_err(|e| format!("Failed to open WAL: {}", e))?;
-        
+
         let json_line = serde_json::to_string(&op)
-            .map_err(|e| format!("Failed to serialize WAL entry: {}", e))? + "\n";
-        
+            .map_err(|e| format!("Failed to serialize WAL entry: {}", e))?
+            + "\n";
+
         file.write_all(json_line.as_bytes())
             .map_err(|e| format!("Failed to write WAL: {}", e))?;
-        
+
         file.sync_all()
             .map_err(|e| format!("Failed to sync WAL to disk: {}", e))?;
-            
+
         Ok(())
     }
 
@@ -69,7 +73,7 @@ impl WalManager {
             }
             let op: WalOp = serde_json::from_str(&line_str)
                 .map_err(|e| format!("WAL deserialize err (potential corruption): {}", e))?;
-            
+
             match op {
                 WalOp::Upsert { vector } => {
                     let _ = collection.insert(vector);
@@ -88,8 +92,8 @@ impl WalManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::vector::Metric;
     use crate::core::collection::CollectionStatus;
+    use crate::core::vector::Metric;
 
     #[test]
     fn test_wal_crash_recovery_and_blocking() {
@@ -99,7 +103,7 @@ mod tests {
 
         // 1. Setup clean collection
         let mut collection = Collection::new(name.to_string(), 3, Metric::L2);
-        
+
         // 2. Perform upserts writing to WAL
         let v1 = Vector {
             id: "vec_1".to_string(),
@@ -113,8 +117,12 @@ mod tests {
         };
 
         // Simulated WAL log appends
-        manager.append(WalOp::Upsert { vector: v1.clone() }).unwrap();
-        manager.append(WalOp::Upsert { vector: v2.clone() }).unwrap();
+        manager
+            .append(WalOp::Upsert { vector: v1.clone() })
+            .unwrap();
+        manager
+            .append(WalOp::Upsert { vector: v2.clone() })
+            .unwrap();
 
         // Replay onto clean collection to verify recovery
         let count = manager.replay(&mut collection).unwrap();
@@ -124,7 +132,11 @@ mod tests {
         assert!(collection.vectors.contains_key("vec_2"));
 
         // 3. Simulated WAL deletion recovery
-        manager.append(WalOp::Delete { id: "vec_1".to_string() }).unwrap();
+        manager
+            .append(WalOp::Delete {
+                id: "vec_1".to_string(),
+            })
+            .unwrap();
         let count2 = manager.replay(&mut collection).unwrap();
         // Since we replayed from the beginning, it's 3 actions now
         assert_eq!(count2, 3);
@@ -135,7 +147,10 @@ mod tests {
         // 4. Test query blocking on CORRUPT status
         collection.status = CollectionStatus::CORRUPT;
         let res = collection.search(&[4.0, 5.0, 6.0], 1, None, false);
-        assert!(res.is_empty(), "Queries should be rejected on CORRUPT collections!");
+        assert!(
+            res.is_empty(),
+            "Queries should be rejected on CORRUPT collections!"
+        );
 
         // Clean up WAL file
         manager.clear().unwrap();

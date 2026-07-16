@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct InferenceTelemetry {
@@ -43,7 +43,10 @@ impl OperationsConsole {
     }
 
     /// Extract citations and calculate grounded confidence ratios across text spans
-    pub fn parse_grounded_citations(answer: &str, retrieved_context: &str) -> Vec<GroundingCitation> {
+    pub fn parse_grounded_citations(
+        answer: &str,
+        retrieved_context: &str,
+    ) -> Vec<GroundingCitation> {
         let mut citations = Vec::new();
         let sentences: Vec<&str> = answer.split(|c| c == '.' || c == '?' || c == '!').collect();
         let context_lower = retrieved_context.to_lowercase();
@@ -56,7 +59,8 @@ impl OperationsConsole {
             }
 
             // Check if the exact context matches keywords of the answer sentence
-            let words: Vec<&str> = trimmed.split_whitespace()
+            let words: Vec<&str> = trimmed
+                .split_whitespace()
                 .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()))
                 .filter(|w| !w.is_empty() && w.len() > 3)
                 .collect();
@@ -153,7 +157,10 @@ mod tests {
 
     #[test]
     fn test_session_timeline_aggregation() {
-        let history = vec![("Where is sharding?".to_string(), "It is stored in storage/shards".to_string())];
+        let history = vec![(
+            "Where is sharding?".to_string(),
+            "It is stored in storage/shards".to_string(),
+        )];
         let timeline = OperationsConsole::build_session_timeline(history);
         assert_eq!(timeline.len(), 4);
         assert_eq!(timeline[0].event_type, "ChatTurn");

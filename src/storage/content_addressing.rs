@@ -1,22 +1,19 @@
+use crate::storage::disk::load_from_file;
+use blake3;
+use serde::{Deserialize, Serialize};
 /// Content-Addressed Storage: Deduplication layer for model weights
-/// 
+///
 /// Core idea: Instead of storing raw weight files, store chunks by their hash.
 /// Multiple models can reference the same weight chunk if it's identical.
 /// This enables:
 /// - Cross-model deduplication (e.g., tinyllama base + quantized variants)
 /// - Layer deduplication (identical layers across depths)
 /// - Block-level efficiency (256-element chunks hashed independently)
-
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use blake3;
-use serde::{Deserialize, Serialize};
-use crate::storage::disk::load_from_file;
-
 
 const CHUNK_SIZE: usize = 262144; // Elements per chunk (1MB)
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkHash {
@@ -42,13 +39,13 @@ pub struct StorageLocation {
 pub struct DedupIndex {
     /// chunk_hash -> StorageLocation (where this chunk is stored)
     pub chunks: HashMap<String, StorageLocation>,
-    
+
     /// chunk_hash -> reference count (how many models/layers reference this chunk)
     pub ref_counts: HashMap<String, u32>,
-    
+
     /// model_name -> set of chunk hashes it uses
     pub model_chunks: HashMap<String, HashSet<String>>,
-    
+
     /// Bloom filter for quick negative checks (prevents unnecessary hash lookups)
     /// In production, use a proper Bloom filter; here simplified with set
     pub bloom_cache: HashSet<String>,
@@ -96,18 +93,16 @@ impl DedupIndex {
 
     /// Check if model owns this chunk exclusively (ref count == 1)
     pub fn is_exclusive(&self, chunk_hash: &str) -> bool {
-        self.ref_counts.get(chunk_hash).map_or(false, |count| *count == 1)
+        self.ref_counts
+            .get(chunk_hash)
+            .map_or(false, |count| *count == 1)
     }
 
     /// Get dedup savings statistics
     pub fn get_stats(&self) -> DedupStats {
         let total_chunks = self.chunks.len();
         let total_refs: u32 = self.ref_counts.values().sum();
-        let unique_chunks_with_dupes = self
-            .ref_counts
-            .values()
-            .filter(|&&count| count > 1)
-            .count();
+        let unique_chunks_with_dupes = self.ref_counts.values().filter(|&&count| count > 1).count();
         let total_duplicate_refs = total_refs.saturating_sub(total_chunks as u32);
 
         let bytes_deduplicated = self
@@ -115,7 +110,15 @@ impl DedupIndex {
             .values()
             .filter(|loc| {
                 self.ref_counts
-                    .get(&self.chunks.iter().find(|(_, l)| *l == *loc).map(|(h, _)| h).unwrap().to_string())
+                    .get(
+                        &self
+                            .chunks
+                            .iter()
+                            .find(|(_, l)| *l == *loc)
+                            .map(|(h, _)| h)
+                            .unwrap()
+                            .to_string(),
+                    )
                     .map_or(false, |&count| count > 1)
             })
             .map(|loc| loc.byte_length)
@@ -154,7 +157,8 @@ impl DedupIndex {
         }
 
         // Remove dead model entries
-        self.model_chunks.retain(|model_name, _| active_models.contains(model_name));
+        self.model_chunks
+            .retain(|model_name, _| active_models.contains(model_name));
 
         removed
     }
@@ -202,18 +206,18 @@ impl ContentAddressedStorage {
     pub fn save_index(&self) -> std::io::Result<()> {
         let index = self.index.lock().unwrap();
         let index_path = self.data_dir.join("dedup_index.json");
-        
+
         let bytes = serde_json::to_vec(&*index)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        
+
         let tmp_path = self.data_dir.join("dedup_index.json.tmp");
-        
+
         use std::io::Write;
         let mut file = std::fs::File::create(&tmp_path)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         std::fs::rename(&tmp_path, &index_path)?;
-        
+
         Ok(())
     }
 
@@ -239,10 +243,9 @@ impl ContentAddressedStorage {
 
         // Chunked storage: hash each chunk and check dedup
         let chunk_iter: Box<dyn Iterator<Item = &[f32]>> = if data.len() % CHUNK_SIZE != 0 {
-            Box::new(
-                data.chunks_exact(CHUNK_SIZE)
-                    .chain(std::iter::once(&data[data.len() - (data.len() % CHUNK_SIZE)..]))
-            )
+            Box::new(data.chunks_exact(CHUNK_SIZE).chain(std::iter::once(
+                &data[data.len() - (data.len() % CHUNK_SIZE)..],
+            )))
         } else {
             Box::new(data.chunks_exact(CHUNK_SIZE))
         };
@@ -255,10 +258,10 @@ impl ContentAddressedStorage {
             .open(&container_path)?;
 
         let mut current_offset = file.metadata()?.len();
-        
+
         // Wrap in BufWriter for high-performance buffered sequential writes
         let mut writer = std::io::BufWriter::with_capacity(65536, file);
-        
+
         // Seek to the end of the container once before starting the chunk loop
         use std::io::Seek;
         writer.seek(std::io::SeekFrom::Start(current_offset))?;
@@ -301,7 +304,7 @@ impl ContentAddressedStorage {
                 );
             }
         }
-        
+
         // Explicitly flush our buffered writer to ensure all data is written to disk
         use std::io::Write;
         writer.flush()?;
@@ -326,7 +329,10 @@ impl ContentAddressedStorage {
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Chunk not found"))?;
 
         if location.path == PathBuf::new() {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Chunk path is empty"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Chunk path is empty",
+            ));
         }
 
         use std::io::{Read, Seek, SeekFrom};
@@ -358,7 +364,10 @@ impl ContentAddressedStorage {
         );
         if stats.total_references > 0 {
             let dedup_ratio = stats.duplicate_refs as f64 / stats.total_references as f64;
-            println!("Deduplication ratio: {:.1}% of storage reused", dedup_ratio * 100.0);
+            println!(
+                "Deduplication ratio: {:.1}% of storage reused",
+                dedup_ratio * 100.0
+            );
         }
     }
 }
@@ -438,7 +447,7 @@ mod tests {
         let index_path = data_dir.join("dedup_index.json");
         assert!(container_path.exists());
         assert!(index_path.exists());
-        
+
         // Verify size of container file (2 chunks * 1048576 bytes = 2097152 bytes)
         assert_eq!(container_path.metadata().unwrap().len(), 2097152);
 

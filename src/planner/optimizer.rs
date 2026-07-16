@@ -1,5 +1,5 @@
-use crate::planner::policy::{PlannerDecision, PlannerPolicy};
 use crate::planner::cost_model::CostModel;
+use crate::planner::policy::{PlannerDecision, PlannerPolicy};
 use crate::storage::storage_manifest::StorageTier;
 
 pub struct ExecutionPathOptimizer;
@@ -34,24 +34,52 @@ impl ExecutionPathOptimizer {
         }
 
         let complexity = 1.0;
-        let exact_cost = CostModel::estimate_path_cost(prompt, 50, PlannerDecision::ExactDecode, complexity, historical_accept_rate, has_activation_view);
-        let spec_cost = CostModel::estimate_path_cost(prompt, 50, PlannerDecision::SpeculativeDecode, complexity, historical_accept_rate, has_activation_view);
-        let spanda_cost = CostModel::estimate_path_cost(prompt, 50, PlannerDecision::SpandaSparse, complexity, historical_accept_rate, has_activation_view);
+        let exact_cost = CostModel::estimate_path_cost(
+            prompt,
+            50,
+            PlannerDecision::ExactDecode,
+            complexity,
+            historical_accept_rate,
+            has_activation_view,
+        );
+        let spec_cost = CostModel::estimate_path_cost(
+            prompt,
+            50,
+            PlannerDecision::SpeculativeDecode,
+            complexity,
+            historical_accept_rate,
+            has_activation_view,
+        );
+        let spanda_cost = CostModel::estimate_path_cost(
+            prompt,
+            50,
+            PlannerDecision::SpandaSparse,
+            complexity,
+            historical_accept_rate,
+            has_activation_view,
+        );
 
         let mut best_decision = PlannerDecision::ExactDecode;
         let mut min_cost = exact_cost;
 
         // Check speculative decoding eligibility based on policy thresholds and adaptive route confidence
-        let spec_confidence = route_confidences.get("SpeculativeDecode").copied().unwrap_or(0.5);
-        let spec_eligible = historical_accept_rate >= policy.min_speculative_accept_rate && spec_confidence >= 0.3;
-        
+        let spec_confidence = route_confidences
+            .get("SpeculativeDecode")
+            .copied()
+            .unwrap_or(0.5);
+        let spec_eligible =
+            historical_accept_rate >= policy.min_speculative_accept_rate && spec_confidence >= 0.3;
+
         if spec_eligible && spec_cost < exact_cost {
             best_decision = PlannerDecision::SpeculativeDecode;
             min_cost = spec_cost;
         }
 
         // Check SPANDA graceful degradation state machine with adaptive confidence
-        let spanda_confidence = route_confidences.get("SpandaSparse").copied().unwrap_or(0.5);
+        let spanda_confidence = route_confidences
+            .get("SpandaSparse")
+            .copied()
+            .unwrap_or(0.5);
         if spanda_healthy && policy.planner_mode == "spanda" && spanda_confidence >= 0.2 {
             if best_decision == PlannerDecision::SpeculativeDecode {
                 if spanda_cost < min_cost {
@@ -82,7 +110,13 @@ impl ExecutionPathOptimizer {
             return StorageTier::Critical;
         }
 
-        CostModel::tier_preference(layer_idx, total_layers, access_count, last_accessed, current_time)
+        CostModel::tier_preference(
+            layer_idx,
+            total_layers,
+            access_count,
+            last_accessed,
+            current_time,
+        )
     }
 }
 
@@ -101,11 +135,31 @@ mod tests {
         let confidences = std::collections::HashMap::new();
 
         // 1. Hit cache -> CachedAnswer
-        let decision = ExecutionPathOptimizer::optimize(&policy, "prompt", "model", &[], true, 0.9, true, &confidences, false);
+        let decision = ExecutionPathOptimizer::optimize(
+            &policy,
+            "prompt",
+            "model",
+            &[],
+            true,
+            0.9,
+            true,
+            &confidences,
+            false,
+        );
         assert_eq!(decision, PlannerDecision::CachedAnswer);
 
         // 2. Miss cache, high accept rate -> SpeculativeDecode
-        let decision = ExecutionPathOptimizer::optimize(&policy, "prompt", "model", &[], false, 0.7, true, &confidences, false);
+        let decision = ExecutionPathOptimizer::optimize(
+            &policy,
+            "prompt",
+            "model",
+            &[],
+            false,
+            0.7,
+            true,
+            &confidences,
+            false,
+        );
         assert_eq!(decision, PlannerDecision::SpeculativeDecode);
 
         // 3. Miss cache, low accept rate, healthy SPANDA -> SpandaSparse (needs mode = "spanda")
@@ -113,11 +167,31 @@ mod tests {
             planner_mode: "spanda".to_string(),
             ..policy.clone()
         };
-        let decision = ExecutionPathOptimizer::optimize(&spanda_policy, "prompt", "model", &[], false, 0.3, true, &confidences, false);
+        let decision = ExecutionPathOptimizer::optimize(
+            &spanda_policy,
+            "prompt",
+            "model",
+            &[],
+            false,
+            0.3,
+            true,
+            &confidences,
+            false,
+        );
         assert_eq!(decision, PlannerDecision::SpandaSparse);
 
         // 4. Miss cache, low accept rate, unhealthy SPANDA -> ExactDecode
-        let decision = ExecutionPathOptimizer::optimize(&spanda_policy, "prompt", "model", &[], false, 0.3, false, &confidences, false);
+        let decision = ExecutionPathOptimizer::optimize(
+            &spanda_policy,
+            "prompt",
+            "model",
+            &[],
+            false,
+            0.3,
+            false,
+            &confidences,
+            false,
+        );
         assert_eq!(decision, PlannerDecision::ExactDecode);
 
         // 5. Force exact_only policy override -> ExactDecode
@@ -125,12 +199,36 @@ mod tests {
             planner_mode: "exact_only".to_string(),
             ..policy
         };
-        let decision = ExecutionPathOptimizer::optimize(&exact_policy, "prompt", "model", &[], true, 0.95, true, &confidences, false);
+        let decision = ExecutionPathOptimizer::optimize(
+            &exact_policy,
+            "prompt",
+            "model",
+            &[],
+            true,
+            0.95,
+            true,
+            &confidences,
+            false,
+        );
         assert_eq!(decision, PlannerDecision::ExactDecode);
 
         // 6. Activation View override tests
-        let view_decision = ExecutionPathOptimizer::optimize(&policy, "long prompt here", "model", &[], false, 0.9, true, &confidences, true);
-        assert_eq!(view_decision, PlannerDecision::ExactDecode, "Should override to ExactDecode when view exists because cost is cheaper");
+        let view_decision = ExecutionPathOptimizer::optimize(
+            &policy,
+            "long prompt here",
+            "model",
+            &[],
+            false,
+            0.9,
+            true,
+            &confidences,
+            true,
+        );
+        assert_eq!(
+            view_decision,
+            PlannerDecision::ExactDecode,
+            "Should override to ExactDecode when view exists because cost is cheaper"
+        );
     }
 
     #[test]
@@ -139,16 +237,18 @@ mod tests {
         let total_layers = 24;
 
         // With default/enabled tier aware, middle layer should be Important (Warm)
-        let tier_default = ExecutionPathOptimizer::route_layer_tier(10, total_layers, 1, 9900, current_time);
+        let tier_default =
+            ExecutionPathOptimizer::route_layer_tier(10, total_layers, 1, 9900, current_time);
         assert_eq!(tier_default, StorageTier::Important);
 
         // Set env var to false to bypass/disable tier routing
         unsafe {
             std::env::set_var("BRAMHA_PLANNER_TIER_AWARE", "false");
         }
-        
-        let tier_bypassed = ExecutionPathOptimizer::route_layer_tier(10, total_layers, 1, 9900, current_time);
-        
+
+        let tier_bypassed =
+            ExecutionPathOptimizer::route_layer_tier(10, total_layers, 1, 9900, current_time);
+
         unsafe {
             std::env::remove_var("BRAMHA_PLANNER_TIER_AWARE");
         }

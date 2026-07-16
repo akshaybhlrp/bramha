@@ -4045,7 +4045,22 @@ dependencies = [
 
 [[package]]
 name = "spanda-engine"
-version = "0.1.0"
+version = "0.7.0"
+dependencies = [
+ "bincode",
+ "blake3",
+ "bytemuck",
+ "crc32fast",
+ "half",
+ "pollster",
+ "rand 0.8.6",
+ "rayon",
+ "safetensors 0.7.0",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wgpu",
+]
 
 [[package]]
 name = "spin"

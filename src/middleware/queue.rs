@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
 use crate::inference::engine::InferenceResult;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::{mpsc, oneshot};
 
 /// A singular heavy inference task containing parameters and oneshot response backchannel
 pub struct InferenceTask {
@@ -9,6 +9,7 @@ pub struct InferenceTask {
     pub prompt: String,
     pub max_new_tokens: usize,
     pub temperature: f64,
+    pub device: Option<String>,
     pub workflow_id: Option<String>,
     pub branch_id: Option<String>,
     pub response_tx: oneshot::Sender<Result<InferenceResult, String>>,
@@ -41,6 +42,7 @@ impl InferenceQueue {
         prompt: String,
         max_new_tokens: usize,
         temperature: f64,
+        device: Option<String>,
         workflow_id: Option<String>,
         branch_id: Option<String>,
     ) -> Result<InferenceResult, String> {
@@ -50,6 +52,7 @@ impl InferenceQueue {
             prompt,
             max_new_tokens,
             temperature,
+            device,
             workflow_id,
             branch_id,
             response_tx: tx,
@@ -65,11 +68,13 @@ impl InferenceQueue {
         }
 
         // Await the response from oneshot
-        let res = rx.await.map_err(|e| format!("Inference worker task cancelled: {}", e))?;
-        
+        let res = rx
+            .await
+            .map_err(|e| format!("Inference worker task cancelled: {}", e))?;
+
         // Decrement depth atomic
         self.queue_depth.fetch_sub(1, Ordering::SeqCst);
-        
+
         res
     }
 

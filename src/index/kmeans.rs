@@ -1,19 +1,14 @@
+use crate::core::distance::l2_distance;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
-use crate::core::distance::l2_distance;
 
 /// Performs K-Means clustering on a dataset of vectors.
 /// Returns a list of K centroids.
-pub fn kmeans(
-    data: &[Vec<f32>],
-    k: usize,
-    max_iters: usize,
-    dimension: usize,
-) -> Vec<Vec<f32>> {
+pub fn kmeans(data: &[Vec<f32>], k: usize, max_iters: usize, dimension: usize) -> Vec<Vec<f32>> {
     if data.is_empty() || k == 0 {
         return vec![];
     }
-    
+
     // If we have fewer items than clusters, just return the items themselves as centroids
     if data.len() <= k {
         return data.to_vec();
@@ -21,10 +16,10 @@ pub fn kmeans(
 
     use rand::SeedableRng;
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-    
+
     // 1. K-Means++ initialization algorithm
     let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(k);
-    
+
     // Choose the first centroid uniformly at random
     if let Some(first) = data.choose(&mut rng) {
         centroids.push(first.clone());
@@ -157,12 +152,14 @@ mod tests {
         ];
 
         let centroids = kmeans(&data, 2, 50, 2);
-        
+
         assert_eq!(centroids.len(), 2);
         // Verify centroids are around (1,1) and (10,10)
         let has_near_1_1 = centroids.iter().any(|c| l2_distance(c, &[1.0, 1.0]) < 1.0);
-        let has_near_10_10 = centroids.iter().any(|c| l2_distance(c, &[10.0, 10.0]) < 1.0);
-        
+        let has_near_10_10 = centroids
+            .iter()
+            .any(|c| l2_distance(c, &[10.0, 10.0]) < 1.0);
+
         assert!(has_near_1_1);
         assert!(has_near_10_10);
     }

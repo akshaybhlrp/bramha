@@ -32,15 +32,18 @@ impl PrefixCacheDb {
             for i in 0..to_remove {
                 let _ = fs::remove_file(&entries[i].0);
             }
-            println!("🗑️ [Prefix KV Cache] Evicted {} oldest cache files to remain under threshold.", to_remove);
+            println!(
+                "🗑️ [Prefix KV Cache] Evicted {} oldest cache files to remain under threshold.",
+                to_remove
+            );
         }
         Ok(())
     }
 }
 
+use serde::{Deserialize, Serialize};
 use std::fs::{self as fs2, File};
 use std::io::{Read, Write};
-use serde::{Serialize, Deserialize};
 
 // ─── KV Cache Entry ──────────────────────────────────────────────────────────
 
@@ -72,7 +75,11 @@ impl Default for KvCacheManager {
 }
 
 impl KvCacheManager {
-    pub fn new_with_dir(_max_layers: usize, ttl_secs: u64, dir: impl AsRef<std::path::Path>) -> Self {
+    pub fn new_with_dir(
+        _max_layers: usize,
+        ttl_secs: u64,
+        dir: impl AsRef<std::path::Path>,
+    ) -> Self {
         let dir = dir.as_ref().to_path_buf();
         let _ = fs2::create_dir_all(&dir);
         Self { dir, ttl_secs }

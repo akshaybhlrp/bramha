@@ -1,10 +1,10 @@
+use crate::core::tensor::{DType, TensorPage};
+use crate::storage::content_addressing::ContentAddressedStorage;
+use crate::storage::model_view::ModelView;
+use crate::storage::multi_tier::{MultiTierStorage, TierConfig};
+use crate::storage::storage_manifest::ModelManifest;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::core::tensor::{TensorPage, DType};
-use crate::storage::multi_tier::{MultiTierStorage, TierConfig};
-use crate::storage::content_addressing::ContentAddressedStorage;
-use crate::storage::storage_manifest::ModelManifest;
-use crate::storage::model_view::ModelView;
 pub struct ModelTable {
     pub name: String,
     pub base_path: PathBuf,
@@ -35,7 +35,13 @@ impl ModelTable {
     }
 
     /// Simulates "inserting" a layer into the table by memory mapping a binary file on disk.
-    pub fn load_layer(&mut self, layer_id: String, file_name: &str, shape: Vec<usize>, dtype: DType) -> std::io::Result<()> {
+    pub fn load_layer(
+        &mut self,
+        layer_id: String,
+        file_name: &str,
+        shape: Vec<usize>,
+        dtype: DType,
+    ) -> std::io::Result<()> {
         let path = self.base_path.join(file_name);
         let page = TensorPage::load_mmap_single(layer_id.clone(), &path, shape, dtype)?;
         let _ = page.advise_prefetch();
@@ -44,26 +50,37 @@ impl ModelTable {
     }
 
     /// Materialize a differential layer (AOT merge)
-    pub fn materialize_differential(&mut self, layer_id: String, reference_id: &str, delta_file_name: &str, shape: Vec<usize>, dtype: DType) -> std::io::Result<()> {
+    pub fn materialize_differential(
+        &mut self,
+        layer_id: String,
+        reference_id: &str,
+        delta_file_name: &str,
+        shape: Vec<usize>,
+        dtype: DType,
+    ) -> std::io::Result<()> {
         let path = self.base_path.join(delta_file_name);
-        let delta_page = TensorPage::load_mmap_single(layer_id.clone() + "_delta", &path, shape.clone(), dtype)?;
-        
+        let delta_page =
+            TensorPage::load_mmap_single(layer_id.clone() + "_delta", &path, shape.clone(), dtype)?;
+
         // Find reference page
         let ref_page = self.layers.get(reference_id).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, format!("Reference layer {} not found", reference_id))
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Reference layer {} not found", reference_id),
+            )
         })?;
-        
+
         // Add them together (f32 only for now as requested)
         let delta_f32 = delta_page.as_f32();
         let ref_f32 = ref_page.as_f32();
-        
+
         let mut buffer = vec![0.0f32; delta_f32.len()];
         for i in 0..buffer.len() {
             buffer[i] = ref_f32[i] + delta_f32[i];
         }
-        
+
         let u8_buffer = bytemuck::cast_slice(&buffer).to_vec();
-        
+
         let materialized_page = TensorPage::new_memory(layer_id.clone(), shape, dtype, u8_buffer);
         self.layers.insert(layer_id, materialized_page);
         Ok(())
@@ -120,14 +137,22 @@ impl ModelTable {
     }
 
     /// Loads the chunks of a single tensor (and its scale tensor if applicable) from the block database using the B-Tree index if it is currently empty.
-    pub fn load_tensor_chunks(&mut self, tensor_name: &str, block_db: &mut crate::storage::block_db::BlockDB) -> std::io::Result<()> {
+    pub fn load_tensor_chunks(
+        &mut self,
+        tensor_name: &str,
+        block_db: &mut crate::storage::block_db::BlockDB,
+    ) -> std::io::Result<()> {
         self.load_tensor_chunks_internal(tensor_name, block_db)?;
         let scale_name = format!("{}.scale", tensor_name);
         self.load_tensor_chunks_internal(&scale_name, block_db)?;
         Ok(())
     }
 
-    fn load_tensor_chunks_internal(&mut self, tensor_name: &str, block_db: &mut crate::storage::block_db::BlockDB) -> std::io::Result<()> {
+    fn load_tensor_chunks_internal(
+        &mut self,
+        tensor_name: &str,
+        block_db: &mut crate::storage::block_db::BlockDB,
+    ) -> std::io::Result<()> {
         if let Some(page) = self.layers.get(tensor_name) {
             if !page.as_bytes().is_empty() {
                 return Ok(()); // Already loaded
@@ -153,7 +178,7 @@ impl ModelTable {
                 }
             }
         }
-        
+
         if hashes_with_idx.is_empty() {
             return Ok(());
         }
@@ -180,7 +205,7 @@ impl ModelTable {
             is_contiguous = false;
         } else {
             for i in 0..locations.len().saturating_sub(1) {
-                if locations[i].offset + locations[i].length as u64 != locations[i+1].offset {
+                if locations[i].offset + locations[i].length as u64 != locations[i + 1].offset {
                     is_contiguous = false;
                     break;
                 }
@@ -190,8 +215,9 @@ impl ModelTable {
         if is_contiguous && !locations.is_empty() {
             if let Some(mmap_data) = &block_db.mmap {
                 let start = locations[0].offset as usize;
-                let end = (locations.last().unwrap().offset + locations.last().unwrap().length as u64) as usize;
-                
+                let end = (locations.last().unwrap().offset
+                    + locations.last().unwrap().length as u64) as usize;
+
                 if let Some(page) = self.layers.get_mut(tensor_name) {
                     *page = TensorPage::new_slice(
                         tensor_name.to_string(),
@@ -211,7 +237,7 @@ impl ModelTable {
         let total_bytes: usize = locations.iter().map(|l| l.length as usize).sum();
         let num_u32s = (total_bytes + 3) / 4;
         let mut aligned_buffer: Vec<u32> = vec![0; num_u32s];
-        
+
         let mut current_offset = 0;
         for loc in locations {
             let data = block_db.read_block(&loc)?;
@@ -269,7 +295,11 @@ impl ModelTable {
         }
     }
 
-    pub fn load_transformer_layer_chunks(&mut self, layer_idx: usize, block_db: &mut crate::storage::block_db::BlockDB) -> std::io::Result<()> {
+    pub fn load_transformer_layer_chunks(
+        &mut self,
+        layer_idx: usize,
+        block_db: &mut crate::storage::block_db::BlockDB,
+    ) -> std::io::Result<()> {
         let components = [
             "input_layernorm.weight",
             "self_attn.q_proj.weight",
@@ -315,7 +345,11 @@ impl ModelTable {
     }
 
     /// Loads all base tensors required for executing layer_idx.
-    pub fn load_layer_tensors(&mut self, layer_idx: usize, block_db: &mut crate::storage::block_db::BlockDB) -> std::io::Result<()> {
+    pub fn load_layer_tensors(
+        &mut self,
+        layer_idx: usize,
+        block_db: &mut crate::storage::block_db::BlockDB,
+    ) -> std::io::Result<()> {
         let keys = [
             format!("model.layers.{}.input_layernorm.weight", layer_idx),
             format!("model.layers.{}.self_attn.q_proj.weight", layer_idx),
@@ -365,15 +399,27 @@ impl ModelTable {
         // Also unload any expert tensors if present for this layer
         if let Some(num_experts) = self.num_experts {
             for e in 0..num_experts {
-                self.unload_tensor_chunks(&format!("model.layers.{}.mlp.experts.{}.gate_proj.weight", layer_idx, e));
-                self.unload_tensor_chunks(&format!("model.layers.{}.mlp.experts.{}.up_proj.weight", layer_idx, e));
-                self.unload_tensor_chunks(&format!("model.layers.{}.mlp.experts.{}.down_proj.weight", layer_idx, e));
+                self.unload_tensor_chunks(&format!(
+                    "model.layers.{}.mlp.experts.{}.gate_proj.weight",
+                    layer_idx, e
+                ));
+                self.unload_tensor_chunks(&format!(
+                    "model.layers.{}.mlp.experts.{}.up_proj.weight",
+                    layer_idx, e
+                ));
+                self.unload_tensor_chunks(&format!(
+                    "model.layers.{}.mlp.experts.{}.down_proj.weight",
+                    layer_idx, e
+                ));
             }
         }
     }
 
     /// Loads non-layer model weights (embeddings, final norms, lm_head).
-    pub fn load_non_layer_tensors(&mut self, block_db: &mut crate::storage::block_db::BlockDB) -> std::io::Result<()> {
+    pub fn load_non_layer_tensors(
+        &mut self,
+        block_db: &mut crate::storage::block_db::BlockDB,
+    ) -> std::io::Result<()> {
         let keys = [
             "model.embed_tokens.weight".to_string(),
             "model.norm.weight".to_string(),
@@ -409,12 +455,12 @@ pub struct TensorDB {
 impl TensorDB {
     pub fn new(storage_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&storage_dir).unwrap_or_default();
-        
+
         let hot_path = storage_dir.join("hot");
         let warm_path = storage_dir.join("warm");
         let cold_path = storage_dir.join("cold");
         let content_dir = storage_dir.join("content");
-        
+
         let config = TierConfig::default();
         let multi_tier = MultiTierStorage::new(config, hot_path, warm_path, cold_path).unwrap();
         let content_storage = ContentAddressedStorage::new(content_dir.clone()).unwrap();
@@ -435,7 +481,8 @@ impl TensorDB {
     pub fn create_model(&mut self, name: String) {
         let path = self.storage_dir.join(&name);
         std::fs::create_dir_all(&path).unwrap_or_default();
-        self.models.insert(name.clone(), ModelTable::new(name, path));
+        self.models
+            .insert(name.clone(), ModelTable::new(name, path));
     }
 
     /// Scans the storage directory for model subdirectories containing a manifest.json,
@@ -457,7 +504,11 @@ impl TensorDB {
                 None => continue,
             };
 
-            if model_name == "hot" || model_name == "warm" || model_name == "cold" || model_name == "content" {
+            if model_name == "hot"
+                || model_name == "warm"
+                || model_name == "cold"
+                || model_name == "content"
+            {
                 continue;
             }
 
@@ -488,18 +539,27 @@ impl TensorDB {
             }
         }
 
-        println!("🔄 Registered model '{}' from disk (lazy loading enabled)", model_name);
+        println!(
+            "🔄 Registered model '{}' from disk (lazy loading enabled)",
+            model_name
+        );
         self.models.insert(model_name, table);
     }
 
     /// Loads the actual layer pages of a model into memory on demand.
     pub fn load_model_layers(&mut self, model_name: &str) -> Result<(), String> {
         let (path, _, _) = {
-            let model = self.models.get(model_name)
+            let model = self
+                .models
+                .get(model_name)
                 .ok_or_else(|| format!("Model {} not registered in TensorDB", model_name))?;
-            (model.base_path.clone(), model.num_experts, model.expert_routing_top_k)
+            (
+                model.base_path.clone(),
+                model.num_experts,
+                model.expert_routing_top_k,
+            )
         };
-        
+
         // Support bypass via manifest_load feature and BRAMHA_MANIFEST_LOAD env variable
         let manifest_load_feature = cfg!(feature = "manifest_load");
         let manifest_load_env = std::env::var("BRAMHA_MANIFEST_LOAD")
@@ -531,7 +591,8 @@ impl TensorDB {
 
             let mut restored_count = 0;
             for (_, virtual_tensor) in view.tensors.into_iter() {
-                let dtype = crate::storage::safetensors_loader::string_to_dtype(&virtual_tensor.dtype);
+                let dtype =
+                    crate::storage::safetensors_loader::string_to_dtype(&virtual_tensor.dtype);
                 // Create an empty placeholder page
                 let page = TensorPage::new_memory(
                     virtual_tensor.name.clone(),
@@ -543,15 +604,20 @@ impl TensorDB {
 
                 // Index each chunk using B-Tree
                 for (chunk_idx, hash) in virtual_tensor.block_hashes.iter().enumerate() {
-                    let key = crate::storage::indexing::BTreeKey::String(format!("{}:{:06}", virtual_tensor.name, chunk_idx));
+                    let key = crate::storage::indexing::BTreeKey::String(format!(
+                        "{}:{:06}",
+                        virtual_tensor.name, chunk_idx
+                    ));
                     let _ = idx.insert(key, hash.clone());
                 }
                 restored_count += 1;
             }
 
             chunk_index = Some(idx);
-            println!("🔄 Loaded model '{}' from BUTS Virtual View ({} layers indexed via B-Tree)", model_name, restored_count);
-
+            println!(
+                "🔄 Loaded model '{}' from BUTS Virtual View ({} layers indexed via B-Tree)",
+                model_name, restored_count
+            );
         } else if let Some(manifest) = maybe_manifest {
             // --- Legacy Manifest-based restoration (full metadata) ---
             let mut restored_count = 0;
@@ -581,9 +647,7 @@ impl TensorDB {
                     _ => vec![format!("{}.bin", safe_name)],
                 };
 
-                let bin_path = candidates.iter()
-                    .map(|c| path.join(c))
-                    .find(|p| p.exists());
+                let bin_path = candidates.iter().map(|c| path.join(c)).find(|p| p.exists());
 
                 let bin_path = match bin_path {
                     Some(p) => p,
@@ -598,22 +662,29 @@ impl TensorDB {
                 };
 
                 if !layer_meta.checksum.is_empty() {
-                    use sha2::{Sha256, Digest};
+                    use sha2::{Digest, Sha256};
                     if let Ok(bytes) = std::fs::read(&bin_path) {
                         let mut hasher = Sha256::new();
                         hasher.update(&bytes);
                         let hash_result = hasher.finalize();
                         let sha256_hex = format!("{:x}", hash_result);
                         if sha256_hex != layer_meta.checksum {
-                            panic!("CRITICAL SECURITY ERROR: Checksum mismatch for tensor shard {:?}. Expected: {}, Actual: {}", bin_path, layer_meta.checksum, sha256_hex);
+                            panic!(
+                                "CRITICAL SECURITY ERROR: Checksum mismatch for tensor shard {:?}. Expected: {}, Actual: {}",
+                                bin_path, layer_meta.checksum, sha256_hex
+                            );
                         }
                     }
                 }
 
                 let dtype = match layer_meta.compression_format {
                     crate::storage::storage_manifest::CompressionFormat::Svd => DType::Svd,
-                    crate::storage::storage_manifest::CompressionFormat::ColumnarDict => DType::ColumnarDict,
-                    crate::storage::storage_manifest::CompressionFormat::Int4PerChannel => DType::U4,
+                    crate::storage::storage_manifest::CompressionFormat::ColumnarDict => {
+                        DType::ColumnarDict
+                    }
+                    crate::storage::storage_manifest::CompressionFormat::Int4PerChannel => {
+                        DType::U4
+                    }
                     _ => DType::F32,
                 };
                 match TensorPage::load_mmap_single(
@@ -627,12 +698,15 @@ impl TensorDB {
                             page.svd_rank = layer_meta.svd_rank;
                         }
                         let _ = page.advise_prefetch();
-                        
 
-                        
                         layers.insert(layer_meta.layer_id.clone(), page);
                         if let Ok(mut mt) = self.multi_tier.lock() {
-                            let _ = mt.register_layer(layer_meta.layer_id.clone(), layer_meta.stored_bytes, layer_meta.storage_tier, bin_path);
+                            let _ = mt.register_layer(
+                                layer_meta.layer_id.clone(),
+                                layer_meta.stored_bytes,
+                                layer_meta.storage_tier,
+                                bin_path,
+                            );
                         }
                         restored_count += 1;
                     }
@@ -642,11 +716,15 @@ impl TensorDB {
                 }
             }
 
-            println!("🔄 Loaded model '{}' from legacy manifest ({} layers)", model_name, restored_count);
+            println!(
+                "🔄 Loaded model '{}' from legacy manifest ({} layers)",
+                model_name, restored_count
+            );
         } else {
             // --- Legacy fallback: scan for .bin files without manifest ---
             let bin_files: Vec<_> = match std::fs::read_dir(&path) {
-                Ok(rd) => rd.flatten()
+                Ok(rd) => rd
+                    .flatten()
                     .filter(|e| e.path().extension().map_or(false, |ext| ext == "bin"))
                     .collect(),
                 Err(_) => Vec::new(),
@@ -656,7 +734,8 @@ impl TensorDB {
 
             for bin_entry in &bin_files {
                 let bin_path = bin_entry.path();
-                let layer_name = bin_path.file_stem()
+                let layer_name = bin_path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown")
                     .replace("_", ".");
@@ -669,9 +748,7 @@ impl TensorDB {
                 ) {
                     Ok(page) => {
                         let _ = page.advise_prefetch();
-                        
 
-                        
                         layers.insert(layer_name, page);
                         restored_count += 1;
                     }
@@ -681,7 +758,10 @@ impl TensorDB {
                 }
             }
 
-            println!("🔄 Loaded legacy model '{}' from disk ({} shards, no manifest)", model_name, restored_count);
+            println!(
+                "🔄 Loaded legacy model '{}' from disk ({} shards, no manifest)",
+                model_name, restored_count
+            );
         }
 
         if let Some(model) = self.models.get_mut(model_name) {
@@ -691,13 +771,19 @@ impl TensorDB {
             }
 
             // Hydrate expert map if it's an MoE model
-            if let (Some(num_experts), Some(chunk_index)) = (model.num_experts, &model.chunk_index) {
+            if let (Some(num_experts), Some(chunk_index)) = (model.num_experts, &model.chunk_index)
+            {
                 if num_experts > 0 {
-                    let num_layers = model.layers.keys()
-                        .filter(|k| k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight"))
+                    let num_layers = model
+                        .layers
+                        .keys()
+                        .filter(|k| {
+                            k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight")
+                        })
                         .count();
-                    
-                    let mut expert_map: Vec<Vec<[Option<TensorPage>; 6]>> = Vec::with_capacity(num_layers);
+
+                    let mut expert_map: Vec<Vec<[Option<TensorPage>; 6]>> =
+                        Vec::with_capacity(num_layers);
                     for _ in 0..num_layers {
                         let mut layer_experts = Vec::with_capacity(num_experts);
                         for _ in 0..num_experts {
@@ -710,12 +796,30 @@ impl TensorDB {
                     for layer_idx in 0..num_layers {
                         for expert_idx in 0..num_experts {
                             let keys = [
-                                format!("model.layers.{}.mlp.experts.{}.gate_proj.weight", layer_idx, expert_idx),
-                                format!("model.layers.{}.mlp.experts.{}.gate_proj.weight.scale", layer_idx, expert_idx),
-                                format!("model.layers.{}.mlp.experts.{}.up_proj.weight", layer_idx, expert_idx),
-                                format!("model.layers.{}.mlp.experts.{}.up_proj.weight.scale", layer_idx, expert_idx),
-                                format!("model.layers.{}.mlp.experts.{}.down_proj.weight", layer_idx, expert_idx),
-                                format!("model.layers.{}.mlp.experts.{}.down_proj.weight.scale", layer_idx, expert_idx),
+                                format!(
+                                    "model.layers.{}.mlp.experts.{}.gate_proj.weight",
+                                    layer_idx, expert_idx
+                                ),
+                                format!(
+                                    "model.layers.{}.mlp.experts.{}.gate_proj.weight.scale",
+                                    layer_idx, expert_idx
+                                ),
+                                format!(
+                                    "model.layers.{}.mlp.experts.{}.up_proj.weight",
+                                    layer_idx, expert_idx
+                                ),
+                                format!(
+                                    "model.layers.{}.mlp.experts.{}.up_proj.weight.scale",
+                                    layer_idx, expert_idx
+                                ),
+                                format!(
+                                    "model.layers.{}.mlp.experts.{}.down_proj.weight",
+                                    layer_idx, expert_idx
+                                ),
+                                format!(
+                                    "model.layers.{}.mlp.experts.{}.down_proj.weight.scale",
+                                    layer_idx, expert_idx
+                                ),
                             ];
                             for (t_idx, key) in keys.iter().enumerate() {
                                 let prefix = format!("{}:", key);
@@ -743,7 +847,9 @@ impl TensorDB {
                                     is_aligned = false;
                                 } else {
                                     for i in 0..locations.len().saturating_sub(1) {
-                                        if locations[i].offset + locations[i].length as u64 != locations[i+1].offset {
+                                        if locations[i].offset + locations[i].length as u64
+                                            != locations[i + 1].offset
+                                        {
                                             is_aligned = false;
                                             break;
                                         }
@@ -753,14 +859,17 @@ impl TensorDB {
                                 if is_aligned {
                                     if let Some(template) = model.layers.get(key) {
                                         if let Some(mmap_data) = &block_db.mmap {
-                                            expert_map[layer_idx][expert_idx][t_idx] = Some(TensorPage::new_slice(
-                                                key.clone(),
-                                                mmap_data.clone(),
-                                                template.shape.clone(),
-                                                template.dtype,
-                                                locations[0].offset as usize,
-                                                (locations.last().unwrap().offset + locations.last().unwrap().length as u64) as usize,
-                                            ));
+                                            expert_map[layer_idx][expert_idx][t_idx] =
+                                                Some(TensorPage::new_slice(
+                                                    key.clone(),
+                                                    mmap_data.clone(),
+                                                    template.shape.clone(),
+                                                    template.dtype,
+                                                    locations[0].offset as usize,
+                                                    (locations.last().unwrap().offset
+                                                        + locations.last().unwrap().length as u64)
+                                                        as usize,
+                                                ));
                                         }
                                     }
                                 }
@@ -768,7 +877,10 @@ impl TensorDB {
                         }
                     }
                     model.expert_map = Some(expert_map);
-                    println!("🔄 Hydrated Static MoE Map for {} layers, {} experts each", num_layers, num_experts);
+                    println!(
+                        "🔄 Hydrated Static MoE Map for {} layers, {} experts each",
+                        num_layers, num_experts
+                    );
                 }
             }
         }
@@ -835,12 +947,8 @@ mod tests {
         // 1. Create reference layer in table
         let ref_data = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32];
         let ref_bytes = bytemuck::cast_slice(&ref_data).to_vec();
-        let ref_page = TensorPage::new_memory(
-            "layer_0".to_string(),
-            vec![2, 2],
-            DType::F32,
-            ref_bytes,
-        );
+        let ref_page =
+            TensorPage::new_memory("layer_0".to_string(), vec![2, 2], DType::F32, ref_bytes);
         table.layers.insert("layer_0".to_string(), ref_page);
 
         // 2. Create delta file on disk
@@ -850,19 +958,21 @@ mod tests {
         std::fs::write(temp_dir.path().join(delta_file), delta_bytes).unwrap();
 
         // 3. Materialize differential
-        table.materialize_differential(
-            "layer_0_materialized".to_string(),
-            "layer_0",
-            delta_file,
-            vec![2, 2],
-            DType::F32,
-        ).unwrap();
+        table
+            .materialize_differential(
+                "layer_0_materialized".to_string(),
+                "layer_0",
+                delta_file,
+                vec![2, 2],
+                DType::F32,
+            )
+            .unwrap();
 
         // 4. Verify output page (sum of ref + delta)
         assert!(table.layers.contains_key("layer_0_materialized"));
         let page = table.layers.get("layer_0_materialized").unwrap();
         let result_f32 = page.as_f32();
-        
+
         assert_eq!(result_f32.len(), 4);
         assert_eq!(result_f32[0], 1.5);
         assert_eq!(result_f32[1], 1.0);
@@ -873,13 +983,30 @@ mod tests {
     #[test]
     fn test_advise_dont_need() {
         let temp_dir = TempDir::new().unwrap();
-        let mut table = ModelTable::new("model-cache-test".to_string(), temp_dir.path().to_path_buf());
+        let mut table = ModelTable::new(
+            "model-cache-test".to_string(),
+            temp_dir.path().to_path_buf(),
+        );
 
         // Insert a couple dummy pages
-        let page1 = TensorPage::new_memory("model.layers.0.input_layernorm.weight".to_string(), vec![1], DType::F32, vec![0; 4]);
-        let page2 = TensorPage::new_memory("model.embed_tokens.weight".to_string(), vec![1], DType::F32, vec![0; 4]);
-        table.layers.insert("model.layers.0.input_layernorm.weight".to_string(), page1);
-        table.layers.insert("model.embed_tokens.weight".to_string(), page2);
+        let page1 = TensorPage::new_memory(
+            "model.layers.0.input_layernorm.weight".to_string(),
+            vec![1],
+            DType::F32,
+            vec![0; 4],
+        );
+        let page2 = TensorPage::new_memory(
+            "model.embed_tokens.weight".to_string(),
+            vec![1],
+            DType::F32,
+            vec![0; 4],
+        );
+        table
+            .layers
+            .insert("model.layers.0.input_layernorm.weight".to_string(), page1);
+        table
+            .layers
+            .insert("model.embed_tokens.weight".to_string(), page2);
 
         // Call advise functions (should run and not panic)
         table.advise_dont_need_for_layer(0);
@@ -902,8 +1029,15 @@ mod tests {
         // Populate with a mock layer
         {
             let model_mut = db.models.get_mut("llama-dummy").unwrap();
-            let page = TensorPage::new_memory("model.embed_tokens.weight".to_string(), vec![2, 2], DType::F32, vec![0; 16]);
-            model_mut.layers.insert("model.embed_tokens.weight".to_string(), page);
+            let page = TensorPage::new_memory(
+                "model.embed_tokens.weight".to_string(),
+                vec![2, 2],
+                DType::F32,
+                vec![0; 16],
+            );
+            model_mut
+                .layers
+                .insert("model.embed_tokens.weight".to_string(), page);
         }
 
         // Call ensure loaded - should be a no-op because layers are not empty
@@ -937,29 +1071,32 @@ mod tests {
         std::fs::write(&dummy_bin, vec![0u8; 100 * 64 * 4]).unwrap();
 
         // 1. With BRAMHA_MANIFEST_LOAD unset or true (should load via manifest)
-        unsafe { std::env::set_var("BRAMHA_MANIFEST_LOAD", "true"); }
+        unsafe {
+            std::env::set_var("BRAMHA_MANIFEST_LOAD", "true");
+        }
         db.restore_model_at_path("bypass-model".to_string(), temp_dir.path());
         assert!(db.models.get("bypass-model").unwrap().manifest.is_some());
-        
+
         db.load_model_layers("bypass-model").unwrap();
         // Since the files for other layers in manifest are missing, loading will log warnings but register what it can.
         // Let's unload and test the bypass now.
         db.unload_model_layers("bypass-model");
 
         // 2. With BRAMHA_MANIFEST_LOAD=false
-        unsafe { std::env::set_var("BRAMHA_MANIFEST_LOAD", "false"); }
+        unsafe {
+            std::env::set_var("BRAMHA_MANIFEST_LOAD", "false");
+        }
         // Clear the model and restore again to verify manifest is not used during load
         db.models.clear();
         db.restore_model_at_path("bypass-model".to_string(), temp_dir.path());
-        
+
         db.load_model_layers("bypass-model").unwrap();
         // The manifest has been bypassed, so it fell back to scanning the folder and found only the model.embed_tokens.weight shard
         let model = db.models.get("bypass-model").unwrap();
         assert!(model.layers.contains_key("model.embed.tokens.weight"));
-        
-        unsafe { std::env::remove_var("BRAMHA_MANIFEST_LOAD"); }
+
+        unsafe {
+            std::env::remove_var("BRAMHA_MANIFEST_LOAD");
+        }
     }
 }
-
-
-

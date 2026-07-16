@@ -128,14 +128,23 @@ mod tests {
     fn test_bm25_tokenize() {
         let text = "Hello, Bramha! The Cognitive Database: 123.";
         let tokens = BM25Index::tokenize(text);
-        assert_eq!(tokens, vec!["hello", "bramha", "the", "cognitive", "database", "123"]);
+        assert_eq!(
+            tokens,
+            vec!["hello", "bramha", "the", "cognitive", "database", "123"]
+        );
     }
 
     #[test]
     fn test_bm25_search_indexing() {
         let mut index = BM25Index::new();
-        index.add_document("doc1".to_string(), "The quick brown fox jumps over the lazy dog");
-        index.add_document("doc2".to_string(), "Bramha is a high performance cognitive database");
+        index.add_document(
+            "doc1".to_string(),
+            "The quick brown fox jumps over the lazy dog",
+        );
+        index.add_document(
+            "doc2".to_string(),
+            "Bramha is a high performance cognitive database",
+        );
         index.add_document("doc3".to_string(), "Rust is fast, safe, and concurrent");
 
         assert_eq!(index.doc_count, 3);

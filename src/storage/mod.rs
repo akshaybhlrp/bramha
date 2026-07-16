@@ -1,36 +1,38 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use serde::{Serialize, Deserialize};
 use tokio::sync::RwLock;
 
 use crate::core::collection::Collection;
 use crate::core::vector::Metric;
 use crate::storage::caching::SemanticCache;
-use crate::storage::disk::{save_to_file, load_from_file};
+use crate::storage::disk::{load_from_file, save_to_file};
 
-pub mod disk;
-pub mod tensor_db;
-pub mod safetensors_loader;
-pub mod wal;
-pub mod session_store;
-pub mod atomic_write;
-pub mod pull;
-pub mod cache_db;
-pub mod answer_cache;
-pub mod metadata_sql;
 pub mod activation_view;
-pub mod storage_manifest;
-pub mod content_addressing;
-pub mod sparse_pager;
-pub mod chunker;
+pub mod answer_cache;
+pub mod atomic_write;
 pub mod block_db;
+pub mod cache_db;
+pub mod factorization;
+pub mod caching;
+pub mod chunker;
+pub mod content_addressing;
+pub mod crud;
+pub mod data_organization;
+pub mod disk;
+pub mod indexing;
+pub mod kv_persistence;
+pub mod metadata_sql;
 pub mod model_view;
 pub mod multi_tier;
-pub mod indexing;
-pub mod data_organization;
-pub mod caching;
+pub mod pull;
 pub mod query_execution;
-pub mod kv_persistence;
+pub mod safetensors_loader;
+pub mod session_store;
+pub mod sparse_pager;
+pub mod storage_manifest;
+pub mod tensor_db;
+pub mod wal;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelMetadata {
@@ -59,7 +61,8 @@ pub struct Database {
     pub state: RwLock<DatabaseState>,
     pub tensor_db: RwLock<crate::storage::tensor_db::TensorDB>,
     pub inference_queue: crate::middleware::queue::InferenceQueue,
-    pub receiver: RwLock<Option<tokio::sync::mpsc::Receiver<crate::middleware::queue::InferenceTask>>>,
+    pub receiver:
+        RwLock<Option<tokio::sync::mpsc::Receiver<crate::middleware::queue::InferenceTask>>>,
     pub file_path: Option<String>,
     pub planner_cache_path: Option<std::path::PathBuf>,
 }
@@ -67,18 +70,23 @@ pub struct Database {
 impl Database {
     /// Creates a new, empty database.
     pub fn new(file_path: Option<String>, cache_dim: usize) -> Self {
-        let default_tensor_storage = if std::path::Path::new("/home/akshay-bhalerao/tensor_data").exists() {
-            std::path::PathBuf::from("/home/akshay-bhalerao/tensor_data")
-        } else {
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join("tensor_data")
-        };
+        let default_tensor_storage =
+            if std::path::Path::new("/home/akshay-bhalerao/tensor_data").exists() {
+                std::path::PathBuf::from("/home/akshay-bhalerao/tensor_data")
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .join("tensor_data")
+            };
         Self::new_with_dir(file_path, cache_dim, default_tensor_storage)
     }
 
     /// Creates a new database with a custom tensor storage directory.
-    pub fn new_with_dir(file_path: Option<String>, cache_dim: usize, tensor_storage_dir: std::path::PathBuf) -> Self {
+    pub fn new_with_dir(
+        file_path: Option<String>,
+        cache_dim: usize,
+        tensor_storage_dir: std::path::PathBuf,
+    ) -> Self {
         let tensor_storage_str = tensor_storage_dir.to_string_lossy().to_string();
 
         let state = DatabaseState {
@@ -89,10 +97,10 @@ impl Database {
             preserved_collections: HashMap::new(),
             ingestion_tasks: HashMap::new(),
         };
-        
+
         let tensor_db = crate::storage::tensor_db::TensorDB::new(tensor_storage_dir);
         let (inference_queue, rx) = crate::middleware::queue::InferenceQueue::new(5);
-        
+
         Database {
             state: RwLock::new(state),
             tensor_db: RwLock::new(tensor_db),
@@ -138,43 +146,57 @@ impl Database {
     /// Loads the database state from a binary file.
     pub async fn load(path: &str) -> Result<Self, String> {
         let mut state: DatabaseState = load_from_file(path)?;
-        
+
         // Recreate any missing preserved collections
         for (model_name, col_name) in &state.preserved_collections {
             if !state.collections.contains_key(col_name) {
-                println!("🔄 Recreating missing preserved collection '{}' for model '{}' on startup...", col_name, model_name);
+                println!(
+                    "🔄 Recreating missing preserved collection '{}' for model '{}' on startup...",
+                    col_name, model_name
+                );
                 let mut collection = Collection::new(col_name.clone(), 384, Metric::Cosine);
                 if let Err(e) = collection.init_sqlite_index() {
-                    println!("⚠️ Failed to rebuild SQLite index for recreated collection '{}': {}", col_name, e);
+                    println!(
+                        "⚠️ Failed to rebuild SQLite index for recreated collection '{}': {}",
+                        col_name, e
+                    );
                 }
                 state.collections.insert(col_name.clone(), collection);
             }
         }
-        
+
         // S4.4: Rebuild SQLite in-memory metadata indices and replay WAL for all loaded collections
         for collection in state.collections.values_mut() {
             let wal = crate::storage::wal::WalManager::new(&collection.name);
             if let Err(e) = wal.replay(collection) {
-                println!("⚠️ WAL Replay failed for collection '{}' (marking degraded/corrupt): {}", collection.name, e);
+                println!(
+                    "⚠️ WAL Replay failed for collection '{}' (marking degraded/corrupt): {}",
+                    collection.name, e
+                );
                 collection.status = crate::core::collection::CollectionStatus::CORRUPT;
             } else {
                 if let Err(e) = collection.init_sqlite_index() {
-                    println!("⚠️ Failed to rebuild SQLite index for collection '{}': {}", collection.name, e);
+                    println!(
+                        "⚠️ Failed to rebuild SQLite index for collection '{}': {}",
+                        collection.name, e
+                    );
                 }
             }
         }
-        
+
         let tensor_storage = if let Some(ref dir) = state.tensor_storage_dir {
             std::path::PathBuf::from(dir)
         } else {
             if std::path::Path::new("/home/akshay-bhalerao/tensor_data").exists() {
                 std::path::PathBuf::from("/home/akshay-bhalerao/tensor_data")
             } else {
-                std::env::current_dir().unwrap_or_default().join("tensor_data")
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .join("tensor_data")
             }
         };
         let mut tensor_db = crate::storage::tensor_db::TensorDB::new(tensor_storage);
-        
+
         // Reconstruct any registered models from the model_registry to make sure they are fully populated in TensorDB
         for (name, meta) in &state.model_registry {
             let meta_path = std::path::Path::new(&meta.base_path);
@@ -186,9 +208,9 @@ impl Database {
                 }
             }
         }
-        
+
         let (inference_queue, rx) = crate::middleware::queue::InferenceQueue::new(5);
-        
+
         let db = Database {
             state: RwLock::new(state),
             tensor_db: RwLock::new(tensor_db),
@@ -212,15 +234,39 @@ impl Database {
             if let Some(mut receiver) = rx {
                 println!("🧠 Bramha Background Inference Worker spawned successfully!");
                 while let Some(task) = receiver.recv().await {
-                    let result = crate::inference::engine::InferenceEngine::new(None).generate(
-                        db_clone.clone(),
-                        &task.model_name,
-                        &task.prompt,
-                        task.max_new_tokens,
-                        task.temperature,
-                        task.workflow_id.clone(),
-                        task.branch_id.clone(),
-                    ).await;
+                    let cpu_only = if let Some(ref dev) = task.device {
+                        dev.to_lowercase() == "cpu"
+                    } else {
+                        let state_guard = db_clone.state.read().await;
+                        if let Some(meta) = state_guard.model_registry.get(&task.model_name) {
+                            meta.active_device.to_lowercase() == "cpu"
+                        } else {
+                            false
+                        }
+                    };
+
+                    let db_clone_inner = db_clone.clone();
+                    let task_model = task.model_name.clone();
+                    let task_prompt = task.prompt.clone();
+                    let task_max_tokens = task.max_new_tokens;
+                    let task_temp = task.temperature;
+                    let task_workflow = task.workflow_id.clone();
+                    let task_branch = task.branch_id.clone();
+
+                    let result_fut = crate::inference::CPU_ONLY_TASK.scope(cpu_only, async move {
+                        crate::inference::engine::InferenceEngine::new(None)
+                            .generate(
+                                db_clone_inner,
+                                &task_model,
+                                &task_prompt,
+                                task_max_tokens,
+                                task_temp,
+                                task_workflow,
+                                task_branch,
+                            )
+                            .await
+                    });
+                    let result = result_fut.await;
                     let _ = task.response_tx.send(result);
                 }
             }

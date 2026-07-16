@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTier {
@@ -21,6 +21,10 @@ pub struct MemoryEntry {
     pub last_accessed_ms: u64,
     pub created_at_ms: u64,
     pub provenance: String,
+    #[serde(default)]
+    pub retracted: bool,
+    #[serde(default)]
+    pub retraction_reason: Option<String>,
 }
 
 pub struct MemoryManager {
@@ -53,7 +57,8 @@ impl MemoryManager {
         let temp_path = self.file_path.with_extension("tmp");
         {
             let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
-            file.write_all(serialized.as_bytes()).map_err(|e| e.to_string())?;
+            file.write_all(serialized.as_bytes())
+                .map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| e.to_string())?;
         }
         std::fs::rename(temp_path, &self.file_path).map_err(|e| e.to_string())?;
@@ -101,19 +106,39 @@ impl MemoryManager {
         Ok(())
     }
 
+    /// Explicitly retract a memory entry and set its confidence to 0.0
+    pub fn retract_memory(&self, id: &str, reason: &str) -> Result<(), String> {
+        let mut memories = self.load_memories();
+        if let Some(entry) = memories.get_mut(id) {
+            entry.retracted = true;
+            entry.retraction_reason = Some(reason.to_string());
+            entry.confidence = 0.0;
+            self.save_memories(&memories)?;
+            println!("🛑 Memory '{}' retracted: {}", id, reason);
+        }
+        Ok(())
+    }
+
+
     /// Search memory tiers automatically, score candidates by relevance/recency/confidence,
     /// and silently inject the top ones into the prompt. Logs injection decisions.
     pub fn proactive_inject(&self, prompt: &str, now_ms: u64) -> (String, Vec<String>) {
         let memories = self.load_memories();
         let mut candidates = Vec::new();
-        let stopwords = ["the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as"];
-        let prompt_words: Vec<String> = prompt.to_lowercase()
+        let stopwords = [
+            "the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as",
+        ];
+        let prompt_words: Vec<String> = prompt
+            .to_lowercase()
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_string())
             .filter(|w| !w.is_empty() && !stopwords.contains(&w.as_str()))
             .collect();
 
         for entry in memories.values() {
+            if entry.retracted {
+                continue;
+            }
             // 1. Recency Decay calculation (without writing back to storage during inline search)
             let elapsed_sec = ((now_ms.saturating_sub(entry.last_accessed_ms)) as f64) / 1000.0;
             let decay_rate = match entry.tier {
@@ -121,7 +146,8 @@ impl MemoryManager {
                 MemoryTier::Episodic => 0.005,
                 MemoryTier::Semantic => 0.0005,
             };
-            let decayed_confidence = (entry.confidence * (-decay_rate * elapsed_sec).exp()).max(0.0);
+            let decayed_confidence =
+                (entry.confidence * (-decay_rate * elapsed_sec).exp()).max(0.0);
 
             // 2. Keyword relevance
             let content_lower = entry.content.to_lowercase();
@@ -150,7 +176,7 @@ impl MemoryManager {
 
         let mut injected_prompts = Vec::new();
         let mut decision_logs = Vec::new();
-        
+
         // Pick top 2 memories
         for (entry, score) in candidates.iter().take(2) {
             injected_prompts.push(format!(
@@ -164,13 +190,15 @@ impl MemoryManager {
         }
 
         if injected_prompts.is_empty() {
-            (prompt.to_string(), vec!["No relevant memories found to inject".to_string()])
+            (
+                prompt.to_string(),
+                vec!["No relevant memories found to inject".to_string()],
+            )
         } else {
             let merged_prompt = format!("{}\n{}", injected_prompts.join("\n"), prompt);
             (merged_prompt, decision_logs)
         }
     }
-
 
     /// Apply forgetting curves with different decay rates per tier
     /// score = confidence * exp(-decay_rate * (now - last_accessed))
@@ -178,7 +206,7 @@ impl MemoryManager {
         let mut memories = self.load_memories();
         for entry in memories.values_mut() {
             let elapsed_sec = ((now_ms.saturating_sub(entry.last_accessed_ms)) as f64) / 1000.0;
-            
+
             // Tier-specific decay rates (Episodic decays faster than Semantic)
             let decay_rate = match entry.tier {
                 MemoryTier::Working => 0.05,    // Fast decay
@@ -229,28 +257,66 @@ impl MemoryManager {
             last_accessed_ms: now_ms,
             created_at_ms: now_ms,
             provenance: format!("session:{}", session_id),
+            retracted: false,
+            retraction_reason: None,
         };
 
         self.insert_memory(entry.clone())?;
         Ok(entry)
     }
+
+    /// Spawns a background task to periodically consolidate high-usage Episodic memories into Semantic ones.
+    pub fn spawn_consolidation_worker(manager: std::sync::Arc<Self>) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                println!("🧠 [Consolidation Worker] Running periodic memory promotion...");
+                
+                let mut memories = manager.load_memories();
+                let mut promoted = 0;
+
+                for entry in memories.values_mut() {
+                    // Promote Episodic memories with high usage and high confidence
+                    if entry.tier == MemoryTier::Episodic && entry.usage_count >= 5 && entry.confidence > 0.85 {
+                        entry.tier = MemoryTier::Semantic;
+                        entry.confidence = 1.0; // Maximize confidence on promotion
+                        promoted += 1;
+                    }
+                }
+
+                if promoted > 0 {
+                    if let Err(e) = manager.save_memories(&memories) {
+                        eprintln!("⚠️ [Consolidation Worker] Failed to save promoted memories: {}", e);
+                    } else {
+                        println!("✅ [Consolidation Worker] Successfully promoted {} memories to Semantic Tier.", promoted);
+                    }
+                }
+            }
+        });
+    }
+
     /// Detect contradictions against highly confident semantic memories
     pub fn detect_contradiction(&self, new_fact: &str) -> Option<MemoryEntry> {
         let memories = self.load_memories();
         let new_fact_clean = new_fact.to_lowercase();
-        
-        let stopwords = ["the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as"];
+
+        let stopwords = [
+            "the", "and", "a", "of", "to", "in", "is", "that", "it", "for", "on", "with", "as",
+        ];
         let new_fact_words: std::collections::HashSet<String> = new_fact_clean
             .split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_string())
             .filter(|w| !w.is_empty() && !stopwords.contains(&w.as_str()))
             .collect();
-            
+
         if new_fact_words.is_empty() {
             return None;
         }
 
         for entry in memories.values() {
+            if entry.retracted {
+                continue;
+            }
             if entry.tier == MemoryTier::Semantic && entry.confidence >= 0.8 {
                 let entry_clean = entry.content.to_lowercase();
                 let entry_words: std::collections::HashSet<String> = entry_clean
@@ -258,22 +324,36 @@ impl MemoryManager {
                     .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_string())
                     .filter(|w| !w.is_empty() && !stopwords.contains(&w.as_str()))
                     .collect();
-                
+
                 // Calculate word overlap ratio
-                let intersection: std::collections::HashSet<_> = new_fact_words.intersection(&entry_words).cloned().collect();
-                let overlap = intersection.len() as f32 / new_fact_words.len().min(entry_words.len()) as f32;
-                
+                let intersection: std::collections::HashSet<_> =
+                    new_fact_words.intersection(&entry_words).cloned().collect();
+                let overlap =
+                    intersection.len() as f32 / new_fact_words.len().min(entry_words.len()) as f32;
+
                 // If there's high overlap, check if there's a negation contradiction
                 if overlap >= 0.4 {
                     // Check if one contains negation words and the other does not
-                    let negations = ["not", "no", "never", "cannot", "isn't", "aren't", "won't", "don't", "doesn't", "false", "incorrect"];
+                    let negations = [
+                        "not",
+                        "no",
+                        "never",
+                        "cannot",
+                        "isn't",
+                        "aren't",
+                        "won't",
+                        "don't",
+                        "doesn't",
+                        "false",
+                        "incorrect",
+                    ];
                     let new_has_neg = negations.iter().any(|&neg| new_fact_clean.contains(neg));
                     let entry_has_neg = negations.iter().any(|&neg| entry_clean.contains(neg));
-                    
+
                     if new_has_neg != entry_has_neg {
                         return Some(entry.clone());
                     }
-                    
+
                     // Direct antonym pairs check (e.g. true vs false, enable vs disable, hot vs cold)
                     let antonyms = [
                         ("true", "false"),
@@ -288,11 +368,11 @@ impl MemoryManager {
                         ("success", "failure"),
                         ("successful", "failed"),
                     ];
-                    
+
                     for (a, b) in antonyms {
                         let has_a = new_fact_clean.contains(a) || entry_clean.contains(a);
                         let has_b = new_fact_clean.contains(b) || entry_clean.contains(b);
-                        
+
                         if has_a && has_b {
                             let new_has_a = new_fact_clean.contains(a);
                             let entry_has_a = entry_clean.contains(a);
@@ -329,6 +409,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "test".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
         manager.insert_memory(entry).unwrap();
 
@@ -360,6 +442,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "test".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
 
         // 1. Insert
@@ -370,7 +454,7 @@ mod tests {
         // 2. Retrieve & Reinforce manually
         let retrieved = manager.retrieve_memory("mem_1", now + 1000).unwrap();
         assert_eq!(retrieved.usage_count, 2);
-        
+
         manager.reinforce_memory("mem_1", 0.15).unwrap();
         let reinforced = manager.load_memories().get("mem_1").unwrap().clone();
         assert!((reinforced.confidence - 0.95).abs() < 1e-9);
@@ -410,6 +494,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "docs".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
 
         manager.insert_memory(entry).unwrap();
@@ -420,6 +506,45 @@ mod tests {
         assert!(merged.contains("[Silently Injected Memory Context:"));
         assert!(merged.contains("The default sharding directory is storage/shards"));
         assert!(logs[0].contains("Injected memory"));
+
+        let _ = std::fs::remove_file(&manager.file_path);
+    }
+
+    #[test]
+    fn test_memory_retraction() {
+        let manager = MemoryManager {
+            file_path: PathBuf::from("storage/test_retraction_memory.json"),
+        };
+        let _ = std::fs::remove_file(&manager.file_path);
+
+        let now = 1000000;
+        let entry = MemoryEntry {
+            id: "mem_retract_test".to_string(),
+            content: "This is a fact to retract".to_string(),
+            tier: MemoryTier::Semantic,
+            confidence: 0.9,
+            usage_count: 1,
+            last_accessed_ms: now,
+            created_at_ms: now,
+            provenance: "user".to_string(),
+            retracted: false,
+            retraction_reason: None,
+        };
+        manager.insert_memory(entry).unwrap();
+
+        // Perform retraction
+        manager.retract_memory("mem_retract_test", "Fact proven false").unwrap();
+
+        let memories = manager.load_memories();
+        let retracted_entry = memories.get("mem_retract_test").unwrap();
+        assert!(retracted_entry.retracted);
+        assert_eq!(retracted_entry.confidence, 0.0);
+        assert_eq!(retracted_entry.retraction_reason.as_deref(), Some("Fact proven false"));
+
+        // Verify proactive inject skips it
+        let prompt = "Fact to retract";
+        let (merged, _logs) = manager.proactive_inject(prompt, now);
+        assert!(!merged.contains("This is a fact to retract"));
 
         let _ = std::fs::remove_file(&manager.file_path);
     }

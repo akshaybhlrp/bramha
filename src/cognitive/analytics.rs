@@ -1,7 +1,7 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct QueryTrace {
@@ -43,7 +43,8 @@ impl AnalyticsStore {
 
     fn initialize_db(&self) -> Result<(), String> {
         let conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;").map_err(|e| e.to_string())?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS query_traces (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,14 +57,18 @@ impl AnalyticsStore {
                 timestamp_ms INTEGER NOT NULL
             )",
             [],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
     /// Persist a single query trace to SQLite
     pub fn log_trace(&self, trace: QueryTrace) -> Result<(), String> {
         let conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
         conn.execute(
             "INSERT INTO query_traces (query_string, retrieval_ms, rerank_ms, inference_ms, cache_hit, exit_layer, timestamp_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -87,19 +92,21 @@ impl AnalyticsStore {
             "SELECT id, query_string, retrieval_ms, rerank_ms, inference_ms, cache_hit, exit_layer, timestamp_ms
              FROM query_traces ORDER BY id DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
-        
-        let rows = stmt.query_map(params![limit], |row| {
-            Ok(QueryTrace {
-                id: Some(row.get(0)?),
-                query_string: row.get(1)?,
-                retrieval_ms: row.get(2)?,
-                rerank_ms: row.get(3)?,
-                inference_ms: row.get(4)?,
-                cache_hit: row.get::<_, i32>(5)? != 0,
-                exit_layer: row.get(6)?,
-                timestamp_ms: row.get(7)?,
+
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok(QueryTrace {
+                    id: Some(row.get(0)?),
+                    query_string: row.get(1)?,
+                    retrieval_ms: row.get(2)?,
+                    rerank_ms: row.get(3)?,
+                    inference_ms: row.get(4)?,
+                    cache_hit: row.get::<_, i32>(5)? != 0,
+                    exit_layer: row.get(6)?,
+                    timestamp_ms: row.get(7)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         let mut traces = Vec::new();
         for row in rows {
@@ -113,7 +120,9 @@ impl AnalyticsStore {
     /// Compute running statistics for query analytics feedback loop
     pub fn get_average_latency_ms(&self) -> Result<f64, String> {
         let conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare("SELECT AVG(retrieval_ms + rerank_ms + inference_ms) FROM query_traces").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT AVG(retrieval_ms + rerank_ms + inference_ms) FROM query_traces")
+            .map_err(|e| e.to_string())?;
         let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
         if let Some(row) = rows.next().map_err(|e| e.to_string())? {
             let avg: Option<f64> = row.get(0).map_err(|e| e.to_string())?;

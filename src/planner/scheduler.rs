@@ -14,7 +14,7 @@ impl HeterogeneousScheduler {
         // Step 1: Identify if a valid wgpu adapter exists
         let gpu_available = crate::compute::wgpu_backend::get_wgpu_plane().is_some();
         let force_cpu = crate::inference::is_cpu_only();
-        
+
         Self {
             gpu_available,
             force_cpu,
@@ -56,14 +56,20 @@ impl HeterogeneousScheduler {
     }
 
     /// Decides if a full inference request should bypass the GPU entirely.
-    pub async fn should_use_cpu_entirely(&self, db: &std::sync::Arc<crate::storage::Database>, model_name: &str) -> bool {
+    pub async fn should_use_cpu_entirely(
+        &self,
+        db: &std::sync::Arc<crate::storage::Database>,
+        model_name: &str,
+    ) -> bool {
         if self.force_cpu || !self.gpu_available {
             return true;
         }
 
         // Get active WGPU VRAM cache capacity limit
         let max_vram_bytes = {
-            let cache = crate::inference::engine::VramCache::global().lock().unwrap();
+            let cache = crate::inference::engine::VramCache::global()
+                .lock()
+                .unwrap();
             cache.max_vram_bytes
         };
 
@@ -76,8 +82,12 @@ impl HeterogeneousScheduler {
                 }
 
                 // Sum all layer weight bytes to calculate exact memory footprint
-                let total_model_bytes: usize = model.layers.values().map(|page| page.as_bytes().len()).sum();
-                
+                let total_model_bytes: usize = model
+                    .layers
+                    .values()
+                    .map(|page| page.as_bytes().len())
+                    .sum();
+
                 // Route entirely to CPU if weight size exceeds active GPU VRAM cap to avoid trashing
                 if total_model_bytes > max_bytes {
                     let logger = crate::inference::engine::InferenceLogger::global();

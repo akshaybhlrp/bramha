@@ -1,13 +1,13 @@
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
-use sha2::{Sha256, Digest};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PrefixCacheEntry {
     pub tokens: Vec<u32>,
-    pub keys: Vec<Vec<f32>>,   // keys[layer_idx] contains sliced flat f32 data
+    pub keys: Vec<Vec<f32>>, // keys[layer_idx] contains sliced flat f32 data
     pub values: Vec<Vec<f32>>, // values[layer_idx] contains sliced flat f32 data
     pub last_accessed: u64,
 }
@@ -27,7 +27,8 @@ fn load_entry(path: &Path) -> Result<PrefixCacheEntry, String> {
     file.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
     let config = bincode::config::standard();
     let entry: PrefixCacheEntry = bincode::serde::decode_from_slice(&buffer, config)
-        .map_err(|e| e.to_string())?.0;
+        .map_err(|e| e.to_string())?
+        .0;
     Ok(entry)
 }
 
@@ -77,8 +78,10 @@ fn save_entry(path: &Path, entry: &PrefixCacheEntry) -> Result<(), String> {
     let config = bincode::config::standard();
     let encoded = bincode::serde::encode_to_vec(entry, config)
         .map_err(|e| format!("Failed to serialize prefix cache: {}", e))?;
-    let mut file = File::create(path).map_err(|e| format!("Failed to create prefix cache: {}", e))?;
-    file.write_all(&encoded).map_err(|e| format!("Failed to write prefix cache: {}", e))?;
+    let mut file =
+        File::create(path).map_err(|e| format!("Failed to create prefix cache: {}", e))?;
+    file.write_all(&encoded)
+        .map_err(|e| format!("Failed to write prefix cache: {}", e))?;
     Ok(())
 }
 
@@ -178,7 +181,9 @@ mod tests {
 
     #[test]
     fn test_rolling_prefix_matching_saving_eviction() {
-        unsafe { std::env::set_var("BRAMHA_KV_TRIM_N", "0"); }
+        unsafe {
+            std::env::set_var("BRAMHA_KV_TRIM_N", "0");
+        }
         let temp_dir = std::env::temp_dir().join("bramha_prefix_cache_test");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
@@ -214,24 +219,39 @@ mod tests {
         assert_eq!(match_hit_partial.1.tokens, tokens[..16].to_vec());
 
         // 6. Match for completely mismatched sequence (should miss fallback)
-        let mismatch_tokens = vec![99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116];
+        let mismatch_tokens = vec![
+            99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116,
+        ];
         let mismatch_hit = find_longest_prefix(&temp_dir, &mismatch_tokens);
-        assert!(mismatch_hit.is_none(), "Expected miss fallback for mismatched tokens");
+        assert!(
+            mismatch_hit.is_none(),
+            "Expected miss fallback for mismatched tokens"
+        );
 
         // 7. Verify eviction limits (limit max_entries to 1)
         crate::storage::cache_db::PrefixCacheDb::enforce_limit(&temp_dir, 1).unwrap();
         let paths = fs::read_dir(&cache_dir).unwrap();
-        let count = paths.filter_map(|p| p.ok()).filter(|e| e.metadata().map(|m| m.is_file()).unwrap_or(false)).count();
-        assert_eq!(count, 1, "Eviction should bound cache files count to exactly 1");
+        let count = paths
+            .filter_map(|p| p.ok())
+            .filter(|e| e.metadata().map(|m| m.is_file()).unwrap_or(false))
+            .count();
+        assert_eq!(
+            count, 1,
+            "Eviction should bound cache files count to exactly 1"
+        );
 
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);
-        unsafe { std::env::remove_var("BRAMHA_KV_TRIM_N"); }
+        unsafe {
+            std::env::remove_var("BRAMHA_KV_TRIM_N");
+        }
     }
 
     #[test]
     fn test_boundary_aligned_trimming() {
-        unsafe { std::env::set_var("BRAMHA_KV_TRIM_N", "4"); }
+        unsafe {
+            std::env::set_var("BRAMHA_KV_TRIM_N", "4");
+        }
         let temp_dir = std::env::temp_dir().join("bramha_trim_test");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
@@ -248,6 +268,8 @@ mod tests {
         assert_eq!(match_hit.0, 16);
 
         let _ = fs::remove_dir_all(&temp_dir);
-        unsafe { std::env::remove_var("BRAMHA_KV_TRIM_N"); }
+        unsafe {
+            std::env::remove_var("BRAMHA_KV_TRIM_N");
+        }
     }
 }

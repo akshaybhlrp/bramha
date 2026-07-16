@@ -1,14 +1,18 @@
+use serde::{Serialize, de::DeserializeOwned};
 use std::fs::File;
 use std::io::{Read, Write};
-use serde::{Serialize, de::DeserializeOwned};
 
 /// Saves any serializable data structure to a JSON file atomically and crash-safely.
 pub fn save_to_file<T: Serialize>(data: &T, path: &str) -> Result<(), String> {
-    let bytes = serde_json::to_vec_pretty(data).map_err(|e| format!("Failed to serialize: {}", e))?;
+    let bytes =
+        serde_json::to_vec_pretty(data).map_err(|e| format!("Failed to serialize: {}", e))?;
     let tmp_path = format!("{}.tmp", path);
-    let mut file = File::create(&tmp_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
-    file.write_all(&bytes).map_err(|e| format!("Failed to write to temp file: {}", e))?;
-    file.sync_all().map_err(|e| format!("Failed to sync temp file: {}", e))?;
+    let mut file =
+        File::create(&tmp_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
+    file.write_all(&bytes)
+        .map_err(|e| format!("Failed to write to temp file: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync temp file: {}", e))?;
     std::fs::rename(&tmp_path, path).map_err(|e| format!("Failed to atomic rename: {}", e))?;
     Ok(())
 }
@@ -17,29 +21,36 @@ pub fn save_to_file<T: Serialize>(data: &T, path: &str) -> Result<(), String> {
 pub fn load_from_file<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     let mut file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|e| format!("Failed to read file: {}", e))?;
-    
+    file.read_to_end(&mut bytes)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
     // 1. Try parsing as JSON first
     if let Ok(data) = serde_json::from_slice::<T>(&bytes) {
         return Ok(data);
     }
-    
+
     // 1.5. Resilient fallback: If it looks like JSON but has trailing garbage/corruption, attempt self-healing recovery
     let trimmed = bytes.iter().position(|&b| !b.is_ascii_whitespace());
     if let Some(first_char_idx) = trimmed {
         if bytes[first_char_idx] == b'{' || bytes[first_char_idx] == b'[' {
             // Find the last closing brace/bracket
-            let target_char = if bytes[first_char_idx] == b'{' { b'}' } else { b']' };
+            let target_char = if bytes[first_char_idx] == b'{' {
+                b'}'
+            } else {
+                b']'
+            };
             if let Some(last_idx) = bytes.iter().rposition(|&b| b == target_char) {
                 let stripped_bytes = &bytes[..=last_idx];
                 if let Ok(data) = serde_json::from_slice::<T>(stripped_bytes) {
-                    println!("🛡️ Resilient Parser: Recovered JSON database from trailing corruption/tampering!");
+                    println!(
+                        "🛡️ Resilient Parser: Recovered JSON database from trailing corruption/tampering!"
+                    );
                     return Ok(data);
                 }
             }
         }
     }
-    
+
     // 2. Fallback to legacy bincode compatibility
     let config = bincode::config::standard();
     match bincode::serde::decode_from_slice::<T, _>(&bytes, config) {
@@ -51,7 +62,7 @@ pub fn load_from_file<T: DeserializeOwned>(path: &str) -> Result<T, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Serialize, Deserialize};
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
     struct DummyData {

@@ -1,16 +1,16 @@
+use burn::backend::NdArray;
+use burn::backend::ndarray::NdArrayDevice;
+use burn::tensor::{Data, Shape, Tensor, activation::softmax};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use sha2::{Sha256, Digest};
-use burn::tensor::{Tensor, Shape, Data, activation::softmax};
-use burn::backend::NdArray;
-use burn::backend::ndarray::NdArrayDevice;
 
-use crate::inference::tokenizer::BramhaTokenizer;
 use crate::inference::engine::{
-    rms_norm, precompute_rope_freqs, apply_rope, repeat_kv, causal_mask,
+    apply_rope, causal_mask, precompute_rope_freqs, repeat_kv, rms_norm,
 };
+use crate::inference::tokenizer::BramhaTokenizer;
 use crate::storage::Database;
 use crate::storage::cache_db::KvCacheEntry;
 
@@ -51,13 +51,16 @@ impl PrefillCacheManager {
             return Err(format!("Cache file not found for prompt at {:?}", path));
         }
 
-        let mut file = File::open(&path).map_err(|e| format!("Failed to open prefill cache file: {}", e))?;
+        let mut file =
+            File::open(&path).map_err(|e| format!("Failed to open prefill cache file: {}", e))?;
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).map_err(|e| format!("Failed to read prefill cache file: {}", e))?;
+        file.read_to_end(&mut buffer)
+            .map_err(|e| format!("Failed to read prefill cache file: {}", e))?;
 
         let config = bincode::config::standard();
         let entry: KvCacheEntry = bincode::serde::decode_from_slice(&buffer, config)
-            .map_err(|e| format!("Failed to deserialize prefill cache: {}", e))?.0;
+            .map_err(|e| format!("Failed to deserialize prefill cache: {}", e))?
+            .0;
 
         Ok(entry)
     }
@@ -65,15 +68,18 @@ impl PrefillCacheManager {
     /// Saves a prefill cache entry to disk
     pub fn save(base_path: &Path, prompt: &str, entry: KvCacheEntry) -> Result<(), String> {
         let cache_dir = Self::get_cache_dir(base_path);
-        fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create prefill cache directory: {}", e))?;
+        fs::create_dir_all(&cache_dir)
+            .map_err(|e| format!("Failed to create prefill cache directory: {}", e))?;
 
         let path = Self::get_cache_file_path(base_path, prompt);
         let config = bincode::config::standard();
         let encoded = bincode::serde::encode_to_vec(&entry, config)
             .map_err(|e| format!("Failed to serialize prefill cache: {}", e))?;
 
-        let mut file = File::create(&path).map_err(|e| format!("Failed to create prefill cache file: {}", e))?;
-        file.write_all(&encoded).map_err(|e| format!("Failed to write prefill cache file: {}", e))?;
+        let mut file = File::create(&path)
+            .map_err(|e| format!("Failed to create prefill cache file: {}", e))?;
+        file.write_all(&encoded)
+            .map_err(|e| format!("Failed to write prefill cache file: {}", e))?;
 
         Ok(())
     }
@@ -88,8 +94,12 @@ impl PrefillCacheManager {
 
         // 1. Fetch Model Table
         let tensor_db_guard = db.tensor_db.read().await;
-        let model = tensor_db_guard.models.get(model_name)
-            .ok_or_else(|| format!("Model '{}' not found in database. Ingest model first.", model_name))?;
+        let model = tensor_db_guard.models.get(model_name).ok_or_else(|| {
+            format!(
+                "Model '{}' not found in database. Ingest model first.",
+                model_name
+            )
+        })?;
 
         // 2. Tokenize prompt
         let bramha_tokenizer = BramhaTokenizer::load(model_name, &model.base_path)?;
@@ -99,7 +109,11 @@ impl PrefillCacheManager {
             return Err("Cannot prefill cache for an empty prompt".to_string());
         }
 
-        println!("⚡ Prefilling prompt tokens (len: {}): {:?}", tokens.len(), tokens);
+        println!(
+            "⚡ Prefilling prompt tokens (len: {}): {:?}",
+            tokens.len(),
+            tokens
+        );
 
         let seq_len = tokens.len();
         let is_mistral = model_name.to_lowercase().contains("mistral");
@@ -111,26 +125,44 @@ impl PrefillCacheManager {
 
         // Helper load closure
         let load_tensor_1d = |name: &str| -> Result<Tensor<B, 1>, String> {
-            let page = model.layers.get(name)
+            let page = model
+                .layers
+                .get(name)
                 .ok_or_else(|| format!("Weight not found: {}", name))?;
             let f32_data: &[f32] = bytemuck::cast_slice(page.as_bytes());
             let expected_len = page.shape[0];
             if f32_data.len() != expected_len {
-                return Err(format!("Quantized or mismatch 1D weight size for {}: got {}, expected {}", name, f32_data.len(), expected_len));
+                return Err(format!(
+                    "Quantized or mismatch 1D weight size for {}: got {}, expected {}",
+                    name,
+                    f32_data.len(),
+                    expected_len
+                ));
             }
             let data = Data::new(f32_data.to_vec(), Shape::from([page.shape[0]])).convert();
             Ok(Tensor::<B, 1>::from_data(data, &device))
         };
 
         let load_tensor_2d = |name: &str| -> Result<Tensor<B, 2>, String> {
-            let page = model.layers.get(name)
+            let page = model
+                .layers
+                .get(name)
                 .ok_or_else(|| format!("Weight not found: {}", name))?;
             let f32_data: &[f32] = bytemuck::cast_slice(page.as_bytes());
             let expected_len = page.shape[0] * page.shape[1];
             if f32_data.len() != expected_len {
-                return Err(format!("Quantized or mismatch 2D weight size for {}: got {}, expected {}", name, f32_data.len(), expected_len));
+                return Err(format!(
+                    "Quantized or mismatch 2D weight size for {}: got {}, expected {}",
+                    name,
+                    f32_data.len(),
+                    expected_len
+                ));
             }
-            let data = Data::new(f32_data.to_vec(), Shape::from([page.shape[0], page.shape[1]])).convert();
+            let data = Data::new(
+                f32_data.to_vec(),
+                Shape::from([page.shape[0], page.shape[1]]),
+            )
+            .convert();
             Ok(Tensor::<B, 2>::from_data(data, &device))
         };
 
@@ -142,7 +174,8 @@ impl PrefillCacheManager {
         let tokens_data = Data::new(
             tokens.iter().map(|&t| t as i32).collect::<Vec<i32>>(),
             Shape::from([seq_len]),
-        ).convert();
+        )
+        .convert();
         let tokens_tensor = Tensor::<B, 1, burn::tensor::Int>::from_data(tokens_data, &device);
         let mut x = embed_w.select(0, tokens_tensor);
 
@@ -152,17 +185,37 @@ impl PrefillCacheManager {
         // Decoder Layer Loop
         for layer_idx in 0..num_layers {
             // RMSNorm 1
-            let norm1_w = load_tensor_1d(&format!("model.layers.{}.input_layernorm.weight", layer_idx))?;
+            let norm1_w = load_tensor_1d(&format!(
+                "model.layers.{}.input_layernorm.weight",
+                layer_idx
+            ))?;
             let h = rms_norm(x.clone(), norm1_w, 1e-5);
 
             // Self Attention Projections
             let (q_res, (k_res, v_res)) = tokio::task::block_in_place(|| {
                 rayon::join(
-                    || load_tensor_2d(&format!("model.layers.{}.self_attn.q_proj.weight", layer_idx)),
-                    || rayon::join(
-                        || load_tensor_2d(&format!("model.layers.{}.self_attn.k_proj.weight", layer_idx)),
-                        || load_tensor_2d(&format!("model.layers.{}.self_attn.v_proj.weight", layer_idx)),
-                    ),
+                    || {
+                        load_tensor_2d(&format!(
+                            "model.layers.{}.self_attn.q_proj.weight",
+                            layer_idx
+                        ))
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                load_tensor_2d(&format!(
+                                    "model.layers.{}.self_attn.k_proj.weight",
+                                    layer_idx
+                                ))
+                            },
+                            || {
+                                load_tensor_2d(&format!(
+                                    "model.layers.{}.self_attn.v_proj.weight",
+                                    layer_idx
+                                ))
+                            },
+                        )
+                    },
                 )
             });
             let q_proj_w = q_res?;
@@ -204,26 +257,46 @@ impl PrefillCacheManager {
             let probs = softmax(scores.add(mask), 2);
             let context = probs.matmul(v);
 
-            let context = context.swap_dims(0, 1).reshape(Shape::from([seq_len, hidden_size]));
+            let context = context
+                .swap_dims(0, 1)
+                .reshape(Shape::from([seq_len, hidden_size]));
 
             // Output projection
-            let o_proj_w = load_tensor_2d(&format!("model.layers.{}.self_attn.o_proj.weight", layer_idx))?;
+            let o_proj_w = load_tensor_2d(&format!(
+                "model.layers.{}.self_attn.o_proj.weight",
+                layer_idx
+            ))?;
             let attn_out = context.matmul(o_proj_w.transpose());
 
             let x_attn = x.add(attn_out);
 
             // RMSNorm 2
-            let norm2_w = load_tensor_1d(&format!("model.layers.{}.post_attention_layernorm.weight", layer_idx))?;
+            let norm2_w = load_tensor_1d(&format!(
+                "model.layers.{}.post_attention_layernorm.weight",
+                layer_idx
+            ))?;
             let h2 = rms_norm(x_attn.clone(), norm2_w, 1e-5);
 
             // SwiGLU MLP
             let (gate_res, (up_res, down_res)) = tokio::task::block_in_place(|| {
                 rayon::join(
                     || load_tensor_2d(&format!("model.layers.{}.mlp.gate_proj.weight", layer_idx)),
-                    || rayon::join(
-                        || load_tensor_2d(&format!("model.layers.{}.mlp.up_proj.weight", layer_idx)),
-                        || load_tensor_2d(&format!("model.layers.{}.mlp.down_proj.weight", layer_idx)),
-                    ),
+                    || {
+                        rayon::join(
+                            || {
+                                load_tensor_2d(&format!(
+                                    "model.layers.{}.mlp.up_proj.weight",
+                                    layer_idx
+                                ))
+                            },
+                            || {
+                                load_tensor_2d(&format!(
+                                    "model.layers.{}.mlp.down_proj.weight",
+                                    layer_idx
+                                ))
+                            },
+                        )
+                    },
                 )
             });
             let gate_proj_w = gate_res?;

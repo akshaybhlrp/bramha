@@ -2,6 +2,7 @@ pub mod calibration;
 pub mod cpu_engine;
 pub mod embedder;
 pub mod engine;
+pub mod flash_attn_cpu;
 pub mod paged_kv;
 pub mod pipeline;
 pub mod prefetcher;
@@ -10,6 +11,7 @@ pub mod profiler;
 pub mod reranker;
 pub mod sparse_predictor;
 pub mod tokenizer;
+pub mod speculative;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

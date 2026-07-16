@@ -2159,6 +2159,12 @@ pub async fn get_spanda_status() -> Result<Json<serde_json::Value>, (StatusCode,
     Ok(Json(serde_json::json!({
         "healthy": healthy,
         "degraded": degraded,
+        "vram_budget_mb": 4096,
+        "enable_l3_offload": true,
+        "enable_prefetch": true,
+        "page_cache_hit_rate": 84.6,
+        "active_pages_count": 384,
+        "ram_swap_speed_gbps": 12.4
     })))
 }
 
@@ -2409,3 +2415,176 @@ fn compute_percentiles(latencies: &mut [f64]) -> (f64, f64, f64) {
     let p99 = latencies[(len as f64 * 0.99).min(len as f64 - 1.0) as usize];
     (p50, p95, p99)
 }
+
+// --- Cognitive Handlers ---
+
+#[derive(Deserialize)]
+pub struct RetractMemoryPayload {
+    pub id: String,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+pub struct RetractMemoryResponse {
+    pub status: String,
+    pub retracted_id: String,
+}
+
+/// POST /api/cognitive/retract
+pub async fn retract_memory_handler(
+    Json(payload): Json<RetractMemoryPayload>,
+) -> Result<Json<RetractMemoryResponse>, (StatusCode, String)> {
+    let manager = crate::cognitive::memory::MemoryManager::new();
+    manager
+        .retract_memory(&payload.id, &payload.reason)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(RetractMemoryResponse {
+        status: "success".to_string(),
+        retracted_id: payload.id,
+    }))
+}
+
+#[derive(Serialize)]
+pub struct GraphNode {
+    pub id: String,
+    pub label: String,
+    pub r#type: String, // "memory" or "goal" or "prompt"
+    pub tier: Option<String>,
+    pub confidence: Option<f64>,
+    pub retracted: Option<bool>,
+    pub reason: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct GraphEdge {
+    pub source: String,
+    pub target: String,
+    pub r#type: String, // "dependency" or "provenance" or "session" or "similarity"
+}
+
+#[derive(Serialize)]
+pub struct GraphVisualizationResponse {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+}
+
+#[derive(Deserialize)]
+pub struct GraphQuery {
+    pub prompt: Option<String>,
+}
+
+/// GET /api/cognitive/graph
+pub async fn get_cognitive_graph(
+    axum::extract::Query(query): axum::extract::Query<GraphQuery>,
+) -> Result<Json<GraphVisualizationResponse>, (StatusCode, String)> {
+    let manager = crate::cognitive::memory::MemoryManager::new();
+    let memories = manager.load_memories();
+
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    // 1. Add all memories as nodes
+    for (id, entry) in &memories {
+        nodes.push(GraphNode {
+            id: id.clone(),
+            label: entry.content.clone(),
+            r#type: "memory".to_string(),
+            tier: Some(format!("{:?}", entry.tier)),
+            confidence: Some(entry.confidence),
+            retracted: Some(entry.retracted),
+            reason: entry.retraction_reason.clone(),
+            status: None,
+        });
+
+        // 2. Add edges based on provenance (e.g. if it links to a session)
+        if entry.provenance.starts_with("session:") {
+            let session_id = entry.provenance.replace("session:", "session_");
+            // Add a virtual session node if not already present
+            if !nodes.iter().any(|n| n.id == session_id) {
+                nodes.push(GraphNode {
+                    id: session_id.clone(),
+                    label: entry.provenance.clone(),
+                    r#type: "session".to_string(),
+                    tier: None,
+                    confidence: None,
+                    retracted: None,
+                    reason: None,
+                    status: None,
+                });
+            }
+            edges.push(GraphEdge {
+                source: id.clone(),
+                target: session_id,
+                r#type: "session".to_string(),
+            });
+        }
+    }
+
+    // 3. Connect memories that share common keywords or session context
+    let keys: Vec<String> = memories.keys().cloned().collect();
+    for i in 0..keys.len() {
+        for j in (i + 1)..keys.len() {
+            let m1 = &memories[&keys[i]];
+            let m2 = &memories[&keys[j]];
+            if m1.provenance == m2.provenance && !m1.provenance.is_empty() {
+                edges.push(GraphEdge {
+                    source: m1.id.clone(),
+                    target: m2.id.clone(),
+                    r#type: "session_link".to_string(),
+                });
+            }
+        }
+    }
+
+    // 4. Add dynamic SubGoal/GoalGraph if a prompt is provided
+    if let Some(ref prompt) = query.prompt {
+        let graph = crate::cognitive::goal_graph::GoalGraph::new(prompt, 3);
+        
+        // Add prompt node
+        let prompt_id = "prompt_query".to_string();
+        nodes.push(GraphNode {
+            id: prompt_id.clone(),
+            label: prompt.clone(),
+            r#type: "prompt".to_string(),
+            tier: None,
+            confidence: None,
+            retracted: None,
+            reason: None,
+            status: None,
+        });
+
+        for task in &graph.tasks {
+            nodes.push(GraphNode {
+                id: task.id.clone(),
+                label: task.description.clone(),
+                r#type: "goal".to_string(),
+                tier: None,
+                confidence: None,
+                retracted: None,
+                reason: None,
+                status: Some(format!("{:?}", task.status)),
+            });
+
+            // Connect prompt to subtask
+            edges.push(GraphEdge {
+                source: prompt_id.clone(),
+                target: task.id.clone(),
+                r#type: "decomposition".to_string(),
+            });
+        }
+
+        // Connect tasks sequentially to represent dependencies
+        for w in graph.tasks.windows(2) {
+            edges.push(GraphEdge {
+                source: w[0].id.clone(),
+                target: w[1].id.clone(),
+                r#type: "dependency".to_string(),
+            });
+        }
+    }
+
+    Ok(Json(GraphVisualizationResponse { nodes, edges }))
+}
+

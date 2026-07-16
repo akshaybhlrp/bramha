@@ -13,6 +13,7 @@ pub mod answer_cache;
 pub mod atomic_write;
 pub mod block_db;
 pub mod cache_db;
+pub mod factorization;
 pub mod caching;
 pub mod chunker;
 pub mod content_addressing;

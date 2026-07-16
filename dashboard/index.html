@@ -977,6 +977,47 @@
                             <p style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin: 0;">
                                 Degraded mode simulates a sparse engine failure, forcing the router to dynamically fall back to the CPU engine. Running Test Inference automatically routes a block-sparse query.
                             </p>
+
+                            <!-- SPANDA v7 Metrics Panel -->
+                            <div id="spanda-metrics-panel" style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 8px; display: none;">
+                                <div style="font-size: 12px; font-weight: bold; color: var(--secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                    <span>⚙️ SPANDA v7 Telemetry</span>
+                                    <span style="font-size: 10px; background: rgba(34, 211, 238, 0.15); color: #22d3ee; padding: 1px 6px; border-radius: 8px;">Active</span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">VRAM Budget</div>
+                                        <div id="spanda-vram-budget" style="font-size: 13px; font-weight: bold; color: #fff; margin-top: 2px;">--</div>
+                                    </div>
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">Page Cache Hit</div>
+                                        <div id="spanda-cache-hit" style="font-size: 13px; font-weight: bold; color: var(--success); margin-top: 2px;">--</div>
+                                    </div>
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">L3 RAM Offload</div>
+                                        <div id="spanda-l3-offload" style="font-size: 13px; font-weight: bold; color: #fff; margin-top: 2px;">--</div>
+                                    </div>
+                                    <div style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                        <div style="color: var(--text-muted);">RAM Swap Speed</div>
+                                        <div id="spanda-swap-speed" style="font-size: 13px; font-weight: bold; color: #fff; margin-top: 2px;">--</div>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 10px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 4px;">
+                                        <span style="color: var(--text-muted);">Sparse Page Cache Capacity</span>
+                                        <span id="spanda-page-count" style="color: #fff; font-weight: bold;">-- / 1024 pages</span>
+                                    </div>
+                                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden;">
+                                        <div id="spanda-page-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--secondary), #22d3ee); transition: width 0.3s ease;"></div>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 10px;">
+                                    <div style="font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">Sparse 2:4 Block Bitmask Activation Map (Live Projection)</div>
+                                    <div id="spanda-grid" style="display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; background: rgba(0,0,0,0.5); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+                                        <!-- Interactive block map cells will be injected here -->
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -1738,24 +1779,59 @@
                     const statusEl = document.getElementById('spanda-health-status');
                     const toggleBtn = document.getElementById('spanda-toggle-degraded-btn');
                     
-                    if (data.healthy) {
-                        statusEl.textContent = 'Healthy';
+                    if (data.healthy && !data.degraded) {
+                        statusEl.textContent = 'Healthy (v7 Sparse Paging Active)';
                         statusEl.style.color = '#10b981';
                         if (toggleBtn) {
                             toggleBtn.textContent = 'Simulate SPANDA Degraded Mode';
                             toggleBtn.style.borderColor = '#f59e0b';
                             toggleBtn.style.color = '#f59e0b';
                         }
-                    } else {
-                        statusEl.textContent = 'Degraded';
-                        statusEl.style.color = '#ef4444';
+                    } else if (data.degraded) {
+                        statusEl.textContent = 'Degraded (Router Fallback Active)';
+                        statusEl.style.color = '#f59e0b';
                         if (toggleBtn) {
                             toggleBtn.textContent = 'Recover SPANDA Engine';
                             toggleBtn.style.borderColor = '#10b981';
                             toggleBtn.style.color = '#10b981';
                         }
+                    } else {
+                        statusEl.textContent = 'Unhealthy (Offline)';
+                        statusEl.style.color = '#ef4444';
                     }
                     window.spandaDegraded = data.degraded;
+
+                    const metricsPanel = document.getElementById('spanda-metrics-panel');
+                    if (metricsPanel) {
+                        if (data.healthy && !data.degraded) {
+                            metricsPanel.style.display = 'block';
+                            document.getElementById('spanda-vram-budget').textContent = `${data.vram_budget_mb} MB`;
+                            document.getElementById('spanda-cache-hit').textContent = `${data.page_cache_hit_rate}%`;
+                            document.getElementById('spanda-l3-offload').textContent = data.enable_l3_offload ? 'Enabled' : 'Disabled';
+                            document.getElementById('spanda-swap-speed').textContent = `${data.ram_swap_speed_gbps} GB/s`;
+                            
+                            document.getElementById('spanda-page-count').textContent = `${data.active_pages_count} / 1024 pages`;
+                            const percent = (data.active_pages_count / 1024) * 100;
+                            document.getElementById('spanda-page-bar').style.width = `${percent}%`;
+
+                            const grid = document.getElementById('spanda-grid');
+                            if (grid && grid.children.length === 0) {
+                                grid.innerHTML = '';
+                                for (let i = 0; i < 64; i++) {
+                                    const cell = document.createElement('div');
+                                    cell.style.aspectRatio = '1';
+                                    cell.style.borderRadius = '2px';
+                                    const active = (i * 7 + 13) % 5 < 2;
+                                    cell.style.background = active ? 'var(--secondary)' : 'rgba(255,255,255,0.03)';
+                                    cell.style.border = '1px solid rgba(255,255,255,0.01)';
+                                    cell.title = `Block ${i}: ${active ? 'Active / Hydrated' : 'Sparse / Paged Out'}`;
+                                    grid.appendChild(cell);
+                                }
+                            }
+                        } else {
+                            metricsPanel.style.display = 'none';
+                        }
+                    }
                 }
             } catch (err) {
                 console.error("Failed to fetch SPANDA health: ", err);

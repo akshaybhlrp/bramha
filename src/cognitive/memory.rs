@@ -21,6 +21,10 @@ pub struct MemoryEntry {
     pub last_accessed_ms: u64,
     pub created_at_ms: u64,
     pub provenance: String,
+    #[serde(default)]
+    pub retracted: bool,
+    #[serde(default)]
+    pub retraction_reason: Option<String>,
 }
 
 pub struct MemoryManager {
@@ -102,6 +106,20 @@ impl MemoryManager {
         Ok(())
     }
 
+    /// Explicitly retract a memory entry and set its confidence to 0.0
+    pub fn retract_memory(&self, id: &str, reason: &str) -> Result<(), String> {
+        let mut memories = self.load_memories();
+        if let Some(entry) = memories.get_mut(id) {
+            entry.retracted = true;
+            entry.retraction_reason = Some(reason.to_string());
+            entry.confidence = 0.0;
+            self.save_memories(&memories)?;
+            println!("🛑 Memory '{}' retracted: {}", id, reason);
+        }
+        Ok(())
+    }
+
+
     /// Search memory tiers automatically, score candidates by relevance/recency/confidence,
     /// and silently inject the top ones into the prompt. Logs injection decisions.
     pub fn proactive_inject(&self, prompt: &str, now_ms: u64) -> (String, Vec<String>) {
@@ -118,6 +136,9 @@ impl MemoryManager {
             .collect();
 
         for entry in memories.values() {
+            if entry.retracted {
+                continue;
+            }
             // 1. Recency Decay calculation (without writing back to storage during inline search)
             let elapsed_sec = ((now_ms.saturating_sub(entry.last_accessed_ms)) as f64) / 1000.0;
             let decay_rate = match entry.tier {
@@ -236,6 +257,8 @@ impl MemoryManager {
             last_accessed_ms: now_ms,
             created_at_ms: now_ms,
             provenance: format!("session:{}", session_id),
+            retracted: false,
+            retraction_reason: None,
         };
 
         self.insert_memory(entry.clone())?;
@@ -291,6 +314,9 @@ impl MemoryManager {
         }
 
         for entry in memories.values() {
+            if entry.retracted {
+                continue;
+            }
             if entry.tier == MemoryTier::Semantic && entry.confidence >= 0.8 {
                 let entry_clean = entry.content.to_lowercase();
                 let entry_words: std::collections::HashSet<String> = entry_clean
@@ -383,6 +409,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "test".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
         manager.insert_memory(entry).unwrap();
 
@@ -414,6 +442,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "test".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
 
         // 1. Insert
@@ -464,6 +494,8 @@ mod tests {
             last_accessed_ms: now,
             created_at_ms: now,
             provenance: "docs".to_string(),
+            retracted: false,
+            retraction_reason: None,
         };
 
         manager.insert_memory(entry).unwrap();
@@ -477,4 +509,44 @@ mod tests {
 
         let _ = std::fs::remove_file(&manager.file_path);
     }
+
+    #[test]
+    fn test_memory_retraction() {
+        let manager = MemoryManager {
+            file_path: PathBuf::from("storage/test_retraction_memory.json"),
+        };
+        let _ = std::fs::remove_file(&manager.file_path);
+
+        let now = 1000000;
+        let entry = MemoryEntry {
+            id: "mem_retract_test".to_string(),
+            content: "This is a fact to retract".to_string(),
+            tier: MemoryTier::Semantic,
+            confidence: 0.9,
+            usage_count: 1,
+            last_accessed_ms: now,
+            created_at_ms: now,
+            provenance: "user".to_string(),
+            retracted: false,
+            retraction_reason: None,
+        };
+        manager.insert_memory(entry).unwrap();
+
+        // Perform retraction
+        manager.retract_memory("mem_retract_test", "Fact proven false").unwrap();
+
+        let memories = manager.load_memories();
+        let retracted_entry = memories.get("mem_retract_test").unwrap();
+        assert!(retracted_entry.retracted);
+        assert_eq!(retracted_entry.confidence, 0.0);
+        assert_eq!(retracted_entry.retraction_reason.as_deref(), Some("Fact proven false"));
+
+        // Verify proactive inject skips it
+        let prompt = "Fact to retract";
+        let (merged, _logs) = manager.proactive_inject(prompt, now);
+        assert!(!merged.contains("This is a fact to retract"));
+
+        let _ = std::fs::remove_file(&manager.file_path);
+    }
 }
+

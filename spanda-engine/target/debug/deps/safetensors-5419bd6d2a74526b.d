@@ -1,0 +1,10 @@
+/home/akshay-bhalerao/.gemini/antigravity/scratch/bramha/spanda-engine/target/debug/deps/safetensors-5419bd6d2a74526b.d: /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/lib.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/slice.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/tensor.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/../README.md
+
+/home/akshay-bhalerao/.gemini/antigravity/scratch/bramha/spanda-engine/target/debug/deps/libsafetensors-5419bd6d2a74526b.rlib: /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/lib.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/slice.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/tensor.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/../README.md
+
+/home/akshay-bhalerao/.gemini/antigravity/scratch/bramha/spanda-engine/target/debug/deps/libsafetensors-5419bd6d2a74526b.rmeta: /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/lib.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/slice.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/tensor.rs /home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/../README.md
+
+/home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/lib.rs:
+/home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/slice.rs:
+/home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/tensor.rs:
+/home/akshay-bhalerao/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/safetensors-0.7.0/src/../README.md:

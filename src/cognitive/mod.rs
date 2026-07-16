@@ -7,6 +7,7 @@ pub mod goal_graph;
 pub mod integrity;
 pub mod memory;
 pub mod onboard;
+pub mod pipeline;
 pub mod research;
 pub mod router;
 pub mod verifier;

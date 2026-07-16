@@ -241,6 +241,37 @@ impl MemoryManager {
         self.insert_memory(entry.clone())?;
         Ok(entry)
     }
+
+    /// Spawns a background task to periodically consolidate high-usage Episodic memories into Semantic ones.
+    pub fn spawn_consolidation_worker(manager: std::sync::Arc<Self>) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                println!("🧠 [Consolidation Worker] Running periodic memory promotion...");
+                
+                let mut memories = manager.load_memories();
+                let mut promoted = 0;
+
+                for entry in memories.values_mut() {
+                    // Promote Episodic memories with high usage and high confidence
+                    if entry.tier == MemoryTier::Episodic && entry.usage_count >= 5 && entry.confidence > 0.85 {
+                        entry.tier = MemoryTier::Semantic;
+                        entry.confidence = 1.0; // Maximize confidence on promotion
+                        promoted += 1;
+                    }
+                }
+
+                if promoted > 0 {
+                    if let Err(e) = manager.save_memories(&memories) {
+                        eprintln!("⚠️ [Consolidation Worker] Failed to save promoted memories: {}", e);
+                    } else {
+                        println!("✅ [Consolidation Worker] Successfully promoted {} memories to Semantic Tier.", promoted);
+                    }
+                }
+            }
+        });
+    }
+
     /// Detect contradictions against highly confident semantic memories
     pub fn detect_contradiction(&self, new_fact: &str) -> Option<MemoryEntry> {
         let memories = self.load_memories();

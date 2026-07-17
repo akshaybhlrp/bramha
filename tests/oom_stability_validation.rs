@@ -194,7 +194,7 @@ mod tests {
 
         let out = sparse_matvec_mul_2_4(&x, &w, 8);
         assert_eq!(out.len(), 2);
-        let sim = cosine_similarity(&out, &vec![8.0, -8.0]);
+        let sim = cosine_similarity(&out, &[8.0, -8.0]);
         assert!((sim - 1.0).abs() < 1e-4);
     }
 

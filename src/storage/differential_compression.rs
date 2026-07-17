@@ -152,7 +152,7 @@ impl DifferentialEncoder {
         }
 
         let non_zero_count = values.len();
-        let uncompressed_bytes = total_len * std::mem::size_of::<f32>();
+        let uncompressed_bytes = std::mem::size_of_val(target);
         let delta_bytes = (indices.len() * std::mem::size_of::<u32>())
             + (values.len() * std::mem::size_of::<f32>())
             + 64; // header overhead

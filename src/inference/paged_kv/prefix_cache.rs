@@ -57,17 +57,18 @@ pub fn find_longest_prefix(base_path: &Path, tokens: &[u32]) -> Option<(usize, P
 
         if path.exists()
             && let Ok(mut entry) = load_entry(&path)
-                && entry.tokens == prefix {
-                    // Update access time
-                    entry.last_accessed = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                    // Re-save asynchronously or ignore; simple in-memory access touch is fine,
-                    // or re-save to keep modified time fresh for eviction
-                    let _ = save_entry(&path, &entry);
-                    return Some((prefix_len, entry));
-                }
+            && entry.tokens == prefix
+        {
+            // Update access time
+            entry.last_accessed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            // Re-save asynchronously or ignore; simple in-memory access touch is fine,
+            // or re-save to keep modified time fresh for eviction
+            let _ = save_entry(&path, &entry);
+            return Some((prefix_len, entry));
+        }
     }
     None
 }

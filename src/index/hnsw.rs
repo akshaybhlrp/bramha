@@ -338,9 +338,10 @@ impl HnswIndex {
         let mut results = Vec::new();
         for candidate in candidates {
             if let Some(allowed) = allowed_ids
-                && !allowed.contains(&candidate.id) {
-                    continue;
-                }
+                && !allowed.contains(&candidate.id)
+            {
+                continue;
+            }
 
             let v = collection.vectors.get(&candidate.id).unwrap();
             results.push(SearchResult {

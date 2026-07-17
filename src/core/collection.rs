@@ -151,30 +151,32 @@ impl Collection {
         // S3.3: Automatically index document text into lexical BM25 index on insert
         if let Some(ref meta) = vector.metadata
             && let Some(text_val) = meta.get("text").or_else(|| meta.get("content"))
-                && let Some(text_str) = text_val.as_str() {
-                    if let Some(ref mut bm25) = self.bm25_index {
-                        bm25.add_document(vector.id.clone(), text_str);
-                    } else {
-                        let mut bm25 = crate::index::bm25::BM25Index::new();
-                        bm25.add_document(vector.id.clone(), text_str);
-                        self.bm25_index = Some(bm25);
-                    }
-                }
+            && let Some(text_str) = text_val.as_str()
+        {
+            if let Some(ref mut bm25) = self.bm25_index {
+                bm25.add_document(vector.id.clone(), text_str);
+            } else {
+                let mut bm25 = crate::index::bm25::BM25Index::new();
+                bm25.add_document(vector.id.clone(), text_str);
+                self.bm25_index = Some(bm25);
+            }
+        }
 
         self.vectors.insert(vector.id.clone(), vector.clone());
 
         if let Some(ref db) = self.sqlite
-            && let Ok(conn) = db.lock() {
-                let meta_str = vector
-                    .metadata
-                    .as_ref()
-                    .map(|m| m.to_string())
-                    .unwrap_or_else(|| "{}".to_string());
-                let _ = conn.execute(
-                    "INSERT OR REPLACE INTO metadata_index (id, metadata) VALUES (?1, ?2)",
-                    rusqlite::params![vector.id, meta_str],
-                );
-            }
+            && let Ok(conn) = db.lock()
+        {
+            let meta_str = vector
+                .metadata
+                .as_ref()
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "{}".to_string());
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO metadata_index (id, metadata) VALUES (?1, ?2)",
+                rusqlite::params![vector.id, meta_str],
+            );
+        }
 
         Ok(())
     }
@@ -184,12 +186,13 @@ impl Collection {
         let removed = self.vectors.remove(id).is_some();
         if removed
             && let Some(ref db) = self.sqlite
-                && let Ok(conn) = db.lock() {
-                    let _ = conn.execute(
-                        "DELETE FROM metadata_index WHERE id = ?1",
-                        rusqlite::params![id],
-                    );
-                }
+            && let Ok(conn) = db.lock()
+        {
+            let _ = conn.execute(
+                "DELETE FROM metadata_index WHERE id = ?1",
+                rusqlite::params![id],
+            );
+        }
         removed
     }
 
@@ -216,34 +219,34 @@ impl Collection {
         let mut allowed_ids: Option<HashSet<String>> = None;
         if let Some(f) = filter
             && let Some(ref db) = self.sqlite
-                && let Ok(conn) = db.lock() {
-                    let (sql_where, params_json) = f.to_sql_query();
-                    let sql = format!("SELECT id FROM metadata_index WHERE {}", sql_where);
+            && let Ok(conn) = db.lock()
+        {
+            let (sql_where, params_json) = f.to_sql_query();
+            let sql = format!("SELECT id FROM metadata_index WHERE {}", sql_where);
 
-                    let params_str: Vec<String> = params_json
-                        .iter()
-                        .map(|v| match v {
-                            serde_json::Value::String(s) => s.clone(),
-                            _ => v.to_string(),
-                        })
-                        .collect();
+            let params_str: Vec<String> = params_json
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => v.to_string(),
+                })
+                .collect();
 
-                    let params_dyn: Vec<&dyn rusqlite::ToSql> = params_str
-                        .iter()
-                        .map(|s| s as &dyn rusqlite::ToSql)
-                        .collect();
+            let params_dyn: Vec<&dyn rusqlite::ToSql> = params_str
+                .iter()
+                .map(|s| s as &dyn rusqlite::ToSql)
+                .collect();
 
-                    if let Ok(mut stmt) = conn.prepare(&sql)
-                        && let Ok(rows) =
-                            stmt.query_map(&params_dyn[..], |row| row.get::<_, String>(0))
-                        {
-                            let mut ids = HashSet::new();
-                            for r in rows.flatten() {
-                                ids.insert(r);
-                            }
-                            allowed_ids = Some(ids);
-                        }
+            if let Ok(mut stmt) = conn.prepare(&sql)
+                && let Ok(rows) = stmt.query_map(&params_dyn[..], |row| row.get::<_, String>(0))
+            {
+                let mut ids = HashSet::new();
+                for r in rows.flatten() {
+                    ids.insert(r);
                 }
+                allowed_ids = Some(ids);
+            }
+        }
 
         // Try approximate search using the index if requested and available
         if use_index {

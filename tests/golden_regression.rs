@@ -12,7 +12,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
             // Let's assert the test compiles and works.
-            assert!(true, "Golden regression test framework is running");
+            // Golden regression test framework is running
         });
     }
 }

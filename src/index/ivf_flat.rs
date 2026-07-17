@@ -390,11 +390,11 @@ mod tests {
 
         // Verify profile-based probes selection
         collection.tuning_profile = TuningProfile::LowLatency;
-        let res_ll = idx.search(&collection, &vec![5.0, 5.0, 5.0, 5.0], 3, None, None);
+        let res_ll = idx.search(&collection, &[5.0, 5.0, 5.0, 5.0], 3, None, None);
         assert!(!res_ll.is_empty());
 
         collection.tuning_profile = TuningProfile::HighRecall;
-        let res_hr = idx.search(&collection, &vec![5.0, 5.0, 5.0, 5.0], 3, None, None);
+        let res_hr = idx.search(&collection, &[5.0, 5.0, 5.0, 5.0], 3, None, None);
         assert!(!res_hr.is_empty());
     }
 }

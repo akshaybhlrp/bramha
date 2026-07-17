@@ -2,6 +2,7 @@
 name = "bramha"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 default-run = "bramha"
 
 [dependencies]
@@ -31,7 +32,7 @@ rusqlite = { version = "0.30.0", features = ["bundled"] }
 libc = "0.2"
 pollster = "0.3.0"
 blake3 = "1.5"
-lru = "0.12"
+lru = "0.16.3"
 dashmap = "6"
 crossbeam = "0.8"
 parking_lot = "0.12"

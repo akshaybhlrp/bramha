@@ -58,7 +58,7 @@ mod tests {
         let cores = get_physical_core_count();
         assert_eq!(pool.current_num_threads(), cores);
 
-        let sum: i32 = pool.install(|| (0..100).into_iter().sum());
+        let sum: i32 = pool.install(|| (0..100).sum());
         assert_eq!(sum, 4950);
     }
 }

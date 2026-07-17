@@ -49,11 +49,10 @@ impl DeterministicAnswerCache {
         let mut entries = HashMap::new();
         if path.exists()
             && let Ok(content) = fs::read_to_string(path)
-                && let Ok(loaded) =
-                    serde_json::from_str::<HashMap<String, CachedResponse>>(&content)
-                {
-                    entries = loaded;
-                }
+            && let Ok(loaded) = serde_json::from_str::<HashMap<String, CachedResponse>>(&content)
+        {
+            entries = loaded;
+        }
         Self {
             entries: Mutex::new(entries),
             cache_path: path.to_path_buf(),

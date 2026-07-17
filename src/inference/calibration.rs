@@ -9,9 +9,10 @@ pub fn calibrate_thresholds(model: &ModelTable) -> Vec<f32> {
             let parts: Vec<&str> = key.split('.').collect();
             if parts.len() > 2
                 && let Ok(layer_idx) = parts[2].parse::<usize>()
-                    && layer_idx > max_layer {
-                        max_layer = layer_idx;
-                    }
+                && layer_idx > max_layer
+            {
+                max_layer = layer_idx;
+            }
         }
     }
 

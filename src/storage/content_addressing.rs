@@ -213,8 +213,8 @@ impl ContentAddressedStorage {
         let index = self.index.lock().unwrap();
         let index_path = self.data_dir.join("dedup_index.json");
 
-        let bytes = serde_json::to_vec(&*index)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let bytes =
+            serde_json::to_vec(&*index).map_err(|e| std::io::Error::other(e.to_string()))?;
 
         let tmp_path = self.data_dir.join("dedup_index.json.tmp");
 
@@ -248,7 +248,8 @@ impl ContentAddressedStorage {
         let mut dedup_savings = 0u64;
 
         // Chunked storage: hash each chunk and check dedup
-        let chunk_iter: Box<dyn Iterator<Item = &[f32]>> = if !data.len().is_multiple_of(CHUNK_SIZE) {
+        let chunk_iter: Box<dyn Iterator<Item = &[f32]>> = if !data.len().is_multiple_of(CHUNK_SIZE)
+        {
             Box::new(data.chunks_exact(CHUNK_SIZE).chain(std::iter::once(
                 &data[data.len() - (data.len() % CHUNK_SIZE)..],
             )))

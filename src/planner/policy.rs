@@ -58,9 +58,10 @@ impl PlannerPolicy {
         let path = Self::get_cache_path();
         if path.exists()
             && let Ok(content) = fs::read_to_string(&path)
-                && let Ok(policy) = serde_json::from_str::<Self>(&content) {
-                    return policy;
-                }
+            && let Ok(policy) = serde_json::from_str::<Self>(&content)
+        {
+            return policy;
+        }
         Self::default()
     }
 

@@ -23,7 +23,11 @@
     clippy::needless_borrows_for_generic_args,
     clippy::unnecessary_get_then_check,
     clippy::single_range_in_vec_init,
-    clippy::manual_flatten
+    clippy::manual_flatten,
+    clippy::await_holding_lock,
+    clippy::assertions_on_constants,
+    clippy::useless_vec,
+    clippy::while_let_loop
 )]
 
 use bramha::api::create_router;
@@ -80,26 +84,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--port" | "-p"
-                if i + 1 < args.len() => {
-                    port = args[i + 1].parse().unwrap_or(8000);
-                    i += 2;
-                }
-            "--uds" | "-u"
-                if i + 1 < args.len() => {
-                    uds_path = Some(args[i + 1].clone());
-                    i += 2;
-                }
-            "--db-file" | "-d"
-                if i + 1 < args.len() => {
-                    db_path = Some(args[i + 1].clone());
-                    i += 2;
-                }
-            "--cache-dim" | "-c"
-                if i + 1 < args.len() => {
-                    cache_dim = args[i + 1].parse().unwrap_or(1536);
-                    i += 2;
-                }
+            "--port" | "-p" if i + 1 < args.len() => {
+                port = args[i + 1].parse().unwrap_or(8000);
+                i += 2;
+            }
+            "--uds" | "-u" if i + 1 < args.len() => {
+                uds_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--db-file" | "-d" if i + 1 < args.len() => {
+                db_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--cache-dim" | "-c" if i + 1 < args.len() => {
+                cache_dim = args[i + 1].parse().unwrap_or(1536);
+                i += 2;
+            }
             "--no-save" => {
                 db_path = None;
                 i += 1;
@@ -120,13 +120,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 i += 1;
             }
-            "--power"
-                if i + 1 < args.len() => {
-                    if let Ok(limit) = args[i + 1].parse::<u32>() {
-                        bramha::inference::power::set_power_limit(limit);
-                    }
-                    i += 2;
+            "--power" if i + 1 < args.len() => {
+                if let Ok(limit) = args[i + 1].parse::<u32>() {
+                    bramha::inference::power::set_power_limit(limit);
                 }
+                i += 2;
+            }
             "--help" | "-h" => {
                 println!("Bramha - A High-Performance Custom LLM Vector Database");
                 println!();

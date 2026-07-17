@@ -185,41 +185,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if let Some(k) = svd_rank
-                    && out_features > k && in_features > k {
-                        print!(
-                            "\r[{}/{}] SVD Factorizing (Randomized) to rank {}: '{}'...",
-                            i + 1,
-                            source_manifest.layers.len(),
-                            k,
-                            name
-                        );
-                        std::io::stdout().flush().unwrap_or_default();
+                    && out_features > k
+                    && in_features > k
+                {
+                    print!(
+                        "\r[{}/{}] SVD Factorizing (Randomized) to rank {}: '{}'...",
+                        i + 1,
+                        source_manifest.layers.len(),
+                        k,
+                        name
+                    );
+                    std::io::stdout().flush().unwrap_or_default();
 
-                        let (a, b, actual_rank) = bramha::storage::factorization::randomized_svd(
-                            f32_data,
-                            out_features,
-                            in_features,
-                            k,
-                        )?;
+                    let (a, b, actual_rank) = bramha::storage::factorization::randomized_svd(
+                        f32_data,
+                        out_features,
+                        in_features,
+                        k,
+                    )?;
 
-                        let mut combined = Vec::with_capacity(
-                            (out_features * actual_rank + actual_rank * in_features) * 4,
-                        );
-                        combined.extend_from_slice(bytemuck::cast_slice(&a));
-                        combined.extend_from_slice(bytemuck::cast_slice(&b));
+                    let mut combined = Vec::with_capacity(
+                        (out_features * actual_rank + actual_rank * in_features) * 4,
+                    );
+                    combined.extend_from_slice(bytemuck::cast_slice(&a));
+                    combined.extend_from_slice(bytemuck::cast_slice(&b));
 
-                        let file_name = format!("{}_svd.bin", name.replace(".", "_"));
-                        let file_path = target_path.join(&file_name);
-                        std::fs::write(&file_path, &combined)?;
+                    let file_name = format!("{}_svd.bin", name.replace(".", "_"));
+                    let file_path = target_path.join(&file_name);
+                    std::fs::write(&file_path, &combined)?;
 
-                        let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
-                        l_meta.quantization_bits = None;
-                        l_meta.compression_format = CompressionFormat::Svd;
-                        l_meta.svd_rank = Some(actual_rank);
-                        l_meta.stored_bytes = combined.len() as u64;
-                        target_manifest.add_layer(l_meta);
-                        continue;
-                    }
+                    let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
+                    l_meta.quantization_bits = None;
+                    l_meta.compression_format = CompressionFormat::Svd;
+                    l_meta.svd_rank = Some(actual_rank);
+                    l_meta.stored_bytes = combined.len() as u64;
+                    target_manifest.add_layer(l_meta);
+                    continue;
+                }
             }
 
             if use_differential {
@@ -228,46 +230,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let parts: Vec<&str> = rest.split('.').collect();
                     if let Some(idx_str) = parts.first()
                         && let Ok(idx) = idx_str.parse::<usize>()
-                            && idx > 0 {
-                                let prev_name = name.replace(
-                                    &format!("model.layers.{}", idx),
-                                    &format!("model.layers.{}", idx - 1),
-                                );
-                                if let Some(prev_page) = model.layers.get(&prev_name) {
-                                    let prev_f32_data: &[f32] =
-                                        bytemuck::cast_slice(prev_page.as_bytes());
+                        && idx > 0
+                    {
+                        let prev_name = name.replace(
+                            &format!("model.layers.{}", idx),
+                            &format!("model.layers.{}", idx - 1),
+                        );
+                        if let Some(prev_page) = model.layers.get(&prev_name) {
+                            let prev_f32_data: &[f32] = bytemuck::cast_slice(prev_page.as_bytes());
 
-                                    // Calculate delta
-                                    let mut delta = vec![0.0f32; f32_data.len()];
-                                    for j in 0..f32_data.len() {
-                                        delta[j] = f32_data[j] - prev_f32_data[j];
-                                    }
-
-                                    print!(
-                                        "\r[{}/{}] Differential compress '{}' from '{}'...",
-                                        i + 1,
-                                        source_manifest.layers.len(),
-                                        name,
-                                        prev_name
-                                    );
-                                    std::io::stdout().flush().unwrap_or_default();
-
-                                    let file_name = format!("{}_diff.bin", name.replace(".", "_"));
-                                    let file_path = target_path.join(&file_name);
-                                    std::fs::write(&file_path, bytemuck::cast_slice(&delta))?;
-
-                                    let mut l_meta =
-                                        LayerMetadata::new(name.clone(), layer.shape.clone());
-                                    l_meta.quantization_bits = None;
-                                    l_meta.compression_format = CompressionFormat::Differential {
-                                        delta_format: Box::new(CompressionFormat::None),
-                                    };
-                                    l_meta.reference_tensor = Some(prev_name);
-                                    l_meta.stored_bytes = (delta.len() * 4) as u64;
-                                    target_manifest.add_layer(l_meta);
-                                    continue;
-                                }
+                            // Calculate delta
+                            let mut delta = vec![0.0f32; f32_data.len()];
+                            for j in 0..f32_data.len() {
+                                delta[j] = f32_data[j] - prev_f32_data[j];
                             }
+
+                            print!(
+                                "\r[{}/{}] Differential compress '{}' from '{}'...",
+                                i + 1,
+                                source_manifest.layers.len(),
+                                name,
+                                prev_name
+                            );
+                            std::io::stdout().flush().unwrap_or_default();
+
+                            let file_name = format!("{}_diff.bin", name.replace(".", "_"));
+                            let file_path = target_path.join(&file_name);
+                            std::fs::write(&file_path, bytemuck::cast_slice(&delta))?;
+
+                            let mut l_meta = LayerMetadata::new(name.clone(), layer.shape.clone());
+                            l_meta.quantization_bits = None;
+                            l_meta.compression_format = CompressionFormat::Differential {
+                                delta_format: Box::new(CompressionFormat::None),
+                            };
+                            l_meta.reference_tensor = Some(prev_name);
+                            l_meta.stored_bytes = (delta.len() * 4) as u64;
+                            target_manifest.add_layer(l_meta);
+                            continue;
+                        }
+                    }
                 }
             }
 

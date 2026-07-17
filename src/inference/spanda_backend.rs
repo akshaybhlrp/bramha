@@ -82,7 +82,7 @@ mod tests {
         ];
 
         // Mock Qwen2-0.5B greedy decode logit generation
-        let actual_logits = vec![
+        let actual_logits = [
             (151643, 10.45f32),
             (10124, 8.21f32),
             (5234, 9.77f32),

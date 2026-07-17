@@ -32,23 +32,24 @@ pub fn load_from_file<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     // 1.5. Resilient fallback: If it looks like JSON but has trailing garbage/corruption, attempt self-healing recovery
     let trimmed = bytes.iter().position(|&b| !b.is_ascii_whitespace());
     if let Some(first_char_idx) = trimmed
-        && (bytes[first_char_idx] == b'{' || bytes[first_char_idx] == b'[') {
-            // Find the last closing brace/bracket
-            let target_char = if bytes[first_char_idx] == b'{' {
-                b'}'
-            } else {
-                b']'
-            };
-            if let Some(last_idx) = bytes.iter().rposition(|&b| b == target_char) {
-                let stripped_bytes = &bytes[..=last_idx];
-                if let Ok(data) = serde_json::from_slice::<T>(stripped_bytes) {
-                    println!(
-                        "🛡️ Resilient Parser: Recovered JSON database from trailing corruption/tampering!"
-                    );
-                    return Ok(data);
-                }
+        && (bytes[first_char_idx] == b'{' || bytes[first_char_idx] == b'[')
+    {
+        // Find the last closing brace/bracket
+        let target_char = if bytes[first_char_idx] == b'{' {
+            b'}'
+        } else {
+            b']'
+        };
+        if let Some(last_idx) = bytes.iter().rposition(|&b| b == target_char) {
+            let stripped_bytes = &bytes[..=last_idx];
+            if let Ok(data) = serde_json::from_slice::<T>(stripped_bytes) {
+                println!(
+                    "🛡️ Resilient Parser: Recovered JSON database from trailing corruption/tampering!"
+                );
+                return Ok(data);
             }
         }
+    }
 
     // 2. Fallback to legacy bincode compatibility
     let config = bincode::config::standard();

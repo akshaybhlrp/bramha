@@ -67,11 +67,11 @@ impl AuthManager {
             && (keys.contains_key("admin_key")
                 || keys.contains_key("write_key")
                 || keys.contains_key("read_key"))
-            {
-                panic!(
-                    "CRITICAL SECURITY FAILURE: Default API keys (admin_key/write_key/read_key) are active in a production environment!"
-                );
-            }
+        {
+            panic!(
+                "CRITICAL SECURITY FAILURE: Default API keys (admin_key/write_key/read_key) are active in a production environment!"
+            );
+        }
         keys
     }
 
@@ -185,9 +185,10 @@ where
 pub fn extract_token_from_header(parts: &Parts) -> Result<String, (StatusCode, String)> {
     if let Some(auth_header) = parts.headers.get("Authorization")
         && let Ok(auth_str) = auth_header.to_str()
-            && auth_str.starts_with("Bearer ") {
-                return Ok(auth_str["Bearer ".len()..].to_string());
-            }
+        && auth_str.starts_with("Bearer ")
+    {
+        return Ok(auth_str["Bearer ".len()..].to_string());
+    }
     Err((
         StatusCode::UNAUTHORIZED,
         "Unauthorized: Missing Authorization Bearer token header".to_string(),

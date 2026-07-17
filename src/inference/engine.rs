@@ -1995,7 +1995,10 @@ mod tests {
 
     #[test]
     fn test_wgpu_device_mapping() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = match ENV_MUTEX.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let active_device = "cpu";
         let device = match active_device.to_lowercase().as_str() {
             "cpu" => WgpuDevice::BestAvailable,

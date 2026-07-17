@@ -11,10 +11,7 @@ use std::fmt;
 /// Errors that can occur during differential compression and reconstruction.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DifferentialCompressionError {
-    DimensionMismatch {
-        base_len: usize,
-        target_len: usize,
-    },
+    DimensionMismatch { base_len: usize, target_len: usize },
     ReferenceNotFound(String),
     CorruptedDeltaData(String),
     ChainResolutionError(String),
@@ -23,7 +20,10 @@ pub enum DifferentialCompressionError {
 impl fmt::Display for DifferentialCompressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::DimensionMismatch { base_len, target_len } => write!(
+            Self::DimensionMismatch {
+                base_len,
+                target_len,
+            } => write!(
                 f,
                 "Base tensor length ({}) does not match target tensor length ({})",
                 base_len, target_len
@@ -95,7 +95,8 @@ pub struct DeltaTensor {
 impl DeltaTensor {
     /// Returns estimated byte size of this encoded delta structure
     pub fn byte_size(&self) -> usize {
-        let header_bytes = std::mem::size_of::<Self>() + self.reference_id.len() + self.shape.len() * 8;
+        let header_bytes =
+            std::mem::size_of::<Self>() + self.reference_id.len() + self.shape.len() * 8;
         let indices_bytes = self.indices.len() * std::mem::size_of::<u32>();
         let values_bytes = self.values.len() * std::mem::size_of::<f32>();
         header_bytes + indices_bytes + values_bytes
@@ -261,14 +262,8 @@ impl DeltaStorageManager {
         delta_type: DeltaType,
         shape: Vec<usize>,
     ) -> Result<&DeltaTensor, DifferentialCompressionError> {
-        let delta = DifferentialEncoder::compute_delta(
-            base,
-            target,
-            config,
-            base_name,
-            delta_type,
-            shape,
-        )?;
+        let delta =
+            DifferentialEncoder::compute_delta(base, target, config, base_name, delta_type, shape)?;
         let name = target_name.into();
         self.deltas.insert(name.clone(), delta);
         Ok(self.deltas.get(&name).unwrap())
@@ -280,14 +275,17 @@ impl DeltaStorageManager {
     }
 
     /// Reconstruct a target tensor by resolving delta dependencies using a base supplier function
-    pub fn reconstruct<F>(&self, target_name: &str, base_supplier: F) -> Result<Vec<f32>, DifferentialCompressionError>
+    pub fn reconstruct<F>(
+        &self,
+        target_name: &str,
+        base_supplier: F,
+    ) -> Result<Vec<f32>, DifferentialCompressionError>
     where
         F: Fn(&str) -> Option<Vec<f32>>,
     {
-        let delta = self
-            .deltas
-            .get(target_name)
-            .ok_or_else(|| DifferentialCompressionError::ReferenceNotFound(target_name.to_string()))?;
+        let delta = self.deltas.get(target_name).ok_or_else(|| {
+            DifferentialCompressionError::ReferenceNotFound(target_name.to_string())
+        })?;
 
         let base_data = base_supplier(&delta.reference_id).ok_or_else(|| {
             DifferentialCompressionError::ReferenceNotFound(delta.reference_id.clone())
@@ -364,8 +362,8 @@ mod tests {
         assert!((delta.values[0] - 0.5).abs() < 1e-5);
         assert!((delta.values[1] - 0.2).abs() < 1e-5);
 
-        let reconstructed = DifferentialEncoder::reconstruct_tensor(&base, &delta)
-            .expect("Reconstruction failed");
+        let reconstructed =
+            DifferentialEncoder::reconstruct_tensor(&base, &delta).expect("Reconstruction failed");
 
         for (orig, rec) in target.iter().zip(reconstructed.iter()) {
             assert!((orig - rec).abs() < 1e-5);

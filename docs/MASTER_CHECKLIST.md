@@ -106,8 +106,13 @@ With Sprints 1 through 11 and SPANDA completely architected, compiled, and integ
 - [x] **Graph Visualization Endpoint:** Add an Axum API route to export the `ResearchGraph` and `Memory` connections to a JSON format compatible with a visualization library (e.g., D3.js or React Flow) in the dashboard.
 
 ### 4. 🌐 Distributed & Serverless Features (Bramha Hyperscale)
-- [ ] **Distributed Layer Splitting (Sprint 12+):** Implement TCP/gRPC layer execution handoffs, allowing two machines with 4GB GPUs to act as a single 8GB GPU.
-- [ ] **WebRTC P2P Intelligence:** Enable multiple instances of Bramha on a local network to securely gossip KV caches and semantic memories.
+- [x] **Distributed Layer Splitting (Sprint 12+):** Implement TCP/gRPC layer execution handoffs, allowing two machines with 4GB GPUs to act as a single 8GB GPU.
+  - [x] **BRM-NET-001: gRPC Protobuf Definitions:** Define `proto/bramha.proto` for remote tensor execution and layer handoff requests.
+  - [x] **BRM-NET-002: Tonic Server Implementation:** Implement the gRPC receiver in `src/network/server.rs` to accept remote layer computation tasks.
+  - [x] **BRM-NET-003: Remote Backend Client:** Implement a `RemoteBackend` that conforms to the computation trait and routes requests to the gRPC server.
+- [x] **WebRTC P2P Intelligence:** Enable multiple instances of Bramha on a local network to securely gossip KV caches and semantic memories.
+  - [x] **BRM-NET-004: UDP/WebRTC Gossip Node:** Create a background `GossipWorker` in `src/network/gossip.rs` for peer discovery.
+  - [x] **BRM-NET-005: KV Cache Sharing Protocol:** Implement the synchronization protocol to broadcast semantic memory vectors across peers.
 
 ---
 

@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package bramha.network;
+
+// Service defining the remote tensor execution handoff
+service ComputeNode {
+    // Ping to check if node is alive and its current VRAM usage
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    
+    // Execute a layer calculation remotely (Distributed Layer Splitting)
+    rpc ExecuteLayer(LayerExecutionRequest) returns (LayerExecutionResponse);
+
+    // Gossip semantic KV caches (WebRTC/P2P replacement for now)
+    rpc GossipMemory(GossipRequest) returns (GossipResponse);
+}
+
+message HeartbeatRequest {
+    string node_id = 1;
+}
+
+message HeartbeatResponse {
+    float vram_usage_percent = 1;
+    bool is_ready = 2;
+}
+
+message LayerExecutionRequest {
+    string model_name = 1;
+    string layer_name = 2;
+    // Serialized token embeddings or hidden states (f32 buffer)
+    bytes input_tensor = 3; 
+    uint32 batch_size = 4;
+    uint32 seq_len = 5;
+    uint32 hidden_dim = 6;
+}
+
+message LayerExecutionResponse {
+    // Resulting hidden states after passing through the layer
+    bytes output_tensor = 1;
+    bool success = 2;
+    string error_message = 3;
+}
+
+message GossipRequest {
+    string node_id = 1;
+    // Bincode serialized collection vectors
+    bytes memory_payload = 2;
+}
+
+message GossipResponse {
+    bool accepted = 1;
+}

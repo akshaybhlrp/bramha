@@ -6,14 +6,14 @@
 
 use bramha::api::create_router;
 use bramha::inference::sparse_predictor::{cosine_similarity, sparse_matvec_mul_2_4};
-use bramha::storage::multi_tier::{MultiTierStorage, TierConfig};
-use bramha::storage::sparse_pager::{pack_sparse_matrix, SparseBlockMask};
-use bramha::storage::storage_manifest::StorageTier;
 use bramha::storage::Database;
+use bramha::storage::multi_tier::{MultiTierStorage, TierConfig};
+use bramha::storage::sparse_pager::{SparseBlockMask, pack_sparse_matrix};
+use bramha::storage::storage_manifest::StorageTier;
 use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::UnixStream;
@@ -137,8 +137,12 @@ mod tests {
         }
 
         // Verify total tasks processed or queued equal 20, with zero unhandled panics
-        let total_handled = success_count.load(Ordering::SeqCst) + rejected_count.load(Ordering::SeqCst);
-        assert_eq!(total_handled, 20, "All 20 concurrent requests must be safely handled");
+        let total_handled =
+            success_count.load(Ordering::SeqCst) + rejected_count.load(Ordering::SeqCst);
+        assert_eq!(
+            total_handled, 20,
+            "All 20 concurrent requests must be safely handled"
+        );
 
         // 5. Shutdown and clean up
         let _ = shutdown_tx.send(());
@@ -152,7 +156,7 @@ mod tests {
     async fn test_spanda_sparse_and_dense_ram_offload_fallback() {
         let temp_dir = TempDir::new().expect("Failed to create tempdir");
         let config = TierConfig {
-            hot_max_bytes: 100 * 1024, // 100KB DRAM cap to force overflow
+            hot_max_bytes: 100 * 1024,       // 100KB DRAM cap to force overflow
             warm_max_bytes: 5 * 1024 * 1024, // 5MB SSD RAM offload
             promotion_threshold: 2,
             demotion_threshold_secs: 3600,
@@ -185,8 +189,7 @@ mod tests {
         // Verify SPANDA 2:4 Sparse predictor functionality under offloaded state
         let x = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         let w = vec![
-            0.1, 10.0, -5.0, 0.2, 1.0, -0.1, 0.5, 2.0,
-            0.0, 0.0, 1.0, 2.0, -5.0, -6.0, 1.0, 0.1,
+            0.1, 10.0, -5.0, 0.2, 1.0, -0.1, 0.5, 2.0, 0.0, 0.0, 1.0, 2.0, -5.0, -6.0, 1.0, 0.1,
         ];
 
         let out = sparse_matvec_mul_2_4(&x, &w, 8);
@@ -197,7 +200,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_sparse_block_pager_oom_resilience() {
-        let block_data = [0.0f32, 1.5, 0.0, 0.0, 2.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.2, 0.0];
+        let block_data = [
+            0.0f32, 1.5, 0.0, 0.0, 2.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.2, 0.0,
+        ];
         let mask = SparseBlockMask::pack_4x4(&block_data);
 
         assert!(mask.mask > 0);

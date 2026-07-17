@@ -18,6 +18,7 @@ pub mod chunker;
 pub mod content_addressing;
 pub mod crud;
 pub mod data_organization;
+pub mod differential_compression;
 pub mod disk;
 pub mod factorization;
 pub mod indexing;

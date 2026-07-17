@@ -379,31 +379,63 @@ impl WgpuComputePlane {
             entry_point: "main",
         });
 
-        // Compilation Circuit Breaker - check cache on boot
+        // BRM-CACHE-001 & BRM-CACHE-003: Pipeline Cache Persistence & Extraction
         let cache_path = std::path::Path::new("gemm_sparse_cache.bin");
-        let mut cache_load_failed = false;
+        let mut cached_spirv: Option<Vec<u32>> = None;
         if cache_path.exists() {
             if let Ok(bytes) = std::fs::read(cache_path) {
                 let config = bincode::config::standard();
-                let decoded: Result<(String, u64), _> =
+                let decoded: Result<(Vec<u32>, u64), _> =
                     bincode::serde::decode_from_slice(&bytes, config).map(|(val, _)| val);
-                if decoded.is_err() {
+                if let Ok((spirv, _)) = decoded {
+                    println!(
+                        "✨ [WGPU] Successfully loaded pre-compiled SPIR-V binary from cache."
+                    );
+                    cached_spirv = Some(spirv);
+                } else {
                     println!(
                         "⚠️ [WGPU] Cache load failed on boot. Triggering compilation circuit breaker."
                     );
-                    cache_load_failed = true;
                 }
-            } else {
-                cache_load_failed = true;
             }
         }
+        let cache_load_failed = cache_path.exists() && cached_spirv.is_none();
 
         // Measure compile time
         let compile_start = std::time::Instant::now();
         let shader_src_sparse = include_str!("shaders/gemm_sparse.wgsl");
+
+        let spirv_data = if let Some(spv) = cached_spirv {
+            spv
+        } else {
+            println!("⚙️ [WGPU] Compiling sparse WGSL to SPIR-V via Naga...");
+            let mut frontend = naga::front::wgsl::Frontend::new();
+            let module = frontend.parse(shader_src_sparse).unwrap();
+            let mut validator = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::empty(),
+            );
+            let info = validator.validate(&module).unwrap();
+
+            let mut options = naga::back::spv::Options::default();
+            options.flags = naga::back::spv::WriterFlags::empty();
+            let pipeline_options = naga::back::spv::PipelineOptions {
+                shader_stage: naga::ShaderStage::Compute,
+                entry_point: "main".to_string(),
+            };
+
+            let mut spv = Vec::new();
+            let mut writer = naga::back::spv::Writer::new(&options).unwrap();
+            writer
+                .write(&module, &info, Some(&pipeline_options), &None, &mut spv)
+                .unwrap();
+            spv
+        };
+
+        // BRM-CACHE-002: Cache Injection via SPIR-V ShaderSource
         let shader_module_sparse = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gemm_sparse.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(shader_src_sparse.into()),
+            source: wgpu::ShaderSource::SpirV(std::borrow::Cow::Owned(spirv_data.clone())),
         });
 
         let pipeline_sparse = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -414,13 +446,10 @@ impl WgpuComputePlane {
         });
         let compile_duration = compile_start.elapsed();
 
-        // Write cache if took > 200ms and load didn't fail
-        if compile_duration.as_millis() > 200 && !cache_load_failed {
+        // Write cache if it wasn't loaded from disk
+        if !cache_path.exists() && !cache_load_failed {
             let config = bincode::config::standard();
-            let entry = (
-                "gemm_sparse_v1".to_string(),
-                compile_duration.as_millis() as u64,
-            );
+            let entry = (spirv_data, compile_duration.as_millis() as u64);
             if let Ok(encoded) = bincode::serde::encode_to_vec(&entry, config) {
                 let _ = std::fs::write(cache_path, encoded);
             }

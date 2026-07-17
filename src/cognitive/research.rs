@@ -17,6 +17,12 @@ pub struct ResearchGraph {
     goals: HashMap<String, SubGoal>,
 }
 
+impl Default for ResearchGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResearchGraph {
     pub fn new() -> Self {
         ResearchGraph {

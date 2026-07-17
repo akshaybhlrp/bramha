@@ -42,8 +42,8 @@ impl IntegrityCenter {
         let mut total_shards_scanned = 0;
 
         let collections_dir = self.storage_dir.join("collections");
-        if collections_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&collections_dir) {
+        if collections_dir.exists()
+            && let Ok(entries) = fs::read_dir(&collections_dir) {
                 for entry in entries {
                     if let Ok(dir_entry) = entry {
                         let path = dir_entry.path();
@@ -72,7 +72,6 @@ impl IntegrityCenter {
                     }
                 }
             }
-        }
 
         // WAL replay health check
         let wal_path = self.storage_dir.join("wal.log");
@@ -86,8 +85,8 @@ impl IntegrityCenter {
 
         // Check for orphaned indices: e.g. .index files without matching db entries
         let indices_dir = self.storage_dir.join("indices");
-        if indices_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&indices_dir) {
+        if indices_dir.exists()
+            && let Ok(entries) = fs::read_dir(&indices_dir) {
                 for entry in entries {
                     if let Ok(dir_entry) = entry {
                         let path = dir_entry.path();
@@ -104,7 +103,6 @@ impl IntegrityCenter {
                     }
                 }
             }
-        }
 
         IntegrityReport {
             shard_checksums,

@@ -28,6 +28,12 @@ pub struct ClusterPlanner {
     nodes: HashMap<String, NodeInfo>,
 }
 
+impl Default for ClusterPlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClusterPlanner {
     pub fn new() -> Self {
         Self {

@@ -1,5 +1,11 @@
 pub struct MultiModelPipeline;
 
+impl Default for MultiModelPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MultiModelPipeline {
     pub fn new() -> Self {
         MultiModelPipeline

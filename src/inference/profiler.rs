@@ -12,6 +12,12 @@ pub struct TimingStats {
     pub max_us: u64,
 }
 
+impl Default for TimingStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimingStats {
     pub fn new() -> Self {
         Self {
@@ -53,6 +59,12 @@ pub struct Profiler {
 }
 
 static GLOBAL_PROFILER: std::sync::OnceLock<Profiler> = std::sync::OnceLock::new();
+
+impl Default for Profiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Profiler {
     pub fn new() -> Self {

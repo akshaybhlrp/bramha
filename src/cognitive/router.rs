@@ -17,8 +17,8 @@ impl ModelRouter {
         analytics: Option<&crate::cognitive::analytics::AnalyticsStore>,
     ) -> (RouteProfile, String) {
         // Step 1: Query benchmark history to check for SLA breaches
-        if let Some(store) = analytics {
-            if let Ok(avg_latency) = store.get_average_latency_ms() {
+        if let Some(store) = analytics
+            && let Ok(avg_latency) = store.get_average_latency_ms() {
                 // If historical latency exceeds our 200.0ms SLA target, force FastPath routing
                 // to maintain low-latency responsiveness.
                 if avg_latency > 200.0 {
@@ -29,7 +29,6 @@ impl ModelRouter {
                     return (RouteProfile::FastPath, reason);
                 }
             }
-        }
 
         let prompt_lower = prompt.to_lowercase();
 

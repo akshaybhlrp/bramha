@@ -1,7 +1,7 @@
-/// Quantization logic for INT8 and INT4 (U4) weight parameters in Bramha.
-///
-/// Provides high-performance, robust per-row/channel symmetric INT8 quantization,
-/// and scale-and-zero-point INT4 quantization with packed nibbles.
+//! Quantization logic for INT8 and INT4 (U4) weight parameters in Bramha.
+//!
+//! Provides high-performance, robust per-row/channel symmetric INT8 quantization,
+//! and scale-and-zero-point INT4 quantization with packed nibbles.
 
 /// Quantize f32 weights to i8 using row-wise symmetric quantization.
 pub fn quantize_to_int8(
@@ -44,7 +44,7 @@ pub fn quantize_to_int4(
     in_features: usize,
 ) -> (Vec<u8>, Vec<f32>) {
     assert!(
-        in_features % 2 == 0,
+        in_features.is_multiple_of(2),
         "in_features must be a multiple of 2 for INT4 packing"
     );
     let mut q_bytes = vec![0u8; out_features * (in_features / 2)];

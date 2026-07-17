@@ -60,15 +60,13 @@ pub async fn pull_model(model_id: &str, tensor_db: &mut TensorDB) -> Result<(), 
     // 1. Download config.json (architecture hyperparameters)
     if !entry.config_url.is_empty() {
         println!("⬇️ Downloading config.json for '{}'...", model_id);
-        if let Ok(cfg_response) = client.get(entry.config_url).send().await {
-            if cfg_response.status().is_success() {
-                if let Ok(cfg_bytes) = cfg_response.bytes().await {
+        if let Ok(cfg_response) = client.get(entry.config_url).send().await
+            && cfg_response.status().is_success()
+                && let Ok(cfg_bytes) = cfg_response.bytes().await {
                     let config_path = model_dir.join("config.json");
                     let _ = atomic_write_file(&config_path, &cfg_bytes);
                     println!("✅ Config saved to {:?}", config_path);
                 }
-            }
-        }
     }
 
     // 2. Download tokenizer.json

@@ -397,13 +397,12 @@ pub async fn delete_vectors(
     }
 
     // Update index if active
-    if deleted_count > 0 {
-        if let Some(ref mut index) = c.index {
+    if deleted_count > 0
+        && let Some(ref mut index) = c.index {
             let clusters = index.num_clusters;
             let probe = index.n_probe;
             c.rebuild_index(clusters, probe);
         }
-    }
 
     let db_clone = db.clone();
     tokio::spawn(async move {
@@ -903,11 +902,10 @@ pub async fn llm_rag(
             let mut display_text = String::new();
 
             // S3.5: Sentence-window expansion
-            if use_window {
-                if let Some(window) = chunk.metadata.get("window").and_then(|v| v.as_str()) {
+            if use_window
+                && let Some(window) = chunk.metadata.get("window").and_then(|v| v.as_str()) {
                     display_text = window.to_string();
                 }
-            }
 
             if display_text.is_empty() {
                 // Fallback to text/content or full metadata
@@ -916,7 +914,7 @@ pub async fn llm_rag(
                     .get("text")
                     .or_else(|| chunk.metadata.get("content"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or_else(|| "")
+                    .unwrap_or("")
                     .to_string();
             }
 
@@ -1184,10 +1182,8 @@ pub async fn llm_embed_batch(
 
 /// GET /api/llm/hardware - Detect available compute devices
 pub async fn llm_hardware() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let has_gpu = wgpu::Instance::new(wgpu::InstanceDescriptor::default())
-        .enumerate_adapters(wgpu::Backends::all())
-        .len()
-        > 0;
+    let has_gpu = !wgpu::Instance::new(wgpu::InstanceDescriptor::default())
+        .enumerate_adapters(wgpu::Backends::all()).is_empty();
     let mut devices = vec![
         serde_json::json!({ "id": "auto", "name": "Auto (Best Available)" }),
         serde_json::json!({ "id": "cpu", "name": "System CPU (8-Core Parallel)" }),
@@ -1232,7 +1228,7 @@ pub async fn llm_load_model(
         } else {
             // Case-insensitive / partial match fallback
             let search_name = payload.model_name.to_lowercase();
-            let last_part = search_name.split('/').last().unwrap_or(&search_name);
+            let last_part = search_name.split('/').next_back().unwrap_or(&search_name);
 
             for name in tensor_db.models.keys() {
                 let name_lower = name.to_lowercase();
@@ -1247,8 +1243,8 @@ pub async fn llm_load_model(
             }
         }
 
-        if let Some(ref name) = resolved_name {
-            if let Some(model) = tensor_db.models.get_mut(name) {
+        if let Some(ref name) = resolved_name
+            && let Some(model) = tensor_db.models.get_mut(name) {
                 model.active_device = target_device.clone();
                 let is_cpu = target_device.to_lowercase() == "cpu";
                 crate::inference::set_cpu_only(is_cpu);
@@ -1257,7 +1253,6 @@ pub async fn llm_load_model(
                     name, target_device, is_cpu
                 );
             }
-        }
     }
 
     // 2. Lock and update in model_registry
@@ -1308,11 +1303,9 @@ pub async fn llm_logs(
         .get(format!("{}/logs?since={}", SIDECAR_URL, since))
         .send()
         .await
-    {
-        if let Ok(body) = resp.json::<serde_json::Value>().await {
+        && let Ok(body) = resp.json::<serde_json::Value>().await {
             return Ok(Json(body));
         }
-    }
 
     // Retrieve native logs from InferenceLogger
     let native_logs = crate::inference::engine::InferenceLogger::global().get_logs(since);
@@ -1359,11 +1352,10 @@ pub async fn llm_logs(
 pub async fn llm_health() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let client = reqwest::Client::new();
 
-    if let Ok(resp) = client.get(format!("{}/health", SIDECAR_URL)).send().await {
-        if let Ok(body) = resp.json::<serde_json::Value>().await {
+    if let Ok(resp) = client.get(format!("{}/health", SIDECAR_URL)).send().await
+        && let Ok(body) = resp.json::<serde_json::Value>().await {
             return Ok(Json(body));
         }
-    }
 
     // Default to healthy native status
     Ok(Json(serde_json::json!({
@@ -1426,22 +1418,18 @@ fn find_safetensors_files(dir: &std::path::Path) -> std::io::Result<Vec<std::pat
             let path = entry.path();
             if path.is_dir() {
                 files.extend(find_safetensors_files(&path)?);
-            } else if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "safetensors" {
+            } else if path.is_file()
+                && let Some(ext) = path.extension()
+                    && ext == "safetensors" {
                         // Skip redundant consolidated files if splits exist, or just ingest all.
                         files.push(path);
                     }
-                }
-            }
         }
-    } else if dir.is_file() {
-        if let Some(ext) = dir.extension() {
-            if ext == "safetensors" {
+    } else if dir.is_file()
+        && let Some(ext) = dir.extension()
+            && ext == "safetensors" {
                 files.push(dir.to_path_buf());
             }
-        }
-    }
     Ok(files)
 }
 
@@ -1488,14 +1476,13 @@ pub async fn ingest_model(
     let mut current = std::path::PathBuf::new();
     for component in canonical.components() {
         current.push(component);
-        if let Ok(meta) = std::fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
+        if let Ok(meta) = std::fs::symlink_metadata(&current)
+            && meta.file_type().is_symlink() {
                 return Err((
                     axum::http::StatusCode::BAD_REQUEST,
                     "Symlinks are forbidden in ingestion paths".to_string(),
                 ));
             }
-        }
     }
 
     let task_id = std::time::SystemTime::now()

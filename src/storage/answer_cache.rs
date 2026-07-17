@@ -47,15 +47,13 @@ impl DeterministicAnswerCache {
     /// Load or initialize the cache using a custom file path
     pub fn load_from_path(path: &Path) -> Self {
         let mut entries = HashMap::new();
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(loaded) =
+        if path.exists()
+            && let Ok(content) = fs::read_to_string(path)
+                && let Ok(loaded) =
                     serde_json::from_str::<HashMap<String, CachedResponse>>(&content)
                 {
                     entries = loaded;
                 }
-            }
-        }
         Self {
             entries: Mutex::new(entries),
             cache_path: path.to_path_buf(),

@@ -1,11 +1,11 @@
-/// CPU Flash Attention Implementation
-///
-/// This module implements a block-wise O(N) memory attention mechanism
-/// for the CPU backend, replacing the O(N^2) memory footprint of naive attention.
-///
-/// It maintains an online softmax scaling factor (row max and denominator)
-/// across block computations to ensure numerical stability and exact equivalence
-/// with standard attention.
+//! CPU Flash Attention Implementation
+//!
+//! This module implements a block-wise O(N) memory attention mechanism
+//! for the CPU backend, replacing the O(N^2) memory footprint of naive attention.
+//!
+//! It maintains an online softmax scaling factor (row max and denominator)
+//! across block computations to ensure numerical stability and exact equivalence
+//! with standard attention.
 
 pub struct FlashAttentionCPU;
 

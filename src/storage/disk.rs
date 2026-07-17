@@ -31,8 +31,8 @@ pub fn load_from_file<T: DeserializeOwned>(path: &str) -> Result<T, String> {
 
     // 1.5. Resilient fallback: If it looks like JSON but has trailing garbage/corruption, attempt self-healing recovery
     let trimmed = bytes.iter().position(|&b| !b.is_ascii_whitespace());
-    if let Some(first_char_idx) = trimmed {
-        if bytes[first_char_idx] == b'{' || bytes[first_char_idx] == b'[' {
+    if let Some(first_char_idx) = trimmed
+        && (bytes[first_char_idx] == b'{' || bytes[first_char_idx] == b'[') {
             // Find the last closing brace/bracket
             let target_char = if bytes[first_char_idx] == b'{' {
                 b'}'
@@ -49,7 +49,6 @@ pub fn load_from_file<T: DeserializeOwned>(path: &str) -> Result<T, String> {
                 }
             }
         }
-    }
 
     // 2. Fallback to legacy bincode compatibility
     let config = bincode::config::standard();

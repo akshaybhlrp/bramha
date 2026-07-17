@@ -149,9 +149,9 @@ impl Collection {
         }
 
         // S3.3: Automatically index document text into lexical BM25 index on insert
-        if let Some(ref meta) = vector.metadata {
-            if let Some(text_val) = meta.get("text").or_else(|| meta.get("content")) {
-                if let Some(text_str) = text_val.as_str() {
+        if let Some(ref meta) = vector.metadata
+            && let Some(text_val) = meta.get("text").or_else(|| meta.get("content"))
+                && let Some(text_str) = text_val.as_str() {
                     if let Some(ref mut bm25) = self.bm25_index {
                         bm25.add_document(vector.id.clone(), text_str);
                     } else {
@@ -160,13 +160,11 @@ impl Collection {
                         self.bm25_index = Some(bm25);
                     }
                 }
-            }
-        }
 
         self.vectors.insert(vector.id.clone(), vector.clone());
 
-        if let Some(ref db) = self.sqlite {
-            if let Ok(conn) = db.lock() {
+        if let Some(ref db) = self.sqlite
+            && let Ok(conn) = db.lock() {
                 let meta_str = vector
                     .metadata
                     .as_ref()
@@ -177,7 +175,6 @@ impl Collection {
                     rusqlite::params![vector.id, meta_str],
                 );
             }
-        }
 
         Ok(())
     }
@@ -185,16 +182,14 @@ impl Collection {
     /// Deletes a vector by ID. Returns true if the vector existed.
     pub fn delete(&mut self, id: &str) -> bool {
         let removed = self.vectors.remove(id).is_some();
-        if removed {
-            if let Some(ref db) = self.sqlite {
-                if let Ok(conn) = db.lock() {
+        if removed
+            && let Some(ref db) = self.sqlite
+                && let Ok(conn) = db.lock() {
                     let _ = conn.execute(
                         "DELETE FROM metadata_index WHERE id = ?1",
                         rusqlite::params![id],
                     );
                 }
-            }
-        }
         removed
     }
 
@@ -219,9 +214,9 @@ impl Collection {
 
         // S3.7: Use SQL pre-filter before ANN search
         let mut allowed_ids: Option<HashSet<String>> = None;
-        if let Some(f) = filter {
-            if let Some(ref db) = self.sqlite {
-                if let Ok(conn) = db.lock() {
+        if let Some(f) = filter
+            && let Some(ref db) = self.sqlite
+                && let Ok(conn) = db.lock() {
                     let (sql_where, params_json) = f.to_sql_query();
                     let sql = format!("SELECT id FROM metadata_index WHERE {}", sql_where);
 
@@ -238,8 +233,8 @@ impl Collection {
                         .map(|s| s as &dyn rusqlite::ToSql)
                         .collect();
 
-                    if let Ok(mut stmt) = conn.prepare(&sql) {
-                        if let Ok(rows) =
+                    if let Ok(mut stmt) = conn.prepare(&sql)
+                        && let Ok(rows) =
                             stmt.query_map(&params_dyn[..], |row| row.get::<_, String>(0))
                         {
                             let mut ids = HashSet::new();
@@ -248,10 +243,7 @@ impl Collection {
                             }
                             allowed_ids = Some(ids);
                         }
-                    }
                 }
-            }
-        }
 
         // Try approximate search using the index if requested and available
         if use_index {

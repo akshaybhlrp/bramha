@@ -23,8 +23,8 @@ impl BramhaTokenizer {
             .and_then(|v| v.as_array())
             .cloned();
 
-        if let Some(added_tokens) = added_tokens_opt {
-            if let Some(vocab) = tokenizer_json
+        if let Some(added_tokens) = added_tokens_opt
+            && let Some(vocab) = tokenizer_json
                 .get_mut("model")
                 .and_then(|m| m.get_mut("vocab"))
                 .and_then(|v| v.as_object_mut())
@@ -33,14 +33,12 @@ impl BramhaTokenizer {
                     if let (Some(content), Some(id)) = (
                         token.get("content").and_then(|c| c.as_str()),
                         token.get("id"),
-                    ) {
-                        if !vocab.contains_key(content) {
+                    )
+                        && !vocab.contains_key(content) {
                             vocab.insert(content.to_string(), id.clone());
                         }
-                    }
                 }
             }
-        }
 
         let raw_fixed = serde_json::to_vec(&tokenizer_json).map_err(|e| e.to_string())?;
         let tokenizer = Tokenizer::from_bytes(&raw_fixed)
@@ -71,8 +69,8 @@ impl BramhaTokenizer {
                 let dir_name = entry.file_name().to_string_lossy().to_lowercase();
                 if dir_name.contains(&model_lower) {
                     let snapshots = entry.path().join("snapshots");
-                    if snapshots.is_dir() {
-                        if let Ok(snap_entries) = std::fs::read_dir(&snapshots) {
+                    if snapshots.is_dir()
+                        && let Ok(snap_entries) = std::fs::read_dir(&snapshots) {
                             for snap in snap_entries.flatten() {
                                 let candidate = snap.path().join("tokenizer.json");
                                 if candidate.is_file() {
@@ -80,7 +78,6 @@ impl BramhaTokenizer {
                                 }
                             }
                         }
-                    }
                 }
             }
         }
@@ -122,11 +119,10 @@ impl BramhaTokenizer {
             "BramhaTokenizer::encode called with add_special_tokens={}",
             add_special_tokens
         );
-        if add_special_tokens && !prompt.starts_with("<s>") {
-            if let Some(bos) = self.tokenizer.token_to_id("<s>") {
+        if add_special_tokens && !prompt.starts_with("<s>")
+            && let Some(bos) = self.tokenizer.token_to_id("<s>") {
                 final_ids.push(bos);
             }
-        }
 
         let mut current_pos = 0;
         let prompt_len = prompt.len();
@@ -137,8 +133,8 @@ impl BramhaTokenizer {
             let mut matched_token_id = 0;
 
             for sp_str in &special_tokens {
-                if let Some(pos) = prompt[current_pos..].find(sp_str) {
-                    if let Some(sp_id) = self.tokenizer.token_to_id(*sp_str) {
+                if let Some(pos) = prompt[current_pos..].find(sp_str)
+                    && let Some(sp_id) = self.tokenizer.token_to_id(sp_str) {
                         let absolute_pos = current_pos + pos;
                         if absolute_pos < earliest_match_pos {
                             earliest_match_pos = absolute_pos;
@@ -146,7 +142,6 @@ impl BramhaTokenizer {
                             matched_token_id = sp_id;
                         }
                     }
-                }
             }
 
             if earliest_match_pos < prompt_len {
@@ -190,10 +185,10 @@ impl BramhaTokenizer {
             .unwrap_or_else(|_| PathBuf::from("."))
             .with_file_name("tokenizer_config.json");
 
-        if config_path.is_file() {
-            if let Ok(raw) = std::fs::read(&config_path) {
-                if let Ok(config_json) = serde_json::from_slice::<serde_json::Value>(&raw) {
-                    if let Some(chat_template) =
+        if config_path.is_file()
+            && let Ok(raw) = std::fs::read(&config_path)
+                && let Ok(config_json) = serde_json::from_slice::<serde_json::Value>(&raw)
+                    && let Some(chat_template) =
                         config_json.get("chat_template").and_then(|v| v.as_str())
                     {
                         let mut env = minijinja::Environment::new();
@@ -224,9 +219,6 @@ impl BramhaTokenizer {
                             }
                         }
                     }
-                }
-            }
-        }
 
         // Fallback for missing template
         let model_name_lower = model_name.to_lowercase();

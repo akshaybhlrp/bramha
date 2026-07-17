@@ -7,13 +7,11 @@ pub fn calibrate_thresholds(model: &ModelTable) -> Vec<f32> {
     for key in model.layers.keys() {
         if key.starts_with("model.layers.") {
             let parts: Vec<&str> = key.split('.').collect();
-            if parts.len() > 2 {
-                if let Ok(layer_idx) = parts[2].parse::<usize>() {
-                    if layer_idx > max_layer {
+            if parts.len() > 2
+                && let Ok(layer_idx) = parts[2].parse::<usize>()
+                    && layer_idx > max_layer {
                         max_layer = layer_idx;
                     }
-                }
-            }
         }
     }
 

@@ -51,6 +51,12 @@ pub struct DedupIndex {
     pub bloom_cache: HashSet<String>,
 }
 
+impl Default for DedupIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DedupIndex {
     pub fn new() -> Self {
         DedupIndex {
@@ -84,7 +90,7 @@ impl DedupIndex {
         // Track which model uses this chunk
         self.model_chunks
             .entry(model_name.to_string())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(chunk_hash.clone());
 
         // Update Bloom filter
@@ -95,7 +101,7 @@ impl DedupIndex {
     pub fn is_exclusive(&self, chunk_hash: &str) -> bool {
         self.ref_counts
             .get(chunk_hash)
-            .map_or(false, |count| *count == 1)
+            .is_some_and(|count| *count == 1)
     }
 
     /// Get dedup savings statistics
@@ -119,7 +125,7 @@ impl DedupIndex {
                             .unwrap()
                             .to_string(),
                     )
-                    .map_or(false, |&count| count > 1)
+                    .is_some_and(|&count| count > 1)
             })
             .map(|loc| loc.byte_length)
             .sum::<u64>();
@@ -208,7 +214,7 @@ impl ContentAddressedStorage {
         let index_path = self.data_dir.join("dedup_index.json");
 
         let bytes = serde_json::to_vec(&*index)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         let tmp_path = self.data_dir.join("dedup_index.json.tmp");
 
@@ -242,7 +248,7 @@ impl ContentAddressedStorage {
         let mut dedup_savings = 0u64;
 
         // Chunked storage: hash each chunk and check dedup
-        let chunk_iter: Box<dyn Iterator<Item = &[f32]>> = if data.len() % CHUNK_SIZE != 0 {
+        let chunk_iter: Box<dyn Iterator<Item = &[f32]>> = if !data.len().is_multiple_of(CHUNK_SIZE) {
             Box::new(data.chunks_exact(CHUNK_SIZE).chain(std::iter::once(
                 &data[data.len() - (data.len() % CHUNK_SIZE)..],
             )))

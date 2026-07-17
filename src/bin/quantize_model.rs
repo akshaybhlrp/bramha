@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use bramha::models::quantization::quantize_to_int4;
 use bramha::storage::Database;
 use bramha::storage::storage_manifest::{CompressionFormat, LayerMetadata, ModelManifest};
@@ -183,8 +184,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     svd_rank = Some(128);
                 }
 
-                if let Some(k) = svd_rank {
-                    if out_features > k && in_features > k {
+                if let Some(k) = svd_rank
+                    && out_features > k && in_features > k {
                         print!(
                             "\r[{}/{}] SVD Factorizing (Randomized) to rank {}: '{}'...",
                             i + 1,
@@ -219,16 +220,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         target_manifest.add_layer(l_meta);
                         continue;
                     }
-                }
             }
 
             if use_differential {
                 // Parse layer index from name: "model.layers.1.mlp.down_proj.weight"
                 if let Some(rest) = name.strip_prefix("model.layers.") {
                     let parts: Vec<&str> = rest.split('.').collect();
-                    if let Some(idx_str) = parts.first() {
-                        if let Ok(idx) = idx_str.parse::<usize>() {
-                            if idx > 0 {
+                    if let Some(idx_str) = parts.first()
+                        && let Ok(idx) = idx_str.parse::<usize>()
+                            && idx > 0 {
                                 let prev_name = name.replace(
                                     &format!("model.layers.{}", idx),
                                     &format!("model.layers.{}", idx - 1),
@@ -268,8 +268,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     continue;
                                 }
                             }
-                        }
-                    }
                 }
             }
 

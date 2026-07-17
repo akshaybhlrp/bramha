@@ -56,13 +56,11 @@ impl PlannerPolicy {
     /// Load the policy from the persisted cache file, falling back cleanly to defaults if missing or invalid
     pub fn load() -> Self {
         let path = Self::get_cache_path();
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(policy) = serde_json::from_str::<Self>(&content) {
+        if path.exists()
+            && let Ok(content) = fs::read_to_string(&path)
+                && let Ok(policy) = serde_json::from_str::<Self>(&content) {
                     return policy;
                 }
-            }
-        }
         Self::default()
     }
 

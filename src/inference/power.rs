@@ -8,11 +8,10 @@ pub fn set_power_limit(val: u32) {
 }
 
 pub fn get_power_limit() -> u32 {
-    if let Ok(env_val) = std::env::var("BRAMHA_POWER_LIMIT") {
-        if let Ok(parsed) = env_val.parse::<u32>() {
+    if let Ok(env_val) = std::env::var("BRAMHA_POWER_LIMIT")
+        && let Ok(parsed) = env_val.parse::<u32>() {
             return parsed.min(100);
         }
-    }
     POWER_LIMIT.load(Ordering::SeqCst)
 }
 

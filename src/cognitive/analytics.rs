@@ -19,6 +19,12 @@ pub struct AnalyticsStore {
     db_path: PathBuf,
 }
 
+impl Default for AnalyticsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnalyticsStore {
     pub fn new() -> Self {
         let storage_dir = Path::new("storage");
@@ -109,10 +115,8 @@ impl AnalyticsStore {
             .map_err(|e| e.to_string())?;
 
         let mut traces = Vec::new();
-        for row in rows {
-            if let Ok(trace) = row {
-                traces.push(trace);
-            }
+        for trace in rows.flatten() {
+            traces.push(trace);
         }
         Ok(traces)
     }

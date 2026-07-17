@@ -31,6 +31,12 @@ pub struct ModelBuffers {
     pub max_vram_bytes: usize,
 }
 
+impl Default for ModelBuffers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelBuffers {
     pub fn new() -> Self {
         let cap = crate::inference::pipeline::get_system_resource_cap();
@@ -586,7 +592,7 @@ impl WgpuComputePlane {
         }
 
         // Allocate persistent weight buffer
-        if weight_bytes.len() == 0 {
+        if weight_bytes.is_empty() {
             panic!("weight_bytes is size 0 for {}", op_key);
         }
         let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(
@@ -599,7 +605,7 @@ impl WgpuComputePlane {
 
         // Allocate scales buffer if needed
         let scales_buffer = scales.map(|s| {
-            if s.len() == 0 {
+            if s.is_empty() {
                 panic!("scales slice is size 0 for {}", op_key);
             }
             std::sync::Arc::new(
@@ -719,7 +725,7 @@ impl WgpuComputePlane {
                 None,
             )
         } else {
-            if weight.len() == 0 {
+            if weight.is_empty() {
                 panic!("temp weight is 0");
             }
             let weight_buffer = std::sync::Arc::new(self.device.create_buffer_init(
@@ -822,7 +828,7 @@ impl WgpuComputePlane {
             compute_pass.set_pipeline(&self.pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let workgroup_count = (out_features + 255) / 256;
+            let workgroup_count = out_features.div_ceil(256);
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
@@ -999,7 +1005,7 @@ impl WgpuComputePlane {
             compute_pass.set_pipeline(&self.pipeline_int8);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let workgroup_count = (out_features + 255) / 256;
+            let workgroup_count = out_features.div_ceil(256);
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
@@ -1176,7 +1182,7 @@ impl WgpuComputePlane {
             compute_pass.set_pipeline(&self.pipeline_int4);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let workgroup_count = (out_features + 255) / 256;
+            let workgroup_count = out_features.div_ceil(256);
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
@@ -1239,8 +1245,8 @@ impl WgpuComputePlane {
         // Check if layer is blacklisted
         if let Some(l_name) = layer_name {
             let mut blacklist_guard = self.blacklist.lock().unwrap();
-            if let Some(count) = blacklist_guard.get_mut(l_name) {
-                if *count > 0 {
+            if let Some(count) = blacklist_guard.get_mut(l_name)
+                && *count > 0 {
                     *count -= 1;
                     drop(blacklist_guard);
                     if let Some(dw) = dense_weight {
@@ -1251,7 +1257,6 @@ impl WgpuComputePlane {
                         );
                     }
                 }
-            }
         }
 
         // Check if dense has already won the concurrent verification race
@@ -1274,11 +1279,10 @@ impl WgpuComputePlane {
         if let Some(sess_id) = session_id {
             // Hardcoded exclusion list of session IDs/prompt markers
             let exclusion_list = ["1337", "4242", "9999", "exclude_session_id"];
-            if exclusion_list.contains(&sess_id) {
-                if let Some(dw) = dense_weight {
+            if exclusion_list.contains(&sess_id)
+                && let Some(dw) = dense_weight {
                     return self.matvec_mul(h, dw, out_features, model_name, layer_name);
                 }
-            }
         }
 
         // Get/update session degradation state
@@ -1594,7 +1598,7 @@ impl WgpuComputePlane {
             compute_pass.set_pipeline(&self.pipeline_sparse);
             compute_pass.set_bind_group(0, &bind_group, &[]);
 
-            let workgroup_count = (out_features + 255) / 256;
+            let workgroup_count = out_features.div_ceil(256);
             compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
         }
 
@@ -1632,7 +1636,7 @@ impl WgpuComputePlane {
 
 /// Alignment-safe bitcasting/copy helper for u8/i8 bytes to u32 slice.
 fn to_u32_slice(bytes: &[u8]) -> std::borrow::Cow<'_, [u32]> {
-    if bytes.as_ptr() as usize % 4 == 0 {
+    if (bytes.as_ptr() as usize).is_multiple_of(4) {
         std::borrow::Cow::Borrowed(bytemuck::cast_slice(bytes))
     } else {
         let mut vec = vec![0u32; bytes.len() / 4];

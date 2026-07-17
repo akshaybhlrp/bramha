@@ -334,7 +334,7 @@ where
 }
 
 fn safe_cast_to_f32(bytes: &[u8]) -> std::borrow::Cow<'_, [f32]> {
-    if (bytes.as_ptr() as usize) % std::mem::align_of::<f32>() == 0 {
+    if (bytes.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
         std::borrow::Cow::Borrowed(bytemuck::cast_slice(bytes))
     } else {
         let mut vec = vec![0.0f32; bytes.len() / 4];
@@ -600,11 +600,10 @@ impl InferenceEngine {
         let spanda_healthy = spanda_engine::Session::new().health_check();
 
         let mut has_activation_view = false;
-        if let (Some(w_id), Some(b_id)) = (&workflow_id, &branch_id) {
-            if let Ok(Some(_)) = sql_store.get_activation_view(w_id, b_id) {
+        if let (Some(w_id), Some(b_id)) = (&workflow_id, &branch_id)
+            && let Ok(Some(_)) = sql_store.get_activation_view(w_id, b_id) {
                 has_activation_view = true;
             }
-        }
 
         // 3. Evaluate the optimal path via ExecutionPathOptimizer
         let decision = crate::planner::optimizer::ExecutionPathOptimizer::optimize(
@@ -623,11 +622,9 @@ impl InferenceEngine {
         InferenceLogger::global().record_log(log_msg);
 
         // 4. Handle CachedAnswer early exit
-        if decision == crate::planner::policy::PlannerDecision::CachedAnswer {
-            if let Some(completion) = cached_completion {
-                let log_msg = format!(
-                    "⚡ [Planner] Cache HIT! Returning deterministic cached response instantly."
-                );
+        if decision == crate::planner::policy::PlannerDecision::CachedAnswer
+            && let Some(completion) = cached_completion {
+                let log_msg = "⚡ [Planner] Cache HIT! Returning deterministic cached response instantly.".to_string();
                 InferenceLogger::global().record_log(log_msg);
 
                 // Log trace to SQL
@@ -650,7 +647,6 @@ impl InferenceEngine {
                     average_uncertainty_score: 0.0,
                 });
             }
-        }
 
         // 5. Configure speculation bypass dynamically
         let force_exact = decision == crate::planner::policy::PlannerDecision::ExactDecode;
@@ -677,9 +673,7 @@ impl InferenceEngine {
 
         let mut result = {
             if decision == crate::planner::policy::PlannerDecision::SpandaSparse {
-                let log_msg = format!(
-                    "🚀 [Scheduler] Routing request entirely to SPANDA engine for sparse fallback."
-                );
+                let log_msg = "🚀 [Scheduler] Routing request entirely to SPANDA engine for sparse fallback.".to_string();
                 InferenceLogger::global().record_log(log_msg);
 
                 let spanda_session = spanda_engine::Session::new();
@@ -711,9 +705,7 @@ impl InferenceEngine {
                     }
                 }
             } else if use_cpu_entirely {
-                let log_msg = format!(
-                    "📋 [Scheduler] Routing request entirely to CPU engine based on scheduler decisions."
-                );
+                let log_msg = "📋 [Scheduler] Routing request entirely to CPU engine based on scheduler decisions.".to_string();
                 InferenceLogger::global().record_log(log_msg);
                 crate::inference::cpu_engine::generate_cpu(
                     db.clone(),
@@ -724,9 +716,7 @@ impl InferenceEngine {
                 )
                 .await
             } else {
-                let log_msg = format!(
-                    "🚀 [Scheduler] Routing request entirely to WGPU GPU engine for peak hardware performance."
-                );
+                let log_msg = "🚀 [Scheduler] Routing request entirely to WGPU GPU engine for peak hardware performance.".to_string();
                 InferenceLogger::global().record_log(log_msg);
                 Self::generate_wgpu(
                     db.clone(),
@@ -815,9 +805,9 @@ impl InferenceEngine {
             } = &mut *tensor_db_write;
             let mut block_db_guard = block_db.lock().unwrap();
             if let Some(m) = models.get_mut(model_name) {
-                let _ = m.load_tensor_chunks("model.embed_tokens.weight", &mut *block_db_guard);
-                let _ = m.load_tensor_chunks("lm_head.weight", &mut *block_db_guard);
-                let _ = m.load_tensor_chunks("model.norm.weight", &mut *block_db_guard);
+                let _ = m.load_tensor_chunks("model.embed_tokens.weight", &mut block_db_guard);
+                let _ = m.load_tensor_chunks("lm_head.weight", &mut block_db_guard);
+                let _ = m.load_tensor_chunks("model.norm.weight", &mut block_db_guard);
             }
         }
 
@@ -1021,8 +1011,8 @@ impl InferenceEngine {
 
         if let (Some(w_id), Some(b_id)) = (&workflow_id, &branch_id) {
             let meta_store = crate::storage::metadata_sql::MetadataSqlStore::new();
-            if let Ok(Some(view)) = meta_store.get_activation_view(w_id, b_id) {
-                if let Ok(replay_res) =
+            if let Ok(Some(view)) = meta_store.get_activation_view(w_id, b_id)
+                && let Ok(replay_res) =
                     crate::inference::paged_kv::branch_replay::load_and_validate_branch(
                         &view, &tokens,
                     )
@@ -1031,11 +1021,10 @@ impl InferenceEngine {
                     prefix_len = replay_res.valid_length;
                     cached_entry = Some(replay_res.entry);
                 }
-            }
         }
 
-        if cached_entry.is_none() {
-            if let Some((mut p_len, mut entry)) =
+        if cached_entry.is_none()
+            && let Some((mut p_len, mut entry)) =
                 crate::inference::paged_kv::prefix_cache::find_longest_prefix(&base_path, &tokens)
             {
                 let max_allowed_prefix = if tokens.len() > 1 {
@@ -1066,7 +1055,6 @@ impl InferenceEngine {
                     cached_entry = Some(entry);
                 }
             }
-        }
 
         if let Some(entry) = cached_entry {
             for layer_idx in 0..num_layers {
@@ -1098,7 +1086,7 @@ impl InferenceEngine {
                     let end = (offset + 40).min(target.len());
                     speculated_tokens = target[offset..end].to_vec();
                 }
-            } else if tokens.len() >= ngram_size + 1 {
+            } else if tokens.len() > ngram_size {
                 let suffix = &tokens[tokens.len() - ngram_size..];
                 for i in 0..(tokens.len() - ngram_size) {
                     if &tokens[i..i + ngram_size] == suffix {
@@ -1214,7 +1202,7 @@ impl InferenceEngine {
                     } = &mut *db_write;
                     let mut block_db_guard = block_db.lock().unwrap();
                     if let Some(m) = models.get_mut(model_name) {
-                        let _ = m.load_transformer_layer_chunks(layer_idx, &mut *block_db_guard);
+                        let _ = m.load_transformer_layer_chunks(layer_idx, &mut block_db_guard);
                     }
                 }
 

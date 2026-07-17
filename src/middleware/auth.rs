@@ -26,6 +26,12 @@ pub struct AuthManager {
     keys_file: &'static str,
 }
 
+impl Default for AuthManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthManager {
     pub fn new() -> Self {
         AuthManager {
@@ -57,16 +63,15 @@ impl AuthManager {
         let keys: HashMap<String, Role> =
             serde_json::from_str(&data).unwrap_or_else(|_| HashMap::new());
 
-        if env_is_prod {
-            if keys.contains_key("admin_key")
+        if env_is_prod
+            && (keys.contains_key("admin_key")
                 || keys.contains_key("write_key")
-                || keys.contains_key("read_key")
+                || keys.contains_key("read_key"))
             {
                 panic!(
                     "CRITICAL SECURITY FAILURE: Default API keys (admin_key/write_key/read_key) are active in a production environment!"
                 );
             }
-        }
         keys
     }
 
@@ -178,13 +183,11 @@ where
 }
 
 pub fn extract_token_from_header(parts: &Parts) -> Result<String, (StatusCode, String)> {
-    if let Some(auth_header) = parts.headers.get("Authorization") {
-        if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
+    if let Some(auth_header) = parts.headers.get("Authorization")
+        && let Ok(auth_str) = auth_header.to_str()
+            && auth_str.starts_with("Bearer ") {
                 return Ok(auth_str["Bearer ".len()..].to_string());
             }
-        }
-    }
     Err((
         StatusCode::UNAUTHORIZED,
         "Unauthorized: Missing Authorization Bearer token header".to_string(),

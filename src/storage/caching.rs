@@ -125,7 +125,7 @@ impl InMemoryDatabase {
             .entries
             .get(key)
             .and_then(|e| e.ttl_secs)
-            .map_or(false, |ttl| {
+            .is_some_and(|ttl| {
                 let created = self.entries.get(key).map(|e| e.created_at).unwrap_or(0);
                 now - created >= ttl
             });
@@ -182,12 +182,11 @@ impl InMemoryDatabase {
                 let mut min_freq = u64::MAX;
                 let mut victim = None;
                 for k in &self.access_order {
-                    if let Some(entry) = self.entries.get(k) {
-                        if entry.access_count < min_freq {
+                    if let Some(entry) = self.entries.get(k)
+                        && entry.access_count < min_freq {
                             min_freq = entry.access_count;
                             victim = Some(k.clone());
                         }
-                    }
                 }
                 victim
             }
@@ -215,11 +214,10 @@ impl InMemoryDatabase {
             }
         };
 
-        if let Some(key) = victim_key {
-            if let Some(entry) = self.entries.remove(&key) {
+        if let Some(key) = victim_key
+            && let Some(entry) = self.entries.remove(&key) {
                 self.current_size = self.current_size.saturating_sub(entry.size_bytes as u64);
             }
-        }
     }
 
     /// Clear all entries.
@@ -777,12 +775,11 @@ impl EdgeCache {
             return None;
         }
 
-        if let Some(cache) = self.region_caches.get_mut(region) {
-            if let Some(entry) = cache.get(key) {
+        if let Some(cache) = self.region_caches.get_mut(region)
+            && let Some(entry) = cache.get(key) {
                 self.hits += 1;
                 return Some(&entry.value);
             }
-        }
         self.misses += 1;
         None
     }

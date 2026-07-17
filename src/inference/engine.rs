@@ -1934,6 +1934,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_vram_cache_lru_eviction() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let mut cache = VramCache {

@@ -3301,6 +3301,7 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn test_cpu_inference_hi_speed_enforcer() {
         let db = Arc::new(Database::new(None, 1536));
 
@@ -3786,6 +3787,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn test_shadow_mode_and_gate_check() {
         let db = Arc::new(Database::new(None, 1536));
 

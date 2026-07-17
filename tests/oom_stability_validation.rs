@@ -35,26 +35,21 @@ mod tests {
             use tower::Service;
             tokio::select! {
                 _ = async {
-                    loop {
-                        match listener.accept().await {
-                            Ok((stream, _addr)) => {
-                                let tower_service = server_app.clone();
-                                let io = TokioIo::new(stream);
-                                tokio::spawn(async move {
-                                    let hyper_service = hyper::service::service_fn(move |req| {
-                                        let mut tower_service = tower_service.clone();
-                                        async move {
-                                            let res = tower_service.call(req).await.unwrap();
-                                            Ok::<_, std::convert::Infallible>(res)
-                                        }
-                                    });
-                                    let _ = hyper::server::conn::http1::Builder::new()
-                                        .serve_connection(io, hyper_service)
-                                        .await;
-                                });
-                            }
-                            Err(_) => break,
-                        }
+                    while let Ok((stream, _addr)) = listener.accept().await {
+                        let tower_service = server_app.clone();
+                        let io = TokioIo::new(stream);
+                        tokio::spawn(async move {
+                            let hyper_service = hyper::service::service_fn(move |req| {
+                                let mut tower_service = tower_service.clone();
+                                async move {
+                                    let res = tower_service.call(req).await.unwrap();
+                                    Ok::<_, std::convert::Infallible>(res)
+                                }
+                            });
+                            let _ = hyper::server::conn::http1::Builder::new()
+                                .serve_connection(io, hyper_service)
+                                .await;
+                        });
                     }
                 } => {}
                 _ = shutdown_rx => {}

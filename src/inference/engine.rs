@@ -1909,7 +1909,7 @@ mod tests {
         let _guard = ENV_MUTEX.lock().unwrap();
         // Simple query
         let simple = estimate_query_complexity("hello");
-        assert!(simple >= 0.1 && simple <= 0.6);
+        assert!((0.1..=0.6).contains(&simple));
 
         // Technical query
         let technical = estimate_query_complexity(

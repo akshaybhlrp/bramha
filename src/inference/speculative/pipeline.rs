@@ -35,6 +35,6 @@ mod tests {
     #[test]
     fn test_speculative_rejection_sampling() {
         // Mock verification
-        assert!(true);
+        // Mock verification
     }
 }

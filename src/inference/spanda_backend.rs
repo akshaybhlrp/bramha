@@ -82,15 +82,13 @@ mod tests {
         ];
 
         // Mock Qwen2-0.5B greedy decode logit generation
-        let actual_logits = vec![
-            (151643, 10.45f32),
+        let actual_logits = [(151643, 10.45f32),
             (10124, 8.21f32),
             (5234, 9.77f32),
             (312, 11.02f32),
             (4212, 7.84f32),
             (374, 12.33f32),
-            (5012, 14.56f32),
-        ];
+            (5012, 14.56f32)];
 
         assert_eq!(reference_logits.len(), actual_logits.len());
         for (ref_tok, ref_val) in reference_logits {

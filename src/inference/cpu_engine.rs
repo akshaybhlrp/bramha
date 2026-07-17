@@ -3989,7 +3989,7 @@ mod generic_architecture_tests {
             .unwrap_or(1e-5);
 
         assert_eq!(rope_theta, 1000000.0);
-        assert_eq!(attention_bias, true);
+        assert!(attention_bias);
         assert_eq!(rms_norm_eps, 1e-6);
     }
 }

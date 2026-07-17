@@ -452,100 +452,6 @@ impl ModelManifest {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_layer_metadata() {
-        let mut layer = LayerMetadata::new("q_proj.weight".to_string(), vec![2048, 8192]);
-        assert_eq!(layer.num_elements, 2048 * 8192);
-        assert_eq!(layer.original_bytes, 2048 * 8192 * 4);
-        assert_eq!(layer.compression_ratio(), 1.0);
-
-        layer.stored_bytes = layer.original_bytes / 4;
-        assert_eq!(layer.compression_ratio(), 4.0);
-    }
-
-    #[test]
-    fn test_model_manifest() {
-        let mut manifest = ModelManifest::new(
-            "tinyllama".to_string(),
-            "base".to_string(),
-            22,
-            "llama".to_string(),
-            2048,
-            32,
-            8,
-            PathBuf::from("/tmp/models"),
-        );
-
-        assert_eq!(manifest.num_layers, 22);
-        assert_eq!(manifest.estimated_dram_usage(), 0);
-
-        let mut layer = LayerMetadata::new("layer_0.q_proj".to_string(), vec![2048, 8192]);
-        layer.storage_tier = StorageTier::Critical;
-        manifest.add_layer(layer);
-
-        assert_eq!(manifest.critical_count, 1);
-        assert!(manifest.estimated_dram_usage() > 0);
-    }
-
-    #[test]
-    fn test_manifest_serialization_roundtrip() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let manifest_path = temp_dir.path().join("manifest.json");
-
-        let mut manifest = ModelManifest::new(
-            "test_model".to_string(),
-            "f32".to_string(),
-            12,
-            "llama".to_string(),
-            2048,
-            32,
-            8,
-            temp_dir.path().to_path_buf(),
-        );
-
-        let mut layer = LayerMetadata::new("layer_0".to_string(), vec![1024, 1024]);
-        layer.storage_tier = StorageTier::Important;
-        layer.compression_format = CompressionFormat::Int8Linear;
-        manifest.add_layer(layer);
-
-        let json_str = serde_json::to_string(&manifest).unwrap();
-        std::fs::write(&manifest_path, &json_str).unwrap();
-
-        let loaded_json = std::fs::read_to_string(&manifest_path).unwrap();
-        let loaded_manifest: ModelManifest = serde_json::from_str(&loaded_json).unwrap();
-
-        assert_eq!(loaded_manifest.name, "test_model");
-        assert_eq!(loaded_manifest.num_layers, 12);
-        assert_eq!(loaded_manifest.important_count, 1);
-        assert_eq!(
-            loaded_manifest
-                .layers
-                .get("layer_0")
-                .unwrap()
-                .compression_format,
-            CompressionFormat::Int8Linear
-        );
-    }
-
-    #[test]
-    fn test_mock_manifest_helpers() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        write_mock_manifest(temp_dir.path(), "qwen", 32000, 2048, 32, 8, 64, 5632);
-
-        let manifest_path = temp_dir.path().join("manifest.json");
-        assert!(manifest_path.exists());
-
-        let json_str = std::fs::read_to_string(&manifest_path).unwrap();
-        let manifest: ModelManifest = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(manifest.name, "qwen");
-        assert!(manifest.layers.contains_key("model.embed_tokens.weight"));
-    }
-}
-
 pub fn write_mock_manifest(
     dir: &std::path::Path,
     name: &str,
@@ -728,4 +634,98 @@ pub fn write_mock_moe_manifest(
 
     let manifest_json = serde_json::to_string_pretty(&manifest).unwrap();
     std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_layer_metadata() {
+        let mut layer = LayerMetadata::new("q_proj.weight".to_string(), vec![2048, 8192]);
+        assert_eq!(layer.num_elements, 2048 * 8192);
+        assert_eq!(layer.original_bytes, 2048 * 8192 * 4);
+        assert_eq!(layer.compression_ratio(), 1.0);
+
+        layer.stored_bytes = layer.original_bytes / 4;
+        assert_eq!(layer.compression_ratio(), 4.0);
+    }
+
+    #[test]
+    fn test_model_manifest() {
+        let mut manifest = ModelManifest::new(
+            "tinyllama".to_string(),
+            "base".to_string(),
+            22,
+            "llama".to_string(),
+            2048,
+            32,
+            8,
+            PathBuf::from("/tmp/models"),
+        );
+
+        assert_eq!(manifest.num_layers, 22);
+        assert_eq!(manifest.estimated_dram_usage(), 0);
+
+        let mut layer = LayerMetadata::new("layer_0.q_proj".to_string(), vec![2048, 8192]);
+        layer.storage_tier = StorageTier::Critical;
+        manifest.add_layer(layer);
+
+        assert_eq!(manifest.critical_count, 1);
+        assert!(manifest.estimated_dram_usage() > 0);
+    }
+
+    #[test]
+    fn test_manifest_serialization_roundtrip() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manifest_path = temp_dir.path().join("manifest.json");
+
+        let mut manifest = ModelManifest::new(
+            "test_model".to_string(),
+            "f32".to_string(),
+            12,
+            "llama".to_string(),
+            2048,
+            32,
+            8,
+            temp_dir.path().to_path_buf(),
+        );
+
+        let mut layer = LayerMetadata::new("layer_0".to_string(), vec![1024, 1024]);
+        layer.storage_tier = StorageTier::Important;
+        layer.compression_format = CompressionFormat::Int8Linear;
+        manifest.add_layer(layer);
+
+        let json_str = serde_json::to_string(&manifest).unwrap();
+        std::fs::write(&manifest_path, &json_str).unwrap();
+
+        let loaded_json = std::fs::read_to_string(&manifest_path).unwrap();
+        let loaded_manifest: ModelManifest = serde_json::from_str(&loaded_json).unwrap();
+
+        assert_eq!(loaded_manifest.name, "test_model");
+        assert_eq!(loaded_manifest.num_layers, 12);
+        assert_eq!(loaded_manifest.important_count, 1);
+        assert_eq!(
+            loaded_manifest
+                .layers
+                .get("layer_0")
+                .unwrap()
+                .compression_format,
+            CompressionFormat::Int8Linear
+        );
+    }
+
+    #[test]
+    fn test_mock_manifest_helpers() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        write_mock_manifest(temp_dir.path(), "qwen", 32000, 2048, 32, 8, 64, 5632);
+
+        let manifest_path = temp_dir.path().join("manifest.json");
+        assert!(manifest_path.exists());
+
+        let json_str = std::fs::read_to_string(&manifest_path).unwrap();
+        let manifest: ModelManifest = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(manifest.name, "qwen");
+        assert!(manifest.layers.contains_key("model.embed_tokens.weight"));
+    }
 }

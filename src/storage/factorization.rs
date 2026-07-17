@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(b.len(), 8);
 
         // Reconstruct W_approx = A @ B
-        let mut w_approx = vec![0.0f32; 16];
+        let mut w_approx = [0.0f32; 16];
         for r_idx in 0..4 {
             for c_idx in 0..4 {
                 let mut sum = 0.0;

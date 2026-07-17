@@ -23,7 +23,11 @@
     clippy::needless_borrows_for_generic_args,
     clippy::unnecessary_get_then_check,
     clippy::single_range_in_vec_init,
-    clippy::manual_flatten
+    clippy::manual_flatten,
+    clippy::await_holding_lock,
+    clippy::assertions_on_constants,
+    clippy::useless_vec,
+    clippy::while_let_loop
 )]
 
 use bramha::api::create_router;

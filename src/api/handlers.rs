@@ -2343,7 +2343,7 @@ mod sse_tests {
         metrics.record_query(50.0);
 
         let (p50, p95, p99) = metrics.get_query_percentiles();
-        assert!(p50 >= 20.0 && p50 <= 40.0);
+        assert!((20.0..=40.0).contains(&p50));
         assert!(p95 >= 40.0);
         assert!(p99 >= 40.0);
     }

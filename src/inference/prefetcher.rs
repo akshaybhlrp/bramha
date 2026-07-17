@@ -241,9 +241,9 @@ impl Prefetcher {
                 if let Some(stats) = states.get(sess)
                     && (stats.state == DegradationState::Orange
                         || stats.state == DegradationState::Red)
-                    {
-                        return 0;
-                    }
+                {
+                    return 0;
+                }
             }
         }
         self.get_adaptive_depth()

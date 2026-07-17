@@ -172,9 +172,10 @@ impl ModelTable {
             if let crate::storage::indexing::BTreeKey::String(s) = key {
                 // Key format is "model.layers.0.input_layernorm.weight:N"
                 if let Some(idx_str) = s.split(':').next_back()
-                    && let Ok(idx) = idx_str.parse::<usize>() {
-                        hashes_with_idx.push((idx, hash.clone()));
-                    }
+                    && let Ok(idx) = idx_str.parse::<usize>()
+                {
+                    hashes_with_idx.push((idx, hash.clone()));
+                }
             }
         }
 
@@ -211,24 +212,26 @@ impl ModelTable {
             }
         }
 
-        if is_contiguous && !locations.is_empty()
-            && let Some(mmap_data) = &block_db.mmap {
-                let start = locations[0].offset as usize;
-                let end = (locations.last().unwrap().offset
-                    + locations.last().unwrap().length as u64) as usize;
+        if is_contiguous
+            && !locations.is_empty()
+            && let Some(mmap_data) = &block_db.mmap
+        {
+            let start = locations[0].offset as usize;
+            let end = (locations.last().unwrap().offset + locations.last().unwrap().length as u64)
+                as usize;
 
-                if let Some(page) = self.layers.get_mut(tensor_name) {
-                    *page = TensorPage::new_slice(
-                        tensor_name.to_string(),
-                        mmap_data.clone(),
-                        page.shape.clone(),
-                        page.dtype,
-                        start,
-                        end,
-                    );
-                }
-                return Ok(());
+            if let Some(page) = self.layers.get_mut(tensor_name) {
+                *page = TensorPage::new_slice(
+                    tensor_name.to_string(),
+                    mmap_data.clone(),
+                    page.shape.clone(),
+                    page.dtype,
+                    start,
+                    end,
+                );
             }
+            return Ok(());
+        }
 
         // Fallback to allocating buffer if non-contiguous or mmap unavailable
         // We MUST ensure 4-byte alignment for bytemuck casts later!
@@ -526,15 +529,16 @@ impl TensorDB {
         table.early_exit_thresholds = Vec::new();
 
         if manifest_path.exists()
-            && let Ok(manifest_data) = std::fs::read_to_string(&manifest_path) {
-                if let Ok(manifest) = serde_json::from_str::<ModelManifest>(&manifest_data) {
-                    table.num_experts = manifest.num_experts;
-                    table.expert_routing_top_k = manifest.expert_routing_top_k;
-                    table.manifest = Some(manifest);
-                } else {
-                    eprintln!("⚠️ Failed to parse manifest.json for model {}", model_name);
-                }
+            && let Ok(manifest_data) = std::fs::read_to_string(&manifest_path)
+        {
+            if let Ok(manifest) = serde_json::from_str::<ModelManifest>(&manifest_data) {
+                table.num_experts = manifest.num_experts;
+                table.expert_routing_top_k = manifest.expert_routing_top_k;
+                table.manifest = Some(manifest);
+            } else {
+                eprintln!("⚠️ Failed to parse manifest.json for model {}", model_name);
             }
+        }
 
         println!(
             "🔄 Registered model '{}' from disk (lazy loading enabled)",
@@ -769,111 +773,114 @@ impl TensorDB {
 
             // Hydrate expert map if it's an MoE model
             if let (Some(num_experts), Some(chunk_index)) = (model.num_experts, &model.chunk_index)
-                && num_experts > 0 {
-                    let num_layers = model
-                        .layers
-                        .keys()
-                        .filter(|k| {
-                            k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight")
-                        })
-                        .count();
+                && num_experts > 0
+            {
+                let num_layers = model
+                    .layers
+                    .keys()
+                    .filter(|k| {
+                        k.starts_with("model.layers.") && k.ends_with(".input_layernorm.weight")
+                    })
+                    .count();
 
-                    let mut expert_map: Vec<Vec<[Option<TensorPage>; 6]>> =
-                        Vec::with_capacity(num_layers);
-                    for _ in 0..num_layers {
-                        let mut layer_experts = Vec::with_capacity(num_experts);
-                        for _ in 0..num_experts {
-                            layer_experts.push([None, None, None, None, None, None]);
-                        }
-                        expert_map.push(layer_experts);
+                let mut expert_map: Vec<Vec<[Option<TensorPage>; 6]>> =
+                    Vec::with_capacity(num_layers);
+                for _ in 0..num_layers {
+                    let mut layer_experts = Vec::with_capacity(num_experts);
+                    for _ in 0..num_experts {
+                        layer_experts.push([None, None, None, None, None, None]);
                     }
-                    let block_db = self.block_db.lock().unwrap();
+                    expert_map.push(layer_experts);
+                }
+                let block_db = self.block_db.lock().unwrap();
 
-                    for layer_idx in 0..num_layers {
-                        for expert_idx in 0..num_experts {
-                            let keys = [
-                                format!(
-                                    "model.layers.{}.mlp.experts.{}.gate_proj.weight",
-                                    layer_idx, expert_idx
-                                ),
-                                format!(
-                                    "model.layers.{}.mlp.experts.{}.gate_proj.weight.scale",
-                                    layer_idx, expert_idx
-                                ),
-                                format!(
-                                    "model.layers.{}.mlp.experts.{}.up_proj.weight",
-                                    layer_idx, expert_idx
-                                ),
-                                format!(
-                                    "model.layers.{}.mlp.experts.{}.up_proj.weight.scale",
-                                    layer_idx, expert_idx
-                                ),
-                                format!(
-                                    "model.layers.{}.mlp.experts.{}.down_proj.weight",
-                                    layer_idx, expert_idx
-                                ),
-                                format!(
-                                    "model.layers.{}.mlp.experts.{}.down_proj.weight.scale",
-                                    layer_idx, expert_idx
-                                ),
-                            ];
-                            for (t_idx, key) in keys.iter().enumerate() {
-                                let prefix = format!("{}:", key);
-                                let mut hashes_with_idx = Vec::new();
-                                for (b_key, hash) in chunk_index.prefix_scan_with_keys(&prefix) {
-                                    if let crate::storage::indexing::BTreeKey::String(s) = b_key
-                                        && let Some(idx_str) = s.split(':').next_back()
-                                            && let Ok(idx) = idx_str.parse::<usize>() {
-                                                hashes_with_idx.push((idx, hash.clone()));
-                                            }
+                for layer_idx in 0..num_layers {
+                    for expert_idx in 0..num_experts {
+                        let keys = [
+                            format!(
+                                "model.layers.{}.mlp.experts.{}.gate_proj.weight",
+                                layer_idx, expert_idx
+                            ),
+                            format!(
+                                "model.layers.{}.mlp.experts.{}.gate_proj.weight.scale",
+                                layer_idx, expert_idx
+                            ),
+                            format!(
+                                "model.layers.{}.mlp.experts.{}.up_proj.weight",
+                                layer_idx, expert_idx
+                            ),
+                            format!(
+                                "model.layers.{}.mlp.experts.{}.up_proj.weight.scale",
+                                layer_idx, expert_idx
+                            ),
+                            format!(
+                                "model.layers.{}.mlp.experts.{}.down_proj.weight",
+                                layer_idx, expert_idx
+                            ),
+                            format!(
+                                "model.layers.{}.mlp.experts.{}.down_proj.weight.scale",
+                                layer_idx, expert_idx
+                            ),
+                        ];
+                        for (t_idx, key) in keys.iter().enumerate() {
+                            let prefix = format!("{}:", key);
+                            let mut hashes_with_idx = Vec::new();
+                            for (b_key, hash) in chunk_index.prefix_scan_with_keys(&prefix) {
+                                if let crate::storage::indexing::BTreeKey::String(s) = b_key
+                                    && let Some(idx_str) = s.split(':').next_back()
+                                    && let Ok(idx) = idx_str.parse::<usize>()
+                                {
+                                    hashes_with_idx.push((idx, hash.clone()));
                                 }
-                                hashes_with_idx.sort_by_key(|(idx, _)| *idx);
-                                let mut locations = Vec::new();
-                                for (_idx, hash) in hashes_with_idx {
-                                    if let Some(loc) = block_db.get_block_location(&hash) {
-                                        locations.push(loc);
+                            }
+                            hashes_with_idx.sort_by_key(|(idx, _)| *idx);
+                            let mut locations = Vec::new();
+                            for (_idx, hash) in hashes_with_idx {
+                                if let Some(loc) = block_db.get_block_location(&hash) {
+                                    locations.push(loc);
+                                }
+                            }
+                            let mut is_aligned = true;
+                            if locations.is_empty() {
+                                is_aligned = false;
+                            } else if locations[0].offset % 4 != 0 {
+                                is_aligned = false;
+                            } else {
+                                for i in 0..locations.len().saturating_sub(1) {
+                                    if locations[i].offset + locations[i].length as u64
+                                        != locations[i + 1].offset
+                                    {
+                                        is_aligned = false;
+                                        break;
                                     }
                                 }
-                                let mut is_aligned = true;
-                                if locations.is_empty() {
-                                    is_aligned = false;
-                                } else if locations[0].offset % 4 != 0 {
-                                    is_aligned = false;
-                                } else {
-                                    for i in 0..locations.len().saturating_sub(1) {
-                                        if locations[i].offset + locations[i].length as u64
-                                            != locations[i + 1].offset
-                                        {
-                                            is_aligned = false;
-                                            break;
-                                        }
-                                    }
-                                }
+                            }
 
-                                if is_aligned
-                                    && let Some(template) = model.layers.get(key)
-                                        && let Some(mmap_data) = &block_db.mmap {
-                                            expert_map[layer_idx][expert_idx][t_idx] =
-                                                Some(TensorPage::new_slice(
-                                                    key.clone(),
-                                                    mmap_data.clone(),
-                                                    template.shape.clone(),
-                                                    template.dtype,
-                                                    locations[0].offset as usize,
-                                                    (locations.last().unwrap().offset
-                                                        + locations.last().unwrap().length as u64)
-                                                        as usize,
-                                                ));
-                                        }
+                            if is_aligned
+                                && let Some(template) = model.layers.get(key)
+                                && let Some(mmap_data) = &block_db.mmap
+                            {
+                                expert_map[layer_idx][expert_idx][t_idx] =
+                                    Some(TensorPage::new_slice(
+                                        key.clone(),
+                                        mmap_data.clone(),
+                                        template.shape.clone(),
+                                        template.dtype,
+                                        locations[0].offset as usize,
+                                        (locations.last().unwrap().offset
+                                            + locations.last().unwrap().length as u64)
+                                            as usize,
+                                    ));
                             }
                         }
                     }
-                    model.expert_map = Some(expert_map);
-                    println!(
-                        "🔄 Hydrated Static MoE Map for {} layers, {} experts each",
-                        num_layers, num_experts
-                    );
                 }
+                model.expert_map = Some(expert_map);
+                println!(
+                    "🔄 Hydrated Static MoE Map for {} layers, {} experts each",
+                    num_layers, num_experts
+                );
+            }
         }
 
         Ok(())

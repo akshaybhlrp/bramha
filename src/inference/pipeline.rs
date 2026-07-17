@@ -114,11 +114,13 @@ pub fn get_system_ram_bytes() -> u64 {
                     let memory_max_path = format!("/sys/fs/cgroup{}/memory.max", cg_path);
                     if let Ok(max_str) = std::fs::read_to_string(&memory_max_path) {
                         let max_trimmed = max_str.trim();
-                        if max_trimmed != "max" && !max_trimmed.is_empty()
+                        if max_trimmed != "max"
+                            && !max_trimmed.is_empty()
                             && let Ok(limit) = max_trimmed.parse::<u64>()
-                                && limit > 0 {
-                                    physical_ram = physical_ram.min(limit);
-                                }
+                            && limit > 0
+                        {
+                            physical_ram = physical_ram.min(limit);
+                        }
                     }
                 }
             }
@@ -127,22 +129,25 @@ pub fn get_system_ram_bytes() -> u64 {
         // Try reading cgroup v2 root limit
         if let Ok(max_str) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
             let max_trimmed = max_str.trim();
-            if max_trimmed != "max" && !max_trimmed.is_empty()
+            if max_trimmed != "max"
+                && !max_trimmed.is_empty()
                 && let Ok(limit) = max_trimmed.parse::<u64>()
-                    && limit > 0 {
-                        physical_ram = physical_ram.min(limit);
-                    }
+                && limit > 0
+            {
+                physical_ram = physical_ram.min(limit);
+            }
         }
 
         // Try reading cgroup v1 limit
         if let Ok(limit_str) =
             std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes")
-            && let Ok(limit) = limit_str.trim().parse::<u64>() {
-                // A value of 9223372036854771712 or similar means unlimited in cgroup v1
-                if limit > 0 && limit < 9000000000000000000 {
-                    physical_ram = physical_ram.min(limit);
-                }
+            && let Ok(limit) = limit_str.trim().parse::<u64>()
+        {
+            // A value of 9223372036854771712 or similar means unlimited in cgroup v1
+            if limit > 0 && limit < 9000000000000000000 {
+                physical_ram = physical_ram.min(limit);
             }
+        }
     }
 
     physical_ram

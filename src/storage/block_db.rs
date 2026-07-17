@@ -100,8 +100,8 @@ impl BlockDB {
 
     pub fn save_index(&self) -> std::io::Result<()> {
         let index_path = self.base_dir.join("block_index.json");
-        let data = serde_json::to_string_pretty(&self.index)
-            .map_err(|e| std::io::Error::other(e))?;
+        let data =
+            serde_json::to_string_pretty(&self.index).map_err(|e| std::io::Error::other(e))?;
         std::fs::write(index_path, data)
     }
 }

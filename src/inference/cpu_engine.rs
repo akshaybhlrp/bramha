@@ -395,60 +395,61 @@ fn matvec_mul(
 
             if scheduler.route_op(tensor_size, "gemv")
                 == crate::planner::scheduler::BackendTarget::Gpu
-                && let Some(plane) = crate::compute::wgpu_backend::get_wgpu_plane() {
-                    match weight {
-                        WeightTensor::Float(w) => {
-                            match plane.matvec_mul(h, w, out_features, name, layer_name) {
-                                Ok(gpu_out) => return gpu_out,
-                                Err(e) => {
-                                    eprintln!(
-                                        "⚠️ [WGPU] GPU execution error: {}. Falling back to CPU SIMD...",
-                                        e
-                                    );
-                                }
+                && let Some(plane) = crate::compute::wgpu_backend::get_wgpu_plane()
+            {
+                match weight {
+                    WeightTensor::Float(w) => {
+                        match plane.matvec_mul(h, w, out_features, name, layer_name) {
+                            Ok(gpu_out) => return gpu_out,
+                            Err(e) => {
+                                eprintln!(
+                                    "⚠️ [WGPU] GPU execution error: {}. Falling back to CPU SIMD...",
+                                    e
+                                );
                             }
-                        }
-                        WeightTensor::QuantizedI8 { q_weight, scales } => {
-                            match plane.matvec_mul_int8(
-                                h,
-                                q_weight,
-                                scales,
-                                out_features,
-                                name,
-                                layer_name,
-                            ) {
-                                Ok(gpu_out) => return gpu_out,
-                                Err(e) => {
-                                    eprintln!(
-                                        "⚠️ [WGPU] GPU execution error (INT8): {}. Falling back to CPU SIMD...",
-                                        e
-                                    );
-                                }
-                            }
-                        }
-                        WeightTensor::QuantizedU4 { q_weight, scales } => {
-                            match plane.matvec_mul_int4(
-                                h,
-                                q_weight,
-                                scales,
-                                out_features,
-                                name,
-                                layer_name,
-                            ) {
-                                Ok(gpu_out) => return gpu_out,
-                                Err(e) => {
-                                    eprintln!(
-                                        "⚠️ [WGPU] GPU execution error (INT4): {}. Falling back to CPU SIMD...",
-                                        e
-                                    );
-                                }
-                            }
-                        }
-                        WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
-                            unimplemented!("SVD not implemented for this operation")
                         }
                     }
+                    WeightTensor::QuantizedI8 { q_weight, scales } => {
+                        match plane.matvec_mul_int8(
+                            h,
+                            q_weight,
+                            scales,
+                            out_features,
+                            name,
+                            layer_name,
+                        ) {
+                            Ok(gpu_out) => return gpu_out,
+                            Err(e) => {
+                                eprintln!(
+                                    "⚠️ [WGPU] GPU execution error (INT8): {}. Falling back to CPU SIMD...",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    WeightTensor::QuantizedU4 { q_weight, scales } => {
+                        match plane.matvec_mul_int4(
+                            h,
+                            q_weight,
+                            scales,
+                            out_features,
+                            name,
+                            layer_name,
+                        ) {
+                            Ok(gpu_out) => return gpu_out,
+                            Err(e) => {
+                                eprintln!(
+                                    "⚠️ [WGPU] GPU execution error (INT4): {}. Falling back to CPU SIMD...",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
+                        unimplemented!("SVD not implemented for this operation")
+                    }
                 }
+            }
         }
     }
 
@@ -1798,17 +1799,15 @@ async fn run_mlp_into(
                 let mut fast_path = false;
                 let mut pages = None;
                 if let Some(m) = guard.models.get(model_name)
-                    && let Some(expert_map) = &m.expert_map {
-                        hydrated = true;
-                        let page_opts = &expert_map[layer_idx][expert_idx];
-                        if page_opts[0].is_some()
-                            && page_opts[2].is_some()
-                            && page_opts[4].is_some()
-                        {
-                            fast_path = true;
-                            pages = Some(page_opts.clone());
-                        }
+                    && let Some(expert_map) = &m.expert_map
+                {
+                    hydrated = true;
+                    let page_opts = &expert_map[layer_idx][expert_idx];
+                    if page_opts[0].is_some() && page_opts[2].is_some() && page_opts[4].is_some() {
+                        fast_path = true;
+                        pages = Some(page_opts.clone());
                     }
+                }
                 (hydrated, fast_path, pages)
             };
 
@@ -1854,8 +1853,7 @@ async fn run_mlp_into(
                         if let Some(m) = models.get_mut(model_name) {
                             m.load_tensor_chunks(&gate_name, &mut block_db_guard)
                                 .unwrap();
-                            m.load_tensor_chunks(&up_name, &mut block_db_guard)
-                                .unwrap();
+                            m.load_tensor_chunks(&up_name, &mut block_db_guard).unwrap();
                             m.load_tensor_chunks(&down_name, &mut block_db_guard)
                                 .unwrap();
                         }
@@ -1928,23 +1926,24 @@ async fn run_mlp_into(
             if !is_hydrated {
                 let mut db_write = db.tensor_db.write().await;
                 if let Some(m) = db_write.models.get_mut(model_name)
-                    && m.expert_map.is_none() {
-                        let gate_name = format!(
-                            "model.layers.{}.mlp.experts.{}.gate_proj.weight",
-                            layer_idx, expert_idx
-                        );
-                        let up_name = format!(
-                            "model.layers.{}.mlp.experts.{}.up_proj.weight",
-                            layer_idx, expert_idx
-                        );
-                        let down_name = format!(
-                            "model.layers.{}.mlp.experts.{}.down_proj.weight",
-                            layer_idx, expert_idx
-                        );
-                        m.unload_tensor_chunks(&gate_name);
-                        m.unload_tensor_chunks(&up_name);
-                        m.unload_tensor_chunks(&down_name);
-                    }
+                    && m.expert_map.is_none()
+                {
+                    let gate_name = format!(
+                        "model.layers.{}.mlp.experts.{}.gate_proj.weight",
+                        layer_idx, expert_idx
+                    );
+                    let up_name = format!(
+                        "model.layers.{}.mlp.experts.{}.up_proj.weight",
+                        layer_idx, expert_idx
+                    );
+                    let down_name = format!(
+                        "model.layers.{}.mlp.experts.{}.down_proj.weight",
+                        layer_idx, expert_idx
+                    );
+                    m.unload_tensor_chunks(&gate_name);
+                    m.unload_tensor_chunks(&up_name);
+                    m.unload_tensor_chunks(&down_name);
+                }
             }
         }
     } else {

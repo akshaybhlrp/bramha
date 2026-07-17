@@ -1246,17 +1246,18 @@ impl WgpuComputePlane {
         if let Some(l_name) = layer_name {
             let mut blacklist_guard = self.blacklist.lock().unwrap();
             if let Some(count) = blacklist_guard.get_mut(l_name)
-                && *count > 0 {
-                    *count -= 1;
-                    drop(blacklist_guard);
-                    if let Some(dw) = dense_weight {
-                        return self.matvec_mul(h, dw, out_features, model_name, layer_name);
-                    } else {
-                        return Err(
-                            "Layer blacklisted and no dense fallback weight provided".to_string()
-                        );
-                    }
+                && *count > 0
+            {
+                *count -= 1;
+                drop(blacklist_guard);
+                if let Some(dw) = dense_weight {
+                    return self.matvec_mul(h, dw, out_features, model_name, layer_name);
+                } else {
+                    return Err(
+                        "Layer blacklisted and no dense fallback weight provided".to_string()
+                    );
                 }
+            }
         }
 
         // Check if dense has already won the concurrent verification race
@@ -1280,9 +1281,10 @@ impl WgpuComputePlane {
             // Hardcoded exclusion list of session IDs/prompt markers
             let exclusion_list = ["1337", "4242", "9999", "exclude_session_id"];
             if exclusion_list.contains(&sess_id)
-                && let Some(dw) = dense_weight {
-                    return self.matvec_mul(h, dw, out_features, model_name, layer_name);
-                }
+                && let Some(dw) = dense_weight
+            {
+                return self.matvec_mul(h, dw, out_features, model_name, layer_name);
+            }
         }
 
         // Get/update session degradation state

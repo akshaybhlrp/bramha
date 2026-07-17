@@ -32,9 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize Multi-Tier Storage with custom small sizes for simulation
     println!("🟡 Initializing Multi-Tier Storage Manager...");
     let config = TierConfig {
-        hot_max_bytes: 10 * 1024 * 1024, // 10 MB limit for DRAM simulation
+        hot_max_bytes: 10 * 1024 * 1024,  // 10 MB limit for DRAM simulation
         warm_max_bytes: 50 * 1024 * 1024, // 50 MB limit for SSD simulation
-        promotion_threshold: 2, // Promote on second access
+        promotion_threshold: 2,           // Promote on second access
         ..TierConfig::default()
     };
 

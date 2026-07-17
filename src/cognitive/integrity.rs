@@ -43,35 +43,35 @@ impl IntegrityCenter {
 
         let collections_dir = self.storage_dir.join("collections");
         if collections_dir.exists()
-            && let Ok(entries) = fs::read_dir(&collections_dir) {
-                for entry in entries {
-                    if let Ok(dir_entry) = entry {
-                        let path = dir_entry.path();
-                        if path.is_file() {
-                            let filename = dir_entry.file_name().to_string_lossy().to_string();
-                            total_shards_scanned += 1;
+            && let Ok(entries) = fs::read_dir(&collections_dir)
+        {
+            for entry in entries {
+                if let Ok(dir_entry) = entry {
+                    let path = dir_entry.path();
+                    if path.is_file() {
+                        let filename = dir_entry.file_name().to_string_lossy().to_string();
+                        total_shards_scanned += 1;
 
-                            // Calculate dummy checksum for speed, or actual SHA256 simulation
-                            if let Ok(data) = fs::read(&path) {
-                                // Calculate actual SHA256 hash using sha2 dependency
-                                let mut hasher = Sha256::new();
-                                hasher.update(&data);
-                                let checksum = format!("{:x}", hasher.finalize());
-                                shard_checksums.insert(filename.clone(), checksum);
+                        // Calculate dummy checksum for speed, or actual SHA256 simulation
+                        if let Ok(data) = fs::read(&path) {
+                            // Calculate actual SHA256 hash using sha2 dependency
+                            let mut hasher = Sha256::new();
+                            hasher.update(&data);
+                            let checksum = format!("{:x}", hasher.finalize());
+                            shard_checksums.insert(filename.clone(), checksum);
 
-                                // Check if corrupted/empty
-                                if data.is_empty() {
-                                    degraded_collections.push(filename.clone());
-                                }
-                            } else {
-                                system_errors
-                                    .push(format!("Failed to read shard file: {}", filename));
-                                degraded_collections.push(filename);
+                            // Check if corrupted/empty
+                            if data.is_empty() {
+                                degraded_collections.push(filename.clone());
                             }
+                        } else {
+                            system_errors.push(format!("Failed to read shard file: {}", filename));
+                            degraded_collections.push(filename);
                         }
                     }
                 }
             }
+        }
 
         // WAL replay health check
         let wal_path = self.storage_dir.join("wal.log");
@@ -86,23 +86,24 @@ impl IntegrityCenter {
         // Check for orphaned indices: e.g. .index files without matching db entries
         let indices_dir = self.storage_dir.join("indices");
         if indices_dir.exists()
-            && let Ok(entries) = fs::read_dir(&indices_dir) {
-                for entry in entries {
-                    if let Ok(dir_entry) = entry {
-                        let path = dir_entry.path();
-                        if path.extension().and_then(|s| s.to_str()) == Some("index") {
-                            let filename = dir_entry.file_name().to_string_lossy().to_string();
-                            let base_name = path.file_stem().unwrap().to_string_lossy().to_string();
+            && let Ok(entries) = fs::read_dir(&indices_dir)
+        {
+            for entry in entries {
+                if let Ok(dir_entry) = entry {
+                    let path = dir_entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("index") {
+                        let filename = dir_entry.file_name().to_string_lossy().to_string();
+                        let base_name = path.file_stem().unwrap().to_string_lossy().to_string();
 
-                            // If index exists but no matching database file is in collections, it is an orphan!
-                            let db_path = collections_dir.join(format!("{}.db", base_name));
-                            if !db_path.exists() {
-                                orphaned_indices.push(filename);
-                            }
+                        // If index exists but no matching database file is in collections, it is an orphan!
+                        let db_path = collections_dir.join(format!("{}.db", base_name));
+                        if !db_path.exists() {
+                            orphaned_indices.push(filename);
                         }
                     }
                 }
             }
+        }
 
         IntegrityReport {
             shard_checksums,

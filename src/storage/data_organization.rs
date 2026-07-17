@@ -141,9 +141,10 @@ impl PartitionManager {
                 };
                 for partition in &self.partitions {
                     if let Some(list_part) = partitions.iter().find(|lp| lp.name == partition.name)
-                        && list_part.values.iter().any(|v| v == key_str) {
-                            return Some(partition);
-                        }
+                        && list_part.values.iter().any(|v| v == key_str)
+                    {
+                        return Some(partition);
+                    }
                 }
                 None
             }

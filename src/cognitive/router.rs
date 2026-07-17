@@ -18,17 +18,18 @@ impl ModelRouter {
     ) -> (RouteProfile, String) {
         // Step 1: Query benchmark history to check for SLA breaches
         if let Some(store) = analytics
-            && let Ok(avg_latency) = store.get_average_latency_ms() {
-                // If historical latency exceeds our 200.0ms SLA target, force FastPath routing
-                // to maintain low-latency responsiveness.
-                if avg_latency > 200.0 {
-                    let reason = format!(
-                        "Benchmark SLA breached ({:.2}ms > 200.0ms) - dynamically routing to FastPath variant",
-                        avg_latency
-                    );
-                    return (RouteProfile::FastPath, reason);
-                }
+            && let Ok(avg_latency) = store.get_average_latency_ms()
+        {
+            // If historical latency exceeds our 200.0ms SLA target, force FastPath routing
+            // to maintain low-latency responsiveness.
+            if avg_latency > 200.0 {
+                let reason = format!(
+                    "Benchmark SLA breached ({:.2}ms > 200.0ms) - dynamically routing to FastPath variant",
+                    avg_latency
+                );
+                return (RouteProfile::FastPath, reason);
             }
+        }
 
         let prompt_lower = prompt.to_lowercase();
 

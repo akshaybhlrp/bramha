@@ -30,11 +30,14 @@ impl ComputeNode for BramhaComputeNode {
         request: Request<LayerExecutionRequest>,
     ) -> Result<Response<LayerExecutionResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Mock layer execution: we just return the input tensor for now to simulate the handoff.
         // Integration with wgpu_backend.rs and tensor_db.rs will come later.
-        println!("🚀 [Hyperscale] Received layer handoff execution request for model: {}, layer: {}", req.model_name, req.layer_name);
-        
+        println!(
+            "🚀 [Hyperscale] Received layer handoff execution request for model: {}, layer: {}",
+            req.model_name, req.layer_name
+        );
+
         let response = LayerExecutionResponse {
             output_tensor: req.input_tensor,
             success: true,
@@ -48,12 +51,13 @@ impl ComputeNode for BramhaComputeNode {
         request: Request<GossipRequest>,
     ) -> Result<Response<GossipResponse>, Status> {
         let req = request.into_inner();
-        println!("📡 [Hyperscale] Received gossip payload from node {}", req.node_id);
-        
+        println!(
+            "📡 [Hyperscale] Received gossip payload from node {}",
+            req.node_id
+        );
+
         // Mock semantic memory cache update
-        let response = GossipResponse {
-            accepted: true,
-        };
+        let response = GossipResponse { accepted: true };
         Ok(Response::new(response))
     }
 }

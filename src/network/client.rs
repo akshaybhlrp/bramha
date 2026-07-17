@@ -34,11 +34,11 @@ impl RemoteBackend {
         });
 
         let response = self.client.execute_layer(request).await?.into_inner();
-        
+
         if !response.success {
             return Err(format!("Remote execution failed: {}", response.error_message).into());
         }
-        
+
         Ok(response.output_tensor)
     }
 }

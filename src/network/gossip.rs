@@ -1,8 +1,8 @@
-use crate::network::proto::compute_node_client::ComputeNodeClient;
 use crate::network::proto::GossipRequest;
-use tonic::transport::Channel;
+use crate::network::proto::compute_node_client::ComputeNodeClient;
 use std::time::Duration;
 use tokio::time;
+use tonic::transport::Channel;
 
 /// A simple Gossip Worker that broadcasts semantic memory updates to known peers.
 pub struct GossipWorker {

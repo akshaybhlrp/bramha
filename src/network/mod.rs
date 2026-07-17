@@ -1,6 +1,6 @@
-pub mod server;
 pub mod client;
 pub mod gossip;
+pub mod server;
 
 // Generated protobuf code
 pub mod proto {

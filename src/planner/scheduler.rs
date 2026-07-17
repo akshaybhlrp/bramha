@@ -9,6 +9,12 @@ pub struct HeterogeneousScheduler {
     force_cpu: bool,
 }
 
+impl Default for HeterogeneousScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HeterogeneousScheduler {
     pub fn new() -> Self {
         // Step 1: Identify if a valid wgpu adapter exists

@@ -16,6 +16,12 @@ pub struct Prefetcher {
     successful_prefetches: AtomicUsize,
 }
 
+impl Default for Prefetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Prefetcher {
     pub fn new() -> Self {
         #[cfg(feature = "prefetch")]
@@ -232,13 +238,12 @@ impl Prefetcher {
         {
             if let (Some(sess), Some(plane)) = (session_id, compute_plane) {
                 let states = plane.session_states.lock().unwrap();
-                if let Some(stats) = states.get(sess) {
-                    if stats.state == DegradationState::Orange
-                        || stats.state == DegradationState::Red
+                if let Some(stats) = states.get(sess)
+                    && (stats.state == DegradationState::Orange
+                        || stats.state == DegradationState::Red)
                     {
                         return 0;
                     }
-                }
             }
         }
         self.get_adaptive_depth()

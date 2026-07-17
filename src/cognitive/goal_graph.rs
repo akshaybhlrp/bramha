@@ -165,7 +165,7 @@ impl GoalGraph {
         for task in &self.tasks {
             if task.status == TaskStatus::Completed && !task.result.is_empty() {
                 final_context.push_str(&task.result);
-                final_context.push_str("\n");
+                final_context.push('\n');
             }
         }
         final_context

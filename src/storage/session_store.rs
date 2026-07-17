@@ -24,6 +24,12 @@ pub struct SessionStore {
     file_path: PathBuf,
 }
 
+impl Default for SessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionStore {
     pub fn new() -> Self {
         let storage_dir = Path::new("storage");

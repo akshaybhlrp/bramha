@@ -62,11 +62,10 @@ impl RerankCache {
 
     fn insert(&mut self, key: String, score: f32) {
         if !self.map.contains_key(&key) {
-            if self.map.len() >= self.max_size {
-                if let Some(old_key) = self.order.pop_front() {
+            if self.map.len() >= self.max_size
+                && let Some(old_key) = self.order.pop_front() {
                     self.map.remove(&old_key);
                 }
-            }
             self.map.insert(key.clone(), score);
             self.order.push_back(key);
         }
@@ -166,11 +165,10 @@ impl Reranker {
     /// Computes high-fidelity relevance score for a given query and document pair
     pub fn compute_score(&self, query: &str, document: &str) -> Result<f32, String> {
         let cache_key = format!("{}|||{}", query, document);
-        if let Ok(cache) = self.cache.lock() {
-            if let Some(score) = cache.get(&cache_key) {
+        if let Ok(cache) = self.cache.lock()
+            && let Some(score) = cache.get(&cache_key) {
                 return Ok(score);
             }
-        }
 
         type B = Wgpu;
         let device = &self.device;

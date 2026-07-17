@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
 
-pub const CHUNK_SIZE_BYTES: usize = 1 * 1024 * 1024; // 1MB
+pub const CHUNK_SIZE_BYTES: usize = 1024 * 1024; // 1MB
 
 pub struct Chunk {
     pub hash: String,

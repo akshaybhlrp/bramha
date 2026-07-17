@@ -97,7 +97,7 @@ impl HnswIndex {
     ) -> Self {
         let mut index = HnswIndex::new(m, ef_construction, ef_search);
 
-        for (id, _) in &collection.vectors {
+        for id in collection.vectors.keys() {
             // Generate exponential level assignment
             let r: f64 = rand::random();
             let level = (-r.ln() * index.level_mult).floor() as usize;
@@ -337,11 +337,10 @@ impl HnswIndex {
         // Filter and map candidates to SearchResult
         let mut results = Vec::new();
         for candidate in candidates {
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&candidate.id) {
+            if let Some(allowed) = allowed_ids
+                && !allowed.contains(&candidate.id) {
                     continue;
                 }
-            }
 
             let v = collection.vectors.get(&candidate.id).unwrap();
             results.push(SearchResult {

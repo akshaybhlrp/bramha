@@ -9,6 +9,12 @@ pub struct EvidenceMap {
 
 pub struct EvidenceMapper;
 
+impl Default for EvidenceMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvidenceMapper {
     pub fn new() -> Self {
         EvidenceMapper
@@ -57,7 +63,7 @@ impl EvidenceMapper {
     }
 
     fn split_into_sentences<'a>(&self, text: &'a str) -> Vec<&'a str> {
-        text.split(|c| c == '.' || c == '?' || c == '!')
+        text.split(['.', '?', '!'])
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect()

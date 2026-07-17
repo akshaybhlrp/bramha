@@ -265,7 +265,7 @@ impl QueryOptimizer {
                 total_rows.ln() * 10.0,
                 1.0,
                 (k * 768 * 4) as f64,
-                (total_rows.ln() * 0.5) as f64,
+                total_rows.ln() * 0.5,
             );
             (steps, cost)
         } else if has_ivf {
@@ -1064,7 +1064,7 @@ impl ConnectionPoolManager {
     pub fn borrow(&mut self, pool_name: &str) -> Result<usize, PoolError> {
         self.pools
             .get_mut(pool_name)
-            .ok_or_else(|| PoolError::ConnectionNotFound { connection_id: 0 })
+            .ok_or(PoolError::ConnectionNotFound { connection_id: 0 })
             .and_then(|pool| pool.borrow())
     }
 
@@ -1072,7 +1072,7 @@ impl ConnectionPoolManager {
     pub fn release(&mut self, pool_name: &str, conn_id: usize) -> Result<(), PoolError> {
         self.pools
             .get_mut(pool_name)
-            .ok_or_else(|| PoolError::ConnectionNotFound {
+            .ok_or(PoolError::ConnectionNotFound {
                 connection_id: conn_id,
             })
             .and_then(|pool| pool.release(conn_id))

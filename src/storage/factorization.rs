@@ -30,7 +30,7 @@ pub fn randomized_svd(
     // 1. Generate random matrix Omega with standard normal distribution
     let mut rng = StdRng::seed_from_u64(42);
     let mut omega_data = Vec::with_capacity(cols * k_oversampled);
-    for _ in 0..((cols * k_oversampled + 1) / 2) {
+    for _ in 0..(cols * k_oversampled).div_ceil(2) {
         let u1: f32 = rng.r#gen();
         let u2: f32 = rng.r#gen();
         let u1 = u1.max(1e-30); // Avoid log(0)

@@ -1,5 +1,5 @@
-/// WGPU Bare Sparse Paging
-/// Packs and unpacks 4x4 block masks into u16 bitmasks for efficient GPU memory transfers.
+//! WGPU Bare Sparse Paging
+//! Packs and unpacks 4x4 block masks into u16 bitmasks for efficient GPU memory transfers.
 
 pub struct SparseBlockMask {
     pub mask: u16,
@@ -36,7 +36,7 @@ impl SparseBlockMask {
 /// and a contiguous array of non-zero values.
 pub fn pack_sparse_matrix(weights: &[f32], _cols: usize) -> (Vec<u16>, Vec<f32>) {
     assert!(
-        weights.len() % 16 == 0,
+        weights.len().is_multiple_of(16),
         "Weight matrix must be divisible by 4x4 blocks (16 elements)"
     );
 

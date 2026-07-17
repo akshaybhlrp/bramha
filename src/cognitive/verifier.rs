@@ -97,7 +97,7 @@ impl ModelVerifier {
 
         // Split completion into sentences/claims
         let raw_sentences: Vec<&str> = completion
-            .split(|c| c == '.' || c == '!' || c == '?')
+            .split(['.', '!', '?'])
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect();

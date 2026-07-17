@@ -147,7 +147,7 @@ impl TensorPage {
     pub fn as_f32(&self) -> &[f32] {
         let b = self.as_bytes();
         assert!(
-            (b.as_ptr() as usize) % 4 == 0,
+            (b.as_ptr() as usize).is_multiple_of(4),
             "CRITICAL ALIGNMENT ERROR: ptr is not 4-byte aligned!"
         );
         cast_slice(b)

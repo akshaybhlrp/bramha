@@ -125,6 +125,12 @@ pub struct ModelCapabilityRegistry {
     pub adapters: HashMap<String, Box<dyn ModelAdapter + Send + Sync>>,
 }
 
+impl Default for ModelCapabilityRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelCapabilityRegistry {
     pub fn new() -> Self {
         let mut registry = ModelCapabilityRegistry {

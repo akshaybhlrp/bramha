@@ -86,7 +86,7 @@ fn main() -> Result<(), String> {
                     }
                 }
                 
-                SpandaTensor::BlockSparse_2_4 {
+                SpandaTensor::BlockSparse2_4 {
                     masks,
                     nonzero_values: values,
                 }

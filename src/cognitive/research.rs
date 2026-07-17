@@ -17,6 +17,12 @@ pub struct ResearchGraph {
     goals: HashMap<String, SubGoal>,
 }
 
+impl Default for ResearchGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResearchGraph {
     pub fn new() -> Self {
         ResearchGraph {
@@ -76,7 +82,6 @@ impl ResearchGraph {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_temporal_graph_filtering() {

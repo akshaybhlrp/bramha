@@ -48,7 +48,7 @@ impl OperationsConsole {
         retrieved_context: &str,
     ) -> Vec<GroundingCitation> {
         let mut citations = Vec::new();
-        let sentences: Vec<&str> = answer.split(|c| c == '.' || c == '?' || c == '!').collect();
+        let sentences: Vec<&str> = answer.split(['.', '?', '!']).collect();
         let context_lower = retrieved_context.to_lowercase();
 
         let mut idx = 1;
@@ -117,7 +117,7 @@ impl OperationsConsole {
             timeline.push(TimelineEvent {
                 timestamp_ms: now,
                 event_type: "GoalHop".to_string(),
-                description: format!("Decomposed Goal Graph execution completed in 2 hops"),
+                description: "Decomposed Goal Graph execution completed in 2 hops".to_string(),
             });
             now += 500;
 

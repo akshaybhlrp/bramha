@@ -171,11 +171,10 @@ impl ModelTable {
         for (key, hash) in chunk_index.prefix_scan_with_keys(&prefix) {
             if let crate::storage::indexing::BTreeKey::String(s) = key {
                 // Key format is "model.layers.0.input_layernorm.weight:N"
-                if let Some(idx_str) = s.split(':').last() {
-                    if let Ok(idx) = idx_str.parse::<usize>() {
+                if let Some(idx_str) = s.split(':').next_back()
+                    && let Ok(idx) = idx_str.parse::<usize>() {
                         hashes_with_idx.push((idx, hash.clone()));
                     }
-                }
             }
         }
 
@@ -212,8 +211,8 @@ impl ModelTable {
             }
         }
 
-        if is_contiguous && !locations.is_empty() {
-            if let Some(mmap_data) = &block_db.mmap {
+        if is_contiguous && !locations.is_empty()
+            && let Some(mmap_data) = &block_db.mmap {
                 let start = locations[0].offset as usize;
                 let end = (locations.last().unwrap().offset
                     + locations.last().unwrap().length as u64) as usize;
@@ -230,12 +229,11 @@ impl ModelTable {
                 }
                 return Ok(());
             }
-        }
 
         // Fallback to allocating buffer if non-contiguous or mmap unavailable
         // We MUST ensure 4-byte alignment for bytemuck casts later!
-        let total_bytes: usize = locations.iter().map(|l| l.length as usize).sum();
-        let num_u32s = (total_bytes + 3) / 4;
+        let total_bytes: usize = locations.iter().map(|l| l.length).sum();
+        let num_u32s = total_bytes.div_ceil(4);
         let mut aligned_buffer: Vec<u32> = vec![0; num_u32s];
 
         let mut current_offset = 0;
@@ -527,8 +525,8 @@ impl TensorDB {
         let mut table = ModelTable::new(model_name.clone(), path.to_path_buf());
         table.early_exit_thresholds = Vec::new();
 
-        if manifest_path.exists() {
-            if let Ok(manifest_data) = std::fs::read_to_string(&manifest_path) {
+        if manifest_path.exists()
+            && let Ok(manifest_data) = std::fs::read_to_string(&manifest_path) {
                 if let Ok(manifest) = serde_json::from_str::<ModelManifest>(&manifest_data) {
                     table.num_experts = manifest.num_experts;
                     table.expert_routing_top_k = manifest.expert_routing_top_k;
@@ -537,7 +535,6 @@ impl TensorDB {
                     eprintln!("⚠️ Failed to parse manifest.json for model {}", model_name);
                 }
             }
-        }
 
         println!(
             "🔄 Registered model '{}' from disk (lazy loading enabled)",
@@ -725,7 +722,7 @@ impl TensorDB {
             let bin_files: Vec<_> = match std::fs::read_dir(&path) {
                 Ok(rd) => rd
                     .flatten()
-                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "bin"))
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "bin"))
                     .collect(),
                 Err(_) => Vec::new(),
             };
@@ -772,8 +769,7 @@ impl TensorDB {
 
             // Hydrate expert map if it's an MoE model
             if let (Some(num_experts), Some(chunk_index)) = (model.num_experts, &model.chunk_index)
-            {
-                if num_experts > 0 {
+                && num_experts > 0 {
                     let num_layers = model
                         .layers
                         .keys()
@@ -825,13 +821,11 @@ impl TensorDB {
                                 let prefix = format!("{}:", key);
                                 let mut hashes_with_idx = Vec::new();
                                 for (b_key, hash) in chunk_index.prefix_scan_with_keys(&prefix) {
-                                    if let crate::storage::indexing::BTreeKey::String(s) = b_key {
-                                        if let Some(idx_str) = s.split(':').last() {
-                                            if let Ok(idx) = idx_str.parse::<usize>() {
+                                    if let crate::storage::indexing::BTreeKey::String(s) = b_key
+                                        && let Some(idx_str) = s.split(':').next_back()
+                                            && let Ok(idx) = idx_str.parse::<usize>() {
                                                 hashes_with_idx.push((idx, hash.clone()));
                                             }
-                                        }
-                                    }
                                 }
                                 hashes_with_idx.sort_by_key(|(idx, _)| *idx);
                                 let mut locations = Vec::new();
@@ -856,9 +850,9 @@ impl TensorDB {
                                     }
                                 }
 
-                                if is_aligned {
-                                    if let Some(template) = model.layers.get(key) {
-                                        if let Some(mmap_data) = &block_db.mmap {
+                                if is_aligned
+                                    && let Some(template) = model.layers.get(key)
+                                        && let Some(mmap_data) = &block_db.mmap {
                                             expert_map[layer_idx][expert_idx][t_idx] =
                                                 Some(TensorPage::new_slice(
                                                     key.clone(),
@@ -871,8 +865,6 @@ impl TensorDB {
                                                         as usize,
                                                 ));
                                         }
-                                    }
-                                }
                             }
                         }
                     }
@@ -882,7 +874,6 @@ impl TensorDB {
                         num_layers, num_experts
                     );
                 }
-            }
         }
 
         Ok(())

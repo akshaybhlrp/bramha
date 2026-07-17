@@ -16,7 +16,7 @@ pub struct PrefixCacheEntry {
 pub fn compute_tokens_hash(tokens: &[u32]) -> String {
     let mut hasher = Sha256::new();
     for &t in tokens {
-        hasher.update(&t.to_le_bytes());
+        hasher.update(t.to_le_bytes());
     }
     format!("{:x}", hasher.finalize())
 }
@@ -55,9 +55,9 @@ pub fn find_longest_prefix(base_path: &Path, tokens: &[u32]) -> Option<(usize, P
         let hash = compute_tokens_hash(prefix);
         let path = cache_dir.join(format!("{}.bin", hash));
 
-        if path.exists() {
-            if let Ok(mut entry) = load_entry(&path) {
-                if entry.tokens == prefix {
+        if path.exists()
+            && let Ok(mut entry) = load_entry(&path)
+                && entry.tokens == prefix {
                     // Update access time
                     entry.last_accessed = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -68,8 +68,6 @@ pub fn find_longest_prefix(base_path: &Path, tokens: &[u32]) -> Option<(usize, P
                     let _ = save_entry(&path, &entry);
                     return Some((prefix_len, entry));
                 }
-            }
-        }
     }
     None
 }

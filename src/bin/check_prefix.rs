@@ -10,10 +10,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bramha::storage::tensor_db::TensorDB {
         models, block_db, ..
     } = &mut *tensor_db_write;
-    let mut block_db_guard = block_db.lock().unwrap();
+    let block_db_guard = block_db.get_mut().unwrap();
     if let Some(model) = models.get_mut("Llama") {
         let tensor_name = "model.embed_tokens.weight";
-        model.load_tensor_chunks(tensor_name, &mut *block_db_guard)?;
+        model.load_tensor_chunks(tensor_name, block_db_guard)?;
         if let Some(page) = model.layers.get(tensor_name) {
             let bytes = page.as_bytes();
             println!(

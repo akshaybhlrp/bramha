@@ -19,7 +19,7 @@ pub struct LayerIndex {
 impl LayerIndex {
     pub fn save<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         let data = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, data)
     }
 
@@ -56,7 +56,7 @@ impl ModelView {
 
     pub fn save<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         let data = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, data)
     }
 

@@ -183,8 +183,8 @@ fn get_weight_tensor<'a>(
     }
 }
 
-fn safe_cast_to_f32<'a>(bytes: &'a [u8]) -> &'a [f32] {
-    if (bytes.as_ptr() as usize) % std::mem::align_of::<f32>() == 0 {
+fn safe_cast_to_f32(bytes: &[u8]) -> &[f32] {
+    if (bytes.as_ptr() as usize).is_multiple_of(std::mem::align_of::<f32>()) {
         bytemuck::cast_slice(bytes)
     } else {
         let mut vec = vec![0.0f32; bytes.len() / 4];
@@ -241,7 +241,7 @@ fn get_weight_tensor_from_page<'a>(
             Ok(WeightTensor::ColumnarDict { dict, indices })
         }
         _ => {
-            if page.as_bytes().len() == 0 {
+            if page.as_bytes().is_empty() {
                 println!(
                     "WARNING: get_weight_tensor_from_page called on 0-byte page: {}",
                     page.name
@@ -395,8 +395,7 @@ fn matvec_mul(
 
             if scheduler.route_op(tensor_size, "gemv")
                 == crate::planner::scheduler::BackendTarget::Gpu
-            {
-                if let Some(plane) = crate::compute::wgpu_backend::get_wgpu_plane() {
+                && let Some(plane) = crate::compute::wgpu_backend::get_wgpu_plane() {
                     match weight {
                         WeightTensor::Float(w) => {
                             match plane.matvec_mul(h, w, out_features, name, layer_name) {
@@ -450,7 +449,6 @@ fn matvec_mul(
                         }
                     }
                 }
-            }
         }
     }
 
@@ -1476,15 +1474,15 @@ fn get_rope_thetas(head_dim: usize, rope_theta: f32) -> Vec<f32> {
     THETA_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let key = (head_dim, rope_theta.to_bits());
-        if !cache.contains_key(&key) {
+        cache.entry(key).or_insert_with(|| {
             let half_dim = head_dim / 2;
             let mut thetas = Vec::with_capacity(half_dim);
             for i in 0..half_dim {
                 let theta = 1.0 / rope_theta.powf((2 * i) as f32 / head_dim as f32);
                 thetas.push(theta);
             }
-            cache.insert(key, thetas);
-        }
+            thetas
+        });
         cache.get(&key).unwrap().clone()
     })
 }
@@ -1799,8 +1797,8 @@ async fn run_mlp_into(
                 let mut hydrated = false;
                 let mut fast_path = false;
                 let mut pages = None;
-                if let Some(m) = guard.models.get(model_name) {
-                    if let Some(expert_map) = &m.expert_map {
+                if let Some(m) = guard.models.get(model_name)
+                    && let Some(expert_map) = &m.expert_map {
                         hydrated = true;
                         let page_opts = &expert_map[layer_idx][expert_idx];
                         if page_opts[0].is_some()
@@ -1811,7 +1809,6 @@ async fn run_mlp_into(
                             pages = Some(page_opts.clone());
                         }
                     }
-                }
                 (hydrated, fast_path, pages)
             };
 
@@ -1855,11 +1852,11 @@ async fn run_mlp_into(
                         } = &mut *db_write;
                         let mut block_db_guard = block_db.lock().unwrap();
                         if let Some(m) = models.get_mut(model_name) {
-                            m.load_tensor_chunks(&gate_name, &mut *block_db_guard)
+                            m.load_tensor_chunks(&gate_name, &mut block_db_guard)
                                 .unwrap();
-                            m.load_tensor_chunks(&up_name, &mut *block_db_guard)
+                            m.load_tensor_chunks(&up_name, &mut block_db_guard)
                                 .unwrap();
-                            m.load_tensor_chunks(&down_name, &mut *block_db_guard)
+                            m.load_tensor_chunks(&down_name, &mut block_db_guard)
                                 .unwrap();
                         }
                     }
@@ -1930,8 +1927,8 @@ async fn run_mlp_into(
 
             if !is_hydrated {
                 let mut db_write = db.tensor_db.write().await;
-                if let Some(m) = db_write.models.get_mut(model_name) {
-                    if m.expert_map.is_none() {
+                if let Some(m) = db_write.models.get_mut(model_name)
+                    && m.expert_map.is_none() {
                         let gate_name = format!(
                             "model.layers.{}.mlp.experts.{}.gate_proj.weight",
                             layer_idx, expert_idx
@@ -1948,7 +1945,6 @@ async fn run_mlp_into(
                         m.unload_tensor_chunks(&up_name);
                         m.unload_tensor_chunks(&down_name);
                     }
-                }
             }
         }
     } else {
@@ -2011,7 +2007,7 @@ async fn load_and_clone_layer_pages(
         } = &mut *db_write;
         let mut block_db_guard = block_db.lock().unwrap();
         if let Some(m) = models.get_mut(model_name) {
-            m.load_layer_tensors(layer_idx, &mut *block_db_guard)
+            m.load_layer_tensors(layer_idx, &mut block_db_guard)
                 .map_err(|e| e.to_string())?;
             let is_capped = crate::inference::pipeline::get_system_resource_cap() < 1.0;
             if layer_idx >= 2 && (is_capped || std::env::var("BRAMHA_FORCE_STREAMING").is_ok()) {
@@ -2238,8 +2234,8 @@ pub async fn generate_cpu(
                             );
 
                             // Check if cosine similarity is < 0.999 for > 5% of queries
-                            if let Ok(mut stmt) = conn.prepare("SELECT cosine_similarity FROM shadow_scan_stats ORDER BY id DESC LIMIT 100") {
-                                if let Ok(mut rows) = stmt.query([]) {
+                            if let Ok(mut stmt) = conn.prepare("SELECT cosine_similarity FROM shadow_scan_stats ORDER BY id DESC LIMIT 100")
+                                && let Ok(mut rows) = stmt.query([]) {
                                     let mut total = 0;
                                     let mut low_similarity_count = 0;
                                     while let Ok(Some(row)) = rows.next() {
@@ -2262,7 +2258,6 @@ pub async fn generate_cpu(
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 });
@@ -2326,9 +2321,9 @@ async fn generate_cpu_inner_logits(
         let crate::storage::tensor_db::TensorDB { models, block_db, .. } = &mut *db_write;
         let mut block_db_guard = block_db.lock().unwrap();
         if let Some(m) = models.get_mut(model_name) {
-            m.load_non_layer_tensors(&mut *block_db_guard).map_err(|e| e.to_string())?;
+            m.load_non_layer_tensors(&mut block_db_guard).map_err(|e| e.to_string())?;
             // Also load the first layer (layer 0) MLPs just to determine mlp_size from shape!
-            m.load_layer_tensors(0, &mut *block_db_guard).map_err(|e| e.to_string())?;
+            m.load_layer_tensors(0, &mut block_db_guard).map_err(|e| e.to_string())?;
         }
     }
 
@@ -2552,12 +2547,11 @@ async fn generate_cpu_inner_logits(
                         crate::inference::prefill_cache::PrefillCacheManager::prefill_and_cache(db.clone(), model_name, system_prefix).await.ok()
                     };
 
-                    if let Some(entry) = loaded {
-                        if entry.tokens.len() == p_len {
+                    if let Some(entry) = loaded
+                        && entry.tokens.len() == p_len {
                             prefix_len = p_len;
                             cached_entry = Some(entry);
                         }
-                    }
                 }
             }
         }
@@ -2616,7 +2610,7 @@ async fn generate_cpu_inner_logits(
             for layer_idx in 0..num_layers {
                 {
                     let db_read = db.tensor_db.read().await;
-                    if let Some(_) = db_read.models.get(model_name) {
+                    if db_read.models.get(model_name).is_some() {
                         prefetcher.prefetch_layers(model_name, &db, layer_idx, num_layers, prefetcher.get_adaptive_depth()).await;
                     }
                 }
@@ -2787,7 +2781,7 @@ async fn generate_cpu_inner_logits(
                 let end = (offset + 40).min(target.len());
                 speculated_tokens = target[offset..end].to_vec();
             }
-        } else if tokens.len() >= ngram_size + 1 {
+        } else if tokens.len() > ngram_size {
             let suffix = &tokens[tokens.len() - ngram_size..];
             for i in 0..(tokens.len() - ngram_size) {
                 if &tokens[i..i + ngram_size] == suffix {
@@ -2829,11 +2823,10 @@ async fn generate_cpu_inner_logits(
                         let _ = mt.access_layer(&layer_id);
 
                         // Phase 5: record which pipeline stage owns this layer
-                        if pipeline_executor.is_multi_stage() {
-                            if let Some(slot_id) = pipeline_executor.assignment.slot_for(layer_idx) {
+                        if pipeline_executor.is_multi_stage()
+                            && let Some(slot_id) = pipeline_executor.assignment.slot_for(layer_idx) {
                                 let _ = mt.access_layer(&format!("pipeline.stage.{}", slot_id));
                             }
-                        }
 
                         if layer_idx + 1 < num_layers {
                             let next_layers = ((layer_idx + 1)..num_layers)
@@ -3073,7 +3066,7 @@ async fn generate_cpu_inner_logits(
         for layer_idx in 0..num_layers {
             {
                 let db_read = db.tensor_db.read().await;
-                if let Some(_) = db_read.models.get(model_name) {
+                if db_read.models.get(model_name).is_some() {
                     prefetcher.prefetch_layers(model_name, &db, layer_idx, num_layers, prefetcher.get_adaptive_depth()).await;
                 }
             }

@@ -1,3 +1,31 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::needless_range_loop,
+    clippy::mut_mutex_lock,
+    clippy::len_zero,
+    clippy::manual_checked_ops,
+    clippy::ptr_arg,
+    clippy::suspicious_open_options,
+    clippy::if_same_then_else,
+    clippy::unnecessary_unwrap,
+    clippy::collapsible_if,
+    clippy::new_without_default,
+    clippy::manual_strip,
+    clippy::redundant_closure,
+    clippy::field_reassign_with_default,
+    clippy::explicit_auto_deref,
+    clippy::manual_is_multiple_of,
+    clippy::map_entry,
+    clippy::manual_div_ceil,
+    clippy::unwrap_or_default,
+    clippy::unnecessary_sort_by,
+    clippy::redundant_pattern_matching,
+    clippy::needless_borrows_for_generic_args,
+    clippy::unnecessary_get_then_check,
+    clippy::single_range_in_vec_init,
+    clippy::manual_flatten
+)]
+
 use bramha::api::create_router;
 use bramha::storage::Database;
 use std::env;
@@ -52,38 +80,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--port" | "-p" => {
-                if i + 1 < args.len() {
+            "--port" | "-p"
+                if i + 1 < args.len() => {
                     port = args[i + 1].parse().unwrap_or(8000);
                     i += 2;
-                } else {
-                    i += 1;
                 }
-            }
-            "--uds" | "-u" => {
-                if i + 1 < args.len() {
+            "--uds" | "-u"
+                if i + 1 < args.len() => {
                     uds_path = Some(args[i + 1].clone());
                     i += 2;
-                } else {
-                    i += 1;
                 }
-            }
-            "--db-file" | "-d" => {
-                if i + 1 < args.len() {
+            "--db-file" | "-d"
+                if i + 1 < args.len() => {
                     db_path = Some(args[i + 1].clone());
                     i += 2;
-                } else {
-                    i += 1;
                 }
-            }
-            "--cache-dim" | "-c" => {
-                if i + 1 < args.len() {
+            "--cache-dim" | "-c"
+                if i + 1 < args.len() => {
                     cache_dim = args[i + 1].parse().unwrap_or(1536);
                     i += 2;
-                } else {
-                    i += 1;
                 }
-            }
             "--no-save" => {
                 db_path = None;
                 i += 1;
@@ -104,16 +120,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 i += 1;
             }
-            "--power" => {
-                if i + 1 < args.len() {
+            "--power"
+                if i + 1 < args.len() => {
                     if let Ok(limit) = args[i + 1].parse::<u32>() {
                         bramha::inference::power::set_power_limit(limit);
                     }
                     i += 2;
-                } else {
-                    i += 1;
                 }
-            }
             "--help" | "-h" => {
                 println!("Bramha - A High-Performance Custom LLM Vector Database");
                 println!();

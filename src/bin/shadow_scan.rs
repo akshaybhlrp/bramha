@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(model) = models.get_mut(active_model) {
         let mut block_db_guard = block_db.lock().unwrap();
-        let _ = model.load_tensor_chunks(&tensor_name, &mut *block_db_guard);
+        let _ = model.load_tensor_chunks(&tensor_name, &mut block_db_guard);
         drop(block_db_guard);
 
         if let Some(page) = model.layers.get(&tensor_name) {

@@ -50,3 +50,6 @@ pub mod middleware;
 pub mod models;
 pub mod planner;
 pub mod storage;
+
+#[cfg(feature = "hyperscale")]
+pub mod network;

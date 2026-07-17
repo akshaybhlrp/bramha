@@ -42,6 +42,8 @@ crc32fast = "1.4"
 ndarray = "0.15"
 spanda-engine = { version = "0.7.0", path = "spanda-engine" }
 minijinja = "2.1.1"
+tonic = { version = "0.12.3", optional = true }
+prost = { version = "0.13.3", optional = true }
 naga = { version = "0.19.2", features = ["deserialize", "serialize", "spv-out", "wgsl-in"] }
 
 [profile.dev]
@@ -82,5 +84,9 @@ default = ["manifest_load", "planner_tier_aware", "prefetch"]
 manifest_load = []
 planner_tier_aware = []
 prefetch = []
+hyperscale = ["dep:tonic", "dep:prost"]
+
+[build-dependencies]
+tonic-build = "0.12.3"
 
 

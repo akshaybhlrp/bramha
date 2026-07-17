@@ -2275,7 +2275,7 @@
                     resBox.innerHTML = `
                         <strong>🔥 Semantic CACHE HIT!</strong> (Similarity: ${result.similarity.toFixed(4)})
                         <div style="margin-top: 10px; font-family: var(--font-code); font-size:14px; background: rgba(0,0,0,0.3); padding:10px; border-radius:6px;">
-                            ${result.completion}
+                            ${renderMarkdown(result.completion)}
                         </div>`;
                 } else {
                     resBox.className = "cache-hit-status miss";

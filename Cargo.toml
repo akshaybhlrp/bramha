@@ -24,7 +24,7 @@ bytemuck = "1.25.0"
 half = { version = "2.7.1", features = ["bytemuck"] }
 safetensors = "0.7.0"
 burn = { version = "0.13.2", features = ["wgpu", "ndarray"] }
-wgpu = "0.19.4"
+wgpu = { version = "0.19.4", features = ["spirv"] }
 tokenizers = "0.22.2"
 sha2 = "0.10"
 rayon = "1.12.0"
@@ -44,6 +44,7 @@ spanda-engine = { version = "0.7.0", path = "spanda-engine" }
 minijinja = "2.1.1"
 tonic = { version = "0.12.3", optional = true }
 prost = { version = "0.13.3", optional = true }
+naga = { version = "0.19.2", features = ["deserialize", "serialize", "spv-out", "wgsl-in"] }
 
 [profile.dev]
 opt-level = 0

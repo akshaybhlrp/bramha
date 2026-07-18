@@ -987,20 +987,18 @@ impl TensorDB {
                             if let Some(model) = self.models.get_mut(model_name) {
                                 model.layers.insert(layer_meta.layer_id.clone(), page);
                             }
-                            return Ok(());
+                            Ok(())
                         }
-                        Err(e) => {
-                            return Err(format!(
-                                "Failed to mmap layer {}: {}",
-                                layer_meta.layer_id, e
-                            ));
-                        }
+                        Err(e) => Err(format!(
+                            "Failed to mmap layer {}: {}",
+                            layer_meta.layer_id, e
+                        )),
                     }
                 } else {
-                    return Err(format!("Missing shard file for layer '{}'", layer_id));
+                    Err(format!("Missing shard file for layer '{}'", layer_id))
                 }
             } else {
-                return Err(format!("Layer {} not found in manifest", layer_id));
+                Err(format!("Layer {} not found in manifest", layer_id))
             }
         } else {
             // Legacy fallback (no manifest)
@@ -1018,14 +1016,12 @@ impl TensorDB {
                         if let Some(model) = self.models.get_mut(model_name) {
                             model.layers.insert(layer_id.to_string(), page);
                         }
-                        return Ok(());
+                        Ok(())
                     }
-                    Err(e) => {
-                        return Err(format!("Failed to mmap legacy shard {:?}: {}", bin_path, e));
-                    }
+                    Err(e) => Err(format!("Failed to mmap legacy shard {:?}: {}", bin_path, e)),
                 }
             } else {
-                return Err(format!("Layer file {:?} not found", bin_path));
+                Err(format!("Layer file {:?} not found", bin_path))
             }
         }
     }

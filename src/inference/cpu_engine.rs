@@ -901,7 +901,7 @@ fn gemm_cpu(
                             out_row[j] = sum * scales[j];
                         }
                         WeightTensor::ColumnarDict { .. } => {
-                            0.0; // SVD not implemented for this sparse op
+                            out_row[j] = 0.0; // SVD not implemented for this sparse op
                         }
                     }
                 }
@@ -956,7 +956,7 @@ fn sparse_matvec_mul(
                     out[j] = sum * scales[j];
                 }
                 WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
-                    0.0; // SVD not implemented for this sparse op
+                    out[j] = 0.0; // SVD not implemented for this sparse op
                 }
             }
         }
@@ -997,7 +997,7 @@ fn sparse_matvec_mul(
                 *out_val = sum * scales[j];
             }
             WeightTensor::Svd { .. } | WeightTensor::ColumnarDict { .. } => {
-                0.0; // SVD not implemented for this sparse op
+                *out_val = 0.0; // SVD not implemented for this sparse op
             }
         });
     out

@@ -33,7 +33,7 @@ Storage Layer + Metadata DB + Cache + WAL
 
 | Crate | Role |
 |-------|------|
-| `bramha` | Monolithic intelligence database containing API, inference, storage, memory, planner, and retrieval modules |
+| `bramha` | Monolithic intelligence database containing all modules |
 | `spanda-engine` | Standalone sparse inference backend (consumed as a versioned workspace dependency) |
 
 SPANDA ships independently. Bramha pins a specific `spanda-engine` release and wires it in via `BramhaBackend` trait.
@@ -45,20 +45,20 @@ SPANDA ships independently. Bramha pins a specific `spanda-engine` release and w
 ```text
 bramha/
 ├── Cargo.toml
-├── src/
-│   ├── api/              # Axum HTTP API & Handlers
-│   ├── planner/          # Cost model, optimizer, policies
-│   ├── inference/        # Engine, CPU/wgpu backends, SPANDA integration
-│   ├── retrieval/        # IVF/HNSW/BM25, evidence mapping
-│   ├── memory/           # Working, episodic, semantic memory
-│   ├── graph/            # Entity/relation/goal graph
-│   ├── compute/          # CPU SIMD, wgpu shaders
-│   ├── storage/          # Manifest, content-addressing, multi-tier, TensorDB
-│   ├── telemetry/        # Metrics, trace recording
-│   ├── degradation/      # Fallback state machines
-│   └── experimental/     # Feature-flagged research paths
-├── spanda-engine/        # Sparse inference compute crate
-└── xtask/                # Build tasks
+└── src/
+    ├── api/              # Axum HTTP API & Handlers
+    ├── cognitive/        # Memory, learning, and high-level intelligence
+    ├── compute/          # CPU SIMD, wgpu shaders
+    ├── concurrency/      # Threading, async/blocking bridge
+    ├── core/             # Core data structures (Tensor, etc.)
+    ├── index/            # IVF/HNSW/BM25 indexing
+    ├── inference/        # Engine, CPU/wgpu backends, SPANDA integration
+    ├── middleware/       # Auth, queueing, etc.
+    ├── models/           # Model loading and quantization
+    ├── network/          # P2P gossip and client logic
+    ├── planner/          # Cost model, optimizer, policies
+    ├── storage/          # Manifest, content-addressing, multi-tier, TensorDB
+    └── bin/              # Crate binaries (serve, ingest, etc.)
 ```
 
 ---
@@ -139,7 +139,7 @@ cargo bench --bench end_to_end_storage
 
 | Invariant | Rule |
 |-----------|------|
-| **Rust-only** | No Python in the runtime binary. `convert.py` is deprecated; target is `bramha-cli model convert` in Rust by Sprint 9. |
+| **Rust-only** | No Python in the runtime binary. `convert.py` is deprecated; the canonical tool is `spanda-convert`. |
 | **CPU fallback complete** | Every feature works CPU-only. wgpu accelerates, never gate-keeps. |
 | **Exact fallback** | Every optimization path has a safe exact fallback. |
 | **Gate discipline** | No phase begins until the previous gate passes. |
@@ -157,7 +157,7 @@ cargo bench --bench end_to_end_storage
 |------|--------|
 | BRM-S9-001: Manifest integration into `tensor_db.rs` | [ ] Open |
 | BRM-S9-002: Multi-tier routing in inference planner | [ ] Open |
-| BRM-S9-003: End-to-end storage benchmark | [ ] Open |
+| BRM-S9-003: End-to-end storage benchmark | [x] Done |
 | BRM-S9-OPT-001: Hugepage-backed mmap | [ ] Open |
 | BRM-S9-OPT-002: madvise sequential + willneed | [ ] Open |
 | BRM-S9-OPT-003: Shader pipeline cache | [ ] Open |

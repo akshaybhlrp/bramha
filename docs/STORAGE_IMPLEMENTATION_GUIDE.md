@@ -163,7 +163,7 @@ storage.report();
 
 ### How to integrate with `tensor_db.rs`
 
-The existing `TensorDB` can be enhanced with these storage modules:
+The existing `TensorDB` can be enhanced with these storage modules. The `MultiTierStorage` will manage the lifecycle and access patterns of tensors, while `ContentAddressedStorage` will handle the underlying deduplicated storage.
 
 **Before:** Simple memmap-based loading
 ```rust
@@ -181,77 +181,23 @@ pub struct TensorDB {
     
     // NEW: Storage efficiency layers
     pub manifests: HashMap<String, ModelManifest>,  // Metadata
-    pub dedup_storage: ContentAddressedStorage,     // Deduplication
-    pub multi_tier: MultiTierStorage,               // Tiering
+    pub multi_tier_storage: MultiTierStorage,       // Tiering and access management
 }
 ```
 
-**Implementation steps:**
+**Implementation Steps:**
 
-1. **On model ingest:**
-```rust
-fn ingest_model(&mut self, model_name: &str, safetensors_path: &Path) {
-    // 1. Load safetensors as usual
-    let model = load_safetensors(safetensors_path)?;
-    
-    // 2. Create manifest
-    let mut manifest = ModelManifest::new(model_name, ...);
-    
-    // 3. For each layer:
-    for (layer_name, weight_data) in &model.layers {
-        // Classify tier
-        let tier = classify_tier(layer_name);
-        
-        // Store in content-addressed storage (dedup)
-        let (stored, savings) = self.dedup_storage.store_tensor(
-            model_name,
-            layer_name,
-            weight_data,
-        )?;
-        
-        // Register in multi-tier storage
-        self.multi_tier.register_layer(
-            layer_id,
-            stored,
-            tier,
-            dedup_path,
-        )?;
-        
-        // Update manifest
-        manifest.add_layer(layer_metadata);
-    }
-    
-    self.manifests.insert(model_name.to_string(), manifest);
-}
-```
+1. **On model ingest:** The `ingest_model` function in `tensor_db.rs` will orchestrate the process.
+   - It will use `ContentAddressedStorage` to store tensor chunks and get back their hashes.
+   - It will then use `MultiTierStorage` to register these chunks and their locations.
+   - Finally, a `ModelManifest` will be created to track all this metadata.
 
-2. **On inference:**
-```rust
-fn fetch_layer(&mut self, model_name: &str, layer_id: &str) -> Vec<f32> {
-    // 1. Record access in multi-tier storage
-    self.multi_tier.access_layer(layer_id)?;
-    
-    // 2. Load from appropriate tier (prefetched or on-demand)
-    if let Some((tier, _)) = self.multi_tier.find_layer(layer_id) {
-        load_from_tier(tier, layer_id)
-    } else {
-        // Not in cache, load from cold storage and register
-        load_and_register(layer_id)
-    }
-}
-```
+2. **On inference:** The `fetch_layer` (or similar) function will change.
+   - Instead of directly accessing a file, it will query `MultiTierStorage`.
+   - `MultiTierStorage` will determine if the layer is in a hot, warm, or cold tier and retrieve it, triggering prefetching for subsequent layers.
 
-3. **Periodic maintenance:**
-```rust
-// Demote inactive layers hourly
-tokio::spawn(async {
-    let mut interval = tokio::time::interval(Duration::from_secs(3600));
-    loop {
-        interval.tick().await;
-        self.multi_tier.demote_inactive();
-    }
-});
-```
+3. **Periodic maintenance:** A background task will be responsible for demoting inactive layers to colder storage tiers to free up high-performance storage. This is managed within `MultiTierStorage`.
+
 
 ---
 

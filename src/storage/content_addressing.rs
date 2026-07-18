@@ -47,7 +47,7 @@ pub struct DedupIndex {
     pub model_chunks: HashMap<String, HashSet<String>>,
 
     /// Bloom filter for quick negative checks (prevents unnecessary hash lookups)
-    /// In production, use a proper Bloom filter; here simplified with set
+    // TODO: Replace HashSet with a proper Bloom filter implementation for better memory efficiency.
     pub bloom_cache: HashSet<String>,
 }
 

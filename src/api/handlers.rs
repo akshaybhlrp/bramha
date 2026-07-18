@@ -2120,6 +2120,9 @@ pub async fn system_diagnostics(
     _: RequireReadOnly,
     State(_db): State<SharedState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // TODO: This endpoint returns hardcoded placeholder metrics.
+    // The `spanda_telemetry` module is a stub. This should be updated
+    // to reflect real measurements from the inference engine.
     let gate = crate::inference::spanda_telemetry::current_gate_status();
     Ok(Json(serde_json::json!({
         "status": "ok",
@@ -2150,6 +2153,9 @@ pub struct SpandaDegradedPayload {
 }
 
 pub async fn get_spanda_status() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // TODO: This endpoint returns hardcoded placeholder metrics.
+    // The values for vram_budget_mb, page_cache_hit_rate, etc. are not real.
+    // This should be updated to query the spanda_engine for live telemetry.
     let session = spanda_engine::Session::new();
     let healthy = session.health_check();
     let degraded = spanda_engine::DEGRADED_MODE.load(std::sync::atomic::Ordering::Relaxed);

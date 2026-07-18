@@ -3,14 +3,25 @@
 //! SPANDA is a standalone sparse inference backend. It implements the query-conditional
 //! sparse paging architecture to overcome the memory wall for LLMs.
 //!
-//! ## Implemented Phases (v7 Plan)
-//! - Phase 0: Bare Sparse Paging
-//! - Phase 1: RAM Offload Fallback
-//! - Phase 2: 4-Bit Logarithmic Quantization
-//! - Phase 2.2: Trajectory Prefetch
-//! - Phase 3: Deferred
+//! ## Phase status (corrected — the previous version of this comment claimed phases
+//! that had zero corresponding code; verify claims against `jaccard.rs`/`paging.rs`
+//! before trusting doc comments here going forward, per project convention that
+//! markdown/doc claims are not ground truth, source is)
+//! - Phase 0 (predictability gate): IMPLEMENTED — see `jaccard::AccessTracker`.
+//!   Computes real Jaccard similarity between consecutive access sets; nothing
+//!   downstream activates until `evaluate_gate().passed`.
+//! - Phase 1 (RAM-resident paging + confidence-based eviction): IMPLEMENTED —
+//!   see `paging::PagingEngine`. Plain `Vec` storage (mmap rejected per design
+//!   decision), eviction picks lowest-confidence page, not LRU.
+//! - Phase 2 (4-bit logarithmic quantization): math helpers exist
+//!   (`dequantize_log4`) but are not wired into the paging path yet.
+//! - Phase 2.2 (trajectory prefetch): NOT IMPLEMENTED. `InferenceSession::generate`
+//!   has a placeholder `_predicted_page` computation that is never used for
+//!   actual prefetching — cosmetic only.
+//! - Phase 3+: deferred, no code.
 //!
-//! For full architecture details, see `docs/SPANDA_Design.md`.
+//! For full architecture details, see `docs/SPANDA_Design.md` (also unverified
+//! against code as of this pass — treat as aspirational until reconciled).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -18,8 +29,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use serde::{Deserialize, Serialize};
 
+pub mod jaccard;
+pub mod paging;
+pub mod sparse;
+
+pub use jaccard::{AccessTracker, GateResult, JACCARD_PASS_THRESHOLD, MIN_SAMPLES};
+pub use paging::{Page, PageId, PageStore, PagingEngine};
+pub use sparse::{cosine_similarity, sparse_matvec_mul_2_4};
+
 // --- Backward Compatibility Bridge ---
-pub type GeneratorFn = fn(&str, usize) -> Result<String, String>;
+// GeneratorFn takes model_name explicitly. It used to be (prompt, max_tokens) with the
+// caller expected to stash model_name in a thread_local before calling — safe only by
+// accident (no .await between the thread_local write and this read on the one call site
+// that used it), and one refactor away from silently reading a stale/wrong model name
+// under tokio's multi-threaded scheduler. Explicit parameter can't have that failure mode.
+pub type GeneratorFn = fn(&str, &str, usize) -> Result<String, String>;
 static GENERATOR: RwLock<Option<GeneratorFn>> = RwLock::new(None);
 pub static DEGRADED_MODE: AtomicBool = AtomicBool::new(false);
 
@@ -44,13 +68,13 @@ impl Session {
         !self.degraded_mode
     }
 
-    pub fn generate(&self, prompt: &str, max_tokens: usize) -> Result<String, String> {
+    pub fn generate(&self, model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String> {
         if self.degraded_mode {
             return Err("Spanda engine is in degraded mode".to_string());
         }
         if let Ok(g) = GENERATOR.read() {
             if let Some(ref f) = *g {
-                return f(prompt, max_tokens);
+                return f(model_name, prompt, max_tokens);
             }
         }
         Err("No generator registered for Spanda engine".to_string())
@@ -207,44 +231,12 @@ pub fn pack_4x4_block(block: &[f32; 16]) -> u16 {
     mask
 }
 
-/// Simulates 2:4 block-sparse matvec multiplication on CPU
-pub fn sparse_matvec_mul_2_4(x: &[f32], w: &[f32], cols: usize) -> Vec<f32> {
-    let rows = w.len() / cols;
-    let mut out = vec![0.0; rows];
-
-    for r in 0..rows {
-        let row_start = r * cols;
-        let row_slice = &w[row_start..row_start + cols];
-        let mut sum = 0.0;
-
-        let mut c = 0;
-        while c + 4 <= cols {
-            let mut mags = [
-                (0, row_slice[c].abs()),
-                (1, row_slice[c + 1].abs()),
-                (2, row_slice[c + 2].abs()),
-                (3, row_slice[c + 3].abs()),
-            ];
-            mags.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-            let idx1 = mags[0].0;
-            let idx2 = mags[1].0;
-
-            sum += row_slice[c + idx1] * x[c + idx1];
-            sum += row_slice[c + idx2] * x[c + idx2];
-            c += 4;
-        }
-
-        while c < cols {
-            sum += row_slice[c] * x[c];
-            c += 1;
-        }
-
-        out[r] = sum;
-    }
-
-    out
-}
+// Note: the 2:4 block-sparse matvec + cosine-similarity implementation that used to
+// live here (a sequential duplicate of the one moved from bramha-engine's
+// sparse_predictor.rs) has been removed in favor of the single copy in `sparse.rs`,
+// which is rayon-parallelized and is the one actually exercised by the shadow-scan
+// gate in production. Use `spanda_engine::sparse_matvec_mul_2_4` /
+// `spanda_engine::cosine_similarity` (re-exported above).
 
 /// Logarithmic 4-bit compression / dequantization helper
 pub fn dequantize_log4(data: &[u8], scale: f32) -> Vec<f32> {

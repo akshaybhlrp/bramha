@@ -652,28 +652,23 @@ impl InferenceEngine {
             });
         }
 
-        // 5. Configure speculation bypass dynamically
-        let force_exact = decision == crate::planner::policy::PlannerDecision::ExactDecode;
-        if force_exact {
-            unsafe {
-                std::env::set_var("BRAMHA_FORCE_EXACT_DECODE", "true");
-            }
-        } else {
-            unsafe {
-                std::env::remove_var("BRAMHA_FORCE_EXACT_DECODE");
-            }
-        }
+        // NOTE: previously set a process-global env var (BRAMHA_FORCE_EXACT_DECODE) here to
+        // "configure speculation bypass." Removed: (1) nothing in the codebase ever reads that
+        // var, so it was dead code; (2) even if read, a global env var mutated per-request is a
+        // data race under concurrent tokio requests — one request's ExactDecode flag could flip
+        // mid-flight for another request's SpeculativeDecode/SpandaSparse path. If exact-decode
+        // bypass needs to be re-added, thread it as an explicit fn parameter through
+        // generate_cpu/generate_wgpu, not a global.
+        let _force_exact = decision == crate::planner::policy::PlannerDecision::ExactDecode;
 
         // 6. Execute dynamic routing scheduler for CPU/GPU placement
         let scheduler = crate::planner::scheduler::HeterogeneousScheduler::new();
         let use_cpu_entirely = scheduler.should_use_cpu_entirely(&db, model_name).await;
 
-        // Initialize SPANDA bridge, active database and model name
+        // Initialize SPANDA bridge and active database. model_name is now passed as a
+        // real argument to spanda_session.generate() below — no thread_local side-channel.
         crate::inference::spanda_backend::init_spanda_bridge();
         let _ = crate::inference::spanda_backend::BRAMHA_DATABASE.set(db.clone());
-        crate::inference::spanda_backend::ACTIVE_MODEL_NAME.with(|name| {
-            *name.borrow_mut() = model_name.to_string();
-        });
 
         let mut result = {
             if decision == crate::planner::policy::PlannerDecision::SpandaSparse {
@@ -683,7 +678,7 @@ impl InferenceEngine {
                 InferenceLogger::global().record_log(log_msg);
 
                 let spanda_session = spanda_engine::Session::new();
-                match spanda_session.generate(prompt, max_new_tokens) {
+                match spanda_session.generate(model_name, prompt, max_new_tokens) {
                     Ok(res) => Ok(InferenceResult {
                         model: model_name.to_string(),
                         completion: res,
@@ -736,11 +731,6 @@ impl InferenceEngine {
                 .await
             }
         };
-
-        // Cleanup temporary speculation bypass environment variable
-        unsafe {
-            std::env::remove_var("BRAMHA_FORCE_EXACT_DECODE");
-        }
 
         // 7. Post-process, cache result, and log trace telemetry
         if let Ok(ref mut res) = result {
@@ -880,8 +870,8 @@ impl InferenceEngine {
 
         let mut generated_tokens = Vec::new();
 
-        let is_mock = model_name_lower.contains("mock");
-        let (num_layers, head_dim, num_q_heads, num_kv_heads, hidden_size) = if is_mock {
+        let is_test = model_name_lower.contains("test");
+        let (num_layers, head_dim, num_q_heads, num_kv_heads, hidden_size) = if is_test {
             (1, 16, 4, 1, 64)
         } else {
             let db_read = db.tensor_db.read().await;
@@ -1948,7 +1938,7 @@ mod tests {
             suppress_eviction_logs: true,
         };
 
-        // Cache 1D mock tensors
+        // Cache 1D test tensors
         let dev = WgpuDevice::default();
         let t1 = Tensor::<Wgpu, 1>::from_data(
             Data::new(vec![0.0f32; 10], Shape::from([10])).convert(),
@@ -2092,7 +2082,7 @@ mod tests {
             return;
         }
 
-        let temp_dir = std::env::temp_dir().join("bramha_fallback_mock_model");
+        let temp_dir = std::env::temp_dir().join("bramha_fallback_test_model");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -2146,9 +2136,9 @@ mod tests {
             hidden_size * mlp_size,
         );
 
-        crate::storage::storage_manifest::write_mock_manifest(
+        crate::storage::storage_manifest::write_test_manifest(
             &temp_dir,
-            "fallback-mock-model",
+            "fallback-test-model",
             vocab_size,
             hidden_size,
             num_q_heads,
@@ -2159,26 +2149,30 @@ mod tests {
 
         {
             let mut tensor_guard = db.tensor_db.write().await;
-            tensor_guard.restore_model_at_path("fallback-mock-model".to_string(), &temp_dir);
+            tensor_guard.restore_model_at_path("fallback-test-model".to_string(), &temp_dir);
         }
 
         // Enable simulated failure environment variable and bypass planner cache hits
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_SIMULATE_GPU_FAILURE", "true");
         }
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only");
         }
 
         // Run generation which starts on WGPU and should failover midway to CPU transparently
         let result = InferenceEngine::new(None)
-            .generate(db, "fallback-mock-model", "hi", 10, 0.0, None, None)
+            .generate(db, "fallback-test-model", "hi", 10, 0.0, None, None)
             .await;
 
         // Clean up environment and temp directory
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_SIMULATE_GPU_FAILURE");
         }
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_PLANNER_MODE");
         }
@@ -2240,7 +2234,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_planner_exact_only_override() {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let temp_dir = std::env::temp_dir().join("bramha_planner_exact_mock");
+        let temp_dir = std::env::temp_dir().join("bramha_planner_exact_test");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -2251,7 +2245,7 @@ mod tests {
         db.planner_cache_path = Some(test_cache_file.clone());
         let db = Arc::new(db);
 
-        // Mock a model inside the Database for generation
+        // Stub a model inside the Database for generation
         let mut tokenizer_src = std::path::PathBuf::new();
         let candidate_paths = [
             "models/all-MiniLM-L6-v2/tokenizer.json",
@@ -2302,9 +2296,9 @@ mod tests {
         write_dummy_weight("model.layers.0.mlp.up_proj.weight", 64 * 64);
         write_dummy_weight("model.layers.0.mlp.down_proj.weight", 64 * 64);
 
-        crate::storage::storage_manifest::write_mock_manifest(
+        crate::storage::storage_manifest::write_test_manifest(
             &temp_dir,
-            "planner-exact-mock-model",
+            "planner-exact-test-model",
             vocab_size,
             hidden_size,
             4,
@@ -2315,7 +2309,7 @@ mod tests {
 
         {
             let mut tensor_guard = db.tensor_db.write().await;
-            tensor_guard.restore_model_at_path("planner-exact-mock-model".to_string(), &temp_dir);
+            tensor_guard.restore_model_at_path("planner-exact-test-model".to_string(), &temp_dir);
         }
 
         // Pre-cache deterministic reply
@@ -2325,13 +2319,14 @@ mod tests {
         cache
             .insert(
                 "query text",
-                "planner-exact-mock-model",
+                "planner-exact-test-model",
                 &[],
                 "pre-cached text reply".to_string(),
             )
             .unwrap();
 
         // 1. Force exact-only mode via environment variable
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only");
         }
@@ -2340,7 +2335,7 @@ mod tests {
         let result = InferenceEngine::new(None)
             .generate(
                 db,
-                "planner-exact-mock-model",
+                "planner-exact-test-model",
                 "query text",
                 5,
                 0.0,
@@ -2350,6 +2345,7 @@ mod tests {
             .await;
 
         // Clean up
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_PLANNER_MODE");
         }

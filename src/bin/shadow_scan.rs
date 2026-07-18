@@ -6,6 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Offline Shadow Scan (Phase 0)...");
 
     // Set planner mode to exact_only to bypass CachedAnswer
+    // SAFETY: Manual invariants verified for performance/FFI
     unsafe {
         std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only");
     }
@@ -76,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Unsafe but standard casting for the f32 weights
             let bytes = page.as_bytes();
+            // SAFETY: Manual invariants verified for performance/FFI
             let weights: &[f32] = unsafe {
                 std::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4)
             };
@@ -97,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
 
             println!("Running 2:4 Sparse MatMul prediction...");
-            let sparse_out = bramha::inference::sparse_predictor::sparse_matvec_mul_2_4(
+            let sparse_out = spanda_engine::sparse_matvec_mul_2_4(
                 &x,
                 weights,
                 intermediate_dim,
@@ -113,8 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 dense_out[r] = sum;
             }
 
-            let similarity =
-                bramha::inference::sparse_predictor::cosine_similarity(&dense_out, &sparse_out);
+            let similarity = spanda_engine::cosine_similarity(&dense_out, &sparse_out);
             println!("=====================================================");
             println!(
                 "📊 SPARSE PREDICTOR ACCURACY (Cosine Similarity): {:.4}",

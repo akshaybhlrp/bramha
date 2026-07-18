@@ -1,3 +1,11 @@
+//! 2:4 block-sparse matvec + cosine similarity. Moved here from
+//! `bramha-engine/src/inference/sparse_predictor.rs` — this is the sparse-inference
+//! math that is actually live in production request paths (via the shadow-scan gate
+//! in `cpu_engine.rs`), unlike the rest of this crate's Phase 2/2.2 claims. Before this
+//! move, spanda-engine (the crate named for the sparse-paging plan) contained none of
+//! the sparse math that was actually running, while this module lived disconnected
+//! from it under bramha-engine. One sparse system now, not two.
+
 use rayon::prelude::*;
 
 /// Simulates a 2:4 block-sparse matrix-vector multiplication.
@@ -6,8 +14,8 @@ use rayon::prelude::*;
 ///
 /// - `x`: Input vector of size N
 /// - `w`: Weight matrix of size (M x N) in row-major order
-/// - `out`: Output vector of size M
 /// - `cols`: The number of columns N
+/// - returns: Output vector of size M
 pub fn sparse_matvec_mul_2_4(x: &[f32], w: &[f32], cols: usize) -> Vec<f32> {
     let rows = w.len() / cols;
     let mut out = vec![0.0; rows];
@@ -42,7 +50,7 @@ pub fn sparse_matvec_mul_2_4(x: &[f32], w: &[f32], cols: usize) -> Vec<f32> {
             c += 4;
         }
 
-        // Handle any remaining elements (if cols is not divisible by 4)
+        // Handle any remaining elements (if cols is not divisible by 4).
         // Usually LLM dimensions are divisible by 128, so this is just a fallback.
         while c < cols {
             sum += row_slice[c] * x[c];
@@ -55,7 +63,10 @@ pub fn sparse_matvec_mul_2_4(x: &[f32], w: &[f32], cols: usize) -> Vec<f32> {
     out
 }
 
-/// Computes the cosine similarity between two vectors.
+/// Computes the cosine similarity between two vectors. Used by the shadow-scan
+/// gate to compare dense vs. sparse output and decide whether to trust the
+/// sparse path (see `cpu_engine.rs`'s shadow-scan call site, which now calls
+/// through to this crate instead of a copy living outside it).
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;

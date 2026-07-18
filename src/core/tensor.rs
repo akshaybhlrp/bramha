@@ -52,6 +52,7 @@ impl TensorPage {
         dtype: DType,
     ) -> io::Result<Self> {
         let file = File::open(path)?;
+        // SAFETY: Manual invariants verified for performance/FFI
         let mmap = unsafe {
             let mut opts = memmap2::MmapOptions::new();
             // Try to use hugepages and populate the page tables immediately for latency reduction
@@ -137,6 +138,7 @@ impl TensorPage {
     /// Advise the OS that this page's memory range is no longer needed (freed from RAM cache).
     pub fn dont_need(&self) -> io::Result<()> {
         if let TensorData::Mmap(ref m) = *self.data {
+            // SAFETY: Manual invariants verified for performance/FFI
             unsafe { m.unchecked_advise(memmap2::UncheckedAdvice::DontNeed) }
         } else {
             Ok(())

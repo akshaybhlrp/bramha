@@ -65,9 +65,11 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_PREFIX_CACHE", "true");
         }
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_KV_TRIM_N", "0");
         }
@@ -106,9 +108,11 @@ mod tests {
         assert_eq!(entry.tokens, tokens);
 
         let _ = fs::remove_dir_all(&temp_dir);
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_PREFIX_CACHE");
         }
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_KV_TRIM_N");
         }

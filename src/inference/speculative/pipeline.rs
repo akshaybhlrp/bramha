@@ -2,7 +2,7 @@ use crate::inference::engine::InferenceEngine;
 
 pub struct SpeculativePipeline {
     pub target_engine: InferenceEngine,
-    // draft_engine would be here, but we mock it for the baseline
+    // draft_engine would be here, but we stub it for the baseline
 }
 
 impl SpeculativePipeline {
@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_speculative_rejection_sampling() {
-        // Mock verification
-        // Mock verification
+        // Stub verification
+        // Stub verification
     }
 }

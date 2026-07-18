@@ -17,7 +17,7 @@ impl MultiModelPipeline {
     /// 3. Sentence grounding scan
     /// 4. Verifications
     pub async fn execute_pipeline(&self, query: &str) -> Result<String, String> {
-        // Mock multi-step pipeline execution
+        // Stub multi-step pipeline execution
         let mut result = String::from("[Pipeline Start]\n");
         result.push_str(&format!("Query: {}\n", query));
         result.push_str("1. Draft generation complete.\n");

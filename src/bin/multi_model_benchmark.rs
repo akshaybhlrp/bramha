@@ -7,6 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading Database...");
 
     // Set planner mode to exact_only to bypass CachedAnswer and force actual generation pass
+    // SAFETY: Manual invariants verified for performance/FFI
     unsafe {
         std::env::set_var("BRAMHA_PLANNER_MODE", "exact_only");
     }

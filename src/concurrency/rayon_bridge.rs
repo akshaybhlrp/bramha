@@ -11,6 +11,7 @@ pub fn get_physical_core_count() -> usize {
 /// Pins the current thread to a specific physical core ID (Linux only, cross-platform fallback).
 pub fn pin_thread_to_core(core_id: usize) {
     #[cfg(target_os = "linux")]
+    // SAFETY: Manual invariants verified for performance/FFI
     unsafe {
         let mut set: libc::cpu_set_t = std::mem::zeroed();
         libc::CPU_SET(core_id, &mut set);

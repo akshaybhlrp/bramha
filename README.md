@@ -33,8 +33,8 @@ Storage Layer + Metadata DB + Cache + WAL
 
 | Crate | Role |
 |-------|------|
-| `bramha-engine` | Intelligence database: planner, storage, retrieval, memory, orchestration |
-| `spanda-engine` | Standalone sparse inference backend (consumed as a versioned dependency) |
+| `bramha` | Monolithic intelligence database containing API, inference, storage, memory, planner, and retrieval modules |
+| `spanda-engine` | Standalone sparse inference backend (consumed as a versioned workspace dependency) |
 
 SPANDA ships independently. Bramha pins a specific `spanda-engine` release and wires it in via `BramhaBackend` trait.
 
@@ -42,28 +42,23 @@ SPANDA ships independently. Bramha pins a specific `spanda-engine` release and w
 
 ## Project Structure
 
-```
+```text
 bramha/
 ├── Cargo.toml
-├── bramha-engine/
-│   └── src/
-│       ├── planner/          # Cost model, optimizer, policies
-│       ├── inference/        # Engine, CPU/wgpu backends, SPANDA integration
-│       ├── retrieval/        # IVF/HNSW/BM25, evidence mapping
-│       ├── memory/           # Working, episodic, semantic memory
-│       ├── graph/            # Entity/relation/goal graph
-│       ├── compute/          # CPU SIMD, wgpu shaders
-│       ├── storage/          # Manifest, content-addressing, multi-tier
-│       ├── telemetry/        # Metrics, trace recording
-│       ├── degradation/      # Fallback state machines
-│       └── experimental/     # Feature-flagged research paths
-├── bramha-server/
-│   └── src/
-│       ├── http/             # Axum HTTP API
-│       └── uds/              # Unix domain socket API
-├── bramha-cli/
-│   └── src/                  # `bramha-cli model convert` (replaces convert.py)
-└── xtask/                    # Build tasks
+├── src/
+│   ├── api/              # Axum HTTP API & Handlers
+│   ├── planner/          # Cost model, optimizer, policies
+│   ├── inference/        # Engine, CPU/wgpu backends, SPANDA integration
+│   ├── retrieval/        # IVF/HNSW/BM25, evidence mapping
+│   ├── memory/           # Working, episodic, semantic memory
+│   ├── graph/            # Entity/relation/goal graph
+│   ├── compute/          # CPU SIMD, wgpu shaders
+│   ├── storage/          # Manifest, content-addressing, multi-tier, TensorDB
+│   ├── telemetry/        # Metrics, trace recording
+│   ├── degradation/      # Fallback state machines
+│   └── experimental/     # Feature-flagged research paths
+├── spanda-engine/        # Sparse inference compute crate
+└── xtask/                # Build tasks
 ```
 
 ---

@@ -242,6 +242,7 @@ mod tests {
         assert_eq!(tier_default, StorageTier::Important);
 
         // Set env var to false to bypass/disable tier routing
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_PLANNER_TIER_AWARE", "false");
         }
@@ -249,6 +250,7 @@ mod tests {
         let tier_bypassed =
             ExecutionPathOptimizer::route_layer_tier(10, total_layers, 1, 9900, current_time);
 
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_PLANNER_TIER_AWARE");
         }

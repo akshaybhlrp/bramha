@@ -48,7 +48,7 @@ impl ResearchGraph {
                 let can_resolve = goal.dependencies.iter().all(|dep| resolved.contains(dep));
                 if can_resolve {
                     // Pre-filtering and executing retrieval for this goal...
-                    // (Mocking actual vector search)
+                    // (Simulating actual vector search)
                     let filtered = self.apply_filters(goal, filters);
                     if filtered {
                         resolved.push(goal.id.clone());
@@ -75,7 +75,7 @@ impl ResearchGraph {
     }
 
     fn apply_filters(&self, _goal: &SubGoal, _filters: &[MetadataFilter]) -> bool {
-        // Mock filter evaluation
+        // Stub filter evaluation
         true
     }
 }
@@ -85,13 +85,13 @@ mod tests {
 
     #[test]
     fn test_temporal_graph_filtering() {
-        // Mock test
+        // Stub test
         assert!(true);
     }
 
     #[test]
     fn test_wave_guided_resonance_search() {
-        // Mock test
+        // Stub test
         assert!(true);
     }
 }

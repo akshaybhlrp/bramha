@@ -2243,21 +2243,26 @@ pub async fn generate_cpu(
                     )
                     .await
                     {
-                        let similarity = spanda_engine::cosine_similarity(
-                            &dense_logits_clone,
-                            &sparse_logits,
-                        );
+                        let similarity =
+                            spanda_engine::cosine_similarity(&dense_logits_clone, &sparse_logits);
                         println!(
                             "📊 [Shadow Scan] Cosine Similarity for query: {:.4}",
                             similarity
                         );
 
                         let sql_store = crate::storage::metadata_sql::MetadataSqlStore::global();
-                        if sql_store.log_shadow_scan(&prompt_str, similarity as f64).is_ok() {
+                        if sql_store
+                            .log_shadow_scan(&prompt_str, similarity as f64)
+                            .is_ok()
+                        {
                             // Check if cosine similarity is < 0.999 for > 5% of queries
                             if let Ok(Some(ratio)) = sql_store.check_shadow_gate() {
-                                println!("🚨 [Shadow Scan] Gate check FAILED: {:.1}% of queries have cosine similarity < 0.999. KILLING dynamic sparse predictor, falling back to Banker Mode.", ratio * 100.0);
-                                let _ = sql_store.update_route_quality("SpandaSparse", 9999.0, false);
+                                println!(
+                                    "🚨 [Shadow Scan] Gate check FAILED: {:.1}% of queries have cosine similarity < 0.999. KILLING dynamic sparse predictor, falling back to Banker Mode.",
+                                    ratio * 100.0
+                                );
+                                let _ =
+                                    sql_store.update_route_quality("SpandaSparse", 9999.0, false);
                             }
                         }
                     }

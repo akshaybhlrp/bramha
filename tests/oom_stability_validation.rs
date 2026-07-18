@@ -5,7 +5,7 @@
 //! degradation for WGPU dense and SPANDA sparse execution backends.
 
 use bramha::api::create_router;
-use bramha::inference::sparse_predictor::{cosine_similarity, sparse_matvec_mul_2_4};
+use spanda_engine::{cosine_similarity, sparse_matvec_mul_2_4};
 use bramha::storage::Database;
 use bramha::storage::multi_tier::{MultiTierStorage, TierConfig};
 use bramha::storage::sparse_pager::{SparseBlockMask, pack_sparse_matrix};

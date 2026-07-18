@@ -13,6 +13,10 @@ use crate::core::filter::Filter;
 use crate::core::vector::{Metric, Vector};
 use crate::middleware::auth::{RequireAdmin, RequireReadOnly, RequireWrite};
 use crate::storage::Database;
+use std::sync::OnceLock;
+use tokio::sync::Semaphore;
+
+static DELETE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 pub type SharedState = Arc<Database>;
 
@@ -257,6 +261,7 @@ pub async fn get_collection(
 
 /// DELETE /api/collections/:name
 pub async fn delete_collection(
+    _: RequireWrite,
     State(db): State<SharedState>,
     Path(name): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
@@ -268,7 +273,16 @@ pub async fn delete_collection(
     if state.collections.remove(&name).is_some() {
         let db_clone = db.clone();
         let name_clone = name.clone();
+
+        let permit = DELETE_SEMAPHORE
+            .get_or_init(|| Arc::new(Semaphore::new(5)))
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap_or_else(|e| panic!("Semaphore closed: {}", e));
+
         tokio::spawn(async move {
+            let _permit = permit;
             if is_preserved {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 let mut state = db_clone.state.write().await;
@@ -1198,7 +1212,7 @@ pub async fn llm_hardware() -> Result<Json<serde_json::Value>, (StatusCode, Stri
     Ok(Json(serde_json::json!({ "devices": devices })))
 }
 
-/// POST /api/llm/load_model - Load model endpoint (Mock/success since models load on demand in Rust)
+/// POST /api/llm/load_model - Load model endpoint (Success since models load on demand in Rust)
 #[derive(Deserialize)]
 pub struct LoadModelPayload {
     pub model_name: String,
@@ -1315,41 +1329,8 @@ pub async fn llm_logs(
     // Retrieve native logs from InferenceLogger
     let native_logs = crate::inference::engine::InferenceLogger::global().get_logs(since);
 
-    // Seed nice default logs if there are no logs recorded yet and requesting since 0
-    let logs = if native_logs.is_empty() && since == 0 {
-        vec![
-            crate::inference::engine::LogEntry {
-                message:
-                    "[Bramha Startup] In-process BERT MiniLM embedder initialized successfully."
-                        .to_string(),
-                time: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-            },
-            crate::inference::engine::LogEntry {
-                message: "[Bramha Memory] Active collections synced: 384 dimensions.".to_string(),
-                time: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64
-                    + 1,
-            },
-            crate::inference::engine::LogEntry {
-                message: "[Bramha RAG] Ready for high-performance cognitive queries!".to_string(),
-                time: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64
-                    + 2,
-            },
-        ]
-    } else {
-        native_logs
-    };
-
     Ok(Json(serde_json::json!({
-        "logs": logs
+        "logs": native_logs
     })))
 }
 
@@ -1363,14 +1344,18 @@ pub async fn llm_health() -> Result<Json<serde_json::Value>, (StatusCode, String
         return Ok(Json(body));
     }
 
-    // Default to healthy native status
+    let has_gpu = !wgpu::Instance::new(wgpu::InstanceDescriptor::default())
+        .enumerate_adapters(wgpu::Backends::all())
+        .is_empty();
+
+    let device = if has_gpu { "wgpu" } else { "cpu" };
+
+    // Return true healthy native status
     Ok(Json(serde_json::json!({
         "status": "healthy",
-        "device": "cpu",
-        "llm_model": "tinyllama",
+        "device": device,
         "simulation_mode": false,
-        "log_entries": 3,
-        "engine": "Bramha Pure Rust (Sidecar Offline)"
+        "engine": "Bramha Pure Rust"
     })))
 }
 
@@ -1442,6 +1427,7 @@ fn find_safetensors_files(dir: &std::path::Path) -> std::io::Result<Vec<std::pat
 }
 
 pub async fn ingest_model(
+    _: RequireAdmin,
     State(state): State<SharedState>,
     Path(model_name): Path<String>,
     Json(payload): Json<IngestModelPayload>,
@@ -1667,6 +1653,7 @@ pub async fn get_ingest_task_status(
 }
 
 pub async fn delete_model(
+    _: RequireAdmin,
     State(state): State<SharedState>,
     Path(model_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -1701,12 +1688,14 @@ pub async fn fetch_tensor_layer(
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     {
         let mut tensor_db = state.tensor_db.write().await;
-        tensor_db.ensure_model_loaded(&model_name).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to load model: {}", e),
-            )
-        })?;
+        tensor_db
+            .ensure_tensor_loaded(&model_name, &layer_id)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to load tensor layer: {}", e),
+                )
+            })?;
     }
 
     let tensor_db = state.tensor_db.read().await;
@@ -1891,6 +1880,7 @@ pub struct GeneratePayload {
 }
 
 pub async fn generate_text(
+    _: RequireWrite,
     State(state): State<SharedState>,
     Json(payload): Json<GeneratePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -2130,7 +2120,18 @@ pub async fn system_diagnostics(
     _: RequireReadOnly,
     State(_db): State<SharedState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    Ok(Json(serde_json::json!({"status": "unimplemented"})))
+    let gate = crate::inference::spanda_telemetry::current_gate_status();
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "spanda_phase0_gate": {
+            "jaccard_score": gate.score,
+            "samples": gate.samples,
+            "passed": gate.passed,
+            "min_samples_required": spanda_engine::MIN_SAMPLES,
+            "pass_threshold": spanda_engine::JACCARD_PASS_THRESHOLD,
+            "note": "measures real model-access predictability across served requests; paging is not yet activated on this signal, see spanda_telemetry.rs"
+        }
+    })))
 }
 
 pub async fn system_heal(
@@ -2178,6 +2179,7 @@ pub async fn set_spanda_degraded(
 }
 
 pub async fn generate_text_stream(
+    _: RequireWrite,
     State(state): State<SharedState>,
     Json(payload): Json<GeneratePayload>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
@@ -2349,7 +2351,7 @@ mod sse_tests {
     }
 }
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 pub struct ObservabilityMetrics {
     query_latencies_ms: Mutex<Vec<f64>>,

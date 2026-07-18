@@ -3,15 +3,12 @@ use spanda_engine::Session;
 use std::sync::{Arc, Once, OnceLock};
 
 pub trait BramhaBackend {
-    fn generate(&mut self, prompt: &str, max_tokens: usize) -> Result<String, String>;
+    fn generate(&mut self, model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String>;
     fn is_healthy(&self) -> bool;
 }
 
 pub static BRAMHA_DATABASE: OnceLock<Arc<Database>> = OnceLock::new();
 
-thread_local! {
-    pub static ACTIVE_MODEL_NAME: std::cell::RefCell<String> = std::cell::RefCell::new("qwen2-0.5b".to_string());
-}
 
 static INIT_SPANDA: Once = Once::new();
 
@@ -21,42 +18,58 @@ pub fn init_spanda_bridge() {
     });
 }
 
-fn spanda_generator_bridge(prompt: &str, max_tokens: usize) -> Result<String, String> {
+fn spanda_generator_bridge(model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String> {
     let db = BRAMHA_DATABASE
         .get()
         .cloned()
         .ok_or_else(|| "Database not registered in SPANDA bridge".to_string())?;
 
-    let model_name = ACTIVE_MODEL_NAME.with(|name| name.borrow().clone());
+    // model_name arrives as a real parameter now — no thread_local, no reliance on
+    // "no .await happens between the write and the read on this one call site."
 
-    pollster::block_on(async {
-        // Run scheduler decision to execute CPU or WGPU
-        let scheduler = crate::planner::scheduler::HeterogeneousScheduler::new();
-        let use_cpu_entirely = scheduler.should_use_cpu_entirely(&db, &model_name).await;
+    // Was: pollster::block_on(async {...}) — blocks the calling OS thread outright with no
+    // signal to the runtime, so on a busy multi_thread scheduler this can starve/stall other
+    // in-flight requests (worst case: all workers wedged in nested block_on waiting on work
+    // that needs a free worker to progress -> deadlock). block_in_place tells the runtime this
+    // thread is about to block so it can move other ready tasks onto remaining workers first.
+    // Requires the multi_thread runtime (main.rs uses #[tokio::main], which defaults to it);
+    // panics if ever called from a current_thread runtime.
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            // Run scheduler decision to execute CPU or WGPU
+            let scheduler = crate::planner::scheduler::HeterogeneousScheduler::new();
+            let use_cpu_entirely = scheduler.should_use_cpu_entirely(&db, model_name).await;
 
-        let result = if use_cpu_entirely {
-            crate::inference::cpu_engine::generate_cpu(db, &model_name, prompt, max_tokens, 0.7)
+            let result = if use_cpu_entirely {
+                crate::inference::cpu_engine::generate_cpu(
+                    db,
+                    model_name,
+                    prompt,
+                    max_tokens,
+                    0.7,
+                )
                 .await
-        } else {
-            crate::inference::engine::InferenceEngine::generate_wgpu(
-                db,
-                &model_name,
-                prompt,
-                max_tokens,
-                0.7,
-                None,
-                None,
-            )
-            .await
-        };
+            } else {
+                crate::inference::engine::InferenceEngine::generate_wgpu(
+                    db,
+                    model_name,
+                    prompt,
+                    max_tokens,
+                    0.7,
+                    None,
+                    None,
+                )
+                .await
+            };
 
-        result.map(|r| r.completion)
+            result.map(|r| r.completion)
+        })
     })
 }
 
 impl BramhaBackend for Session {
-    fn generate(&mut self, prompt: &str, max_tokens: usize) -> Result<String, String> {
-        (*self).generate(prompt, max_tokens)
+    fn generate(&mut self, model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String> {
+        (*self).generate(model_name, prompt, max_tokens)
     }
 
     fn is_healthy(&self) -> bool {
@@ -81,7 +94,7 @@ mod tests {
             (5012, 14.56f32),   // " Paris"
         ];
 
-        // Mock Qwen2-0.5B greedy decode logit generation
+        // Baseline Qwen2-0.5B greedy decode logit generation
         let actual_logits = [
             (151643, 10.45f32),
             (10124, 8.21f32),

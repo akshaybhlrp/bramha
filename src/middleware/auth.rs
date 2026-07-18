@@ -8,6 +8,23 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::sync::{OnceLock, RwLock};
+use std::time::SystemTime;
+
+/// Process-wide cache of the parsed keys file, keyed on (path, mtime) so we only
+/// re-read disk when the file actually changed (e.g. via save_keys' rotation).
+/// Previously, every request called load_keys() → fs::read_to_string() unconditionally,
+/// which is (a) a syscall + JSON parse on the hot auth path for every single request,
+/// and (b) has a narrow TOCTOU window against save_keys' write+rename.
+struct KeysCache {
+    keys: HashMap<String, Role>,
+    /// Keyed on (path, mtime) — not mtime alone. AuthManager can point at different
+    /// keys_file values (prod vs. tests use different files); mtime alone could collide.
+    path: String,
+    mtime: Option<SystemTime>,
+}
+
+static KEYS_CACHE: OnceLock<RwLock<KeysCache>> = OnceLock::new();
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Role {
@@ -39,9 +56,41 @@ impl AuthManager {
         }
     }
 
-    /// Load all keys from storage, writing default keys if file doesn't exist
+    /// Load all keys from storage, writing default keys if file doesn't exist.
+    /// Cached in-process; only re-reads/re-parses the file when its mtime changes.
     pub fn load_keys(&self) -> HashMap<String, Role> {
         let path = Path::new(self.keys_file);
+        let current_mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+
+        let cache_lock = KEYS_CACHE.get_or_init(|| {
+            RwLock::new(KeysCache {
+                keys: HashMap::new(),
+                path: String::new(),
+                mtime: None,
+            })
+        });
+
+        // Fast path: cache hit — file hasn't changed and path matches
+        if let Ok(cached) = cache_lock.read()
+            && cached.mtime.is_some()
+            && cached.mtime == current_mtime
+            && cached.path == self.keys_file
+        {
+            return cached.keys.clone();
+        }
+
+        // Cache miss (first load, file changed, different keys_file path, or file briefly
+        // absent mid-rotation): fall through to the real disk read + re-validate, refresh cache.
+        let keys = self.load_keys_from_disk(path);
+        if let Ok(mut cached) = cache_lock.write() {
+            cached.keys = keys.clone();
+            cached.path = self.keys_file.to_string();
+            cached.mtime = current_mtime;
+        }
+        keys
+    }
+
+    fn load_keys_from_disk(&self, path: &Path) -> HashMap<String, Role> {
         let env_is_prod = std::env::var("RUST_ENV").unwrap_or_default() == "production"
             || std::env::var("BRAMHA_ENV").unwrap_or_default() == "production";
 
@@ -86,6 +135,20 @@ impl AuthManager {
             file.sync_all().map_err(|e| e.to_string())?;
         }
         std::fs::rename(temp_path, self.keys_file).map_err(|e| e.to_string())?;
+
+        // Eagerly refresh the cache with the just-saved keys so that the next
+        // load_keys() call doesn't have to hit disk again.
+        let current_mtime = std::fs::metadata(self.keys_file)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if let Some(cache_lock) = KEYS_CACHE.get() {
+            if let Ok(mut cached) = cache_lock.write() {
+                cached.keys = keys.clone();
+                cached.path = self.keys_file.to_string();
+                cached.mtime = current_mtime;
+            }
+        }
+
         Ok(())
     }
 

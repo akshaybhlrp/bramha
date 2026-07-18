@@ -9,7 +9,10 @@ pub mod prefetcher;
 pub mod prefill_cache;
 pub mod profiler;
 pub mod reranker;
-pub mod sparse_predictor;
+// sparse_predictor module removed: merged into spanda-engine (spanda_engine::sparse) —
+// this crate's sparse math now lives in the crate actually named for the sparse
+// architecture, instead of duplicated/disconnected from it.
+
 pub mod speculative;
 pub mod tokenizer;
 
@@ -32,3 +35,4 @@ pub fn is_cpu_only() -> bool {
 }
 pub mod power;
 pub mod spanda_backend;
+pub mod spanda_telemetry;

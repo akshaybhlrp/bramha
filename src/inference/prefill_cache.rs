@@ -355,13 +355,13 @@ mod tests {
         fs::create_dir_all(&temp_dir).unwrap();
 
         let prompt = "Test prompt for roundtrip persistence";
-        let mock_keys = vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]];
-        let mock_values = vec![vec![1.1, 1.2, 1.3], vec![1.4, 1.5, 1.6]];
+        let test_keys = vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]];
+        let test_values = vec![vec![1.1, 1.2, 1.3], vec![1.4, 1.5, 1.6]];
         let entry = KvCacheEntry {
             session_id: PrefillCacheManager::compute_prompt_hash(prompt),
             tokens: vec![42, 1337],
-            keys: mock_keys.clone(),
-            values: mock_values.clone(),
+            keys: test_keys.clone(),
+            values: test_values.clone(),
             last_accessed: 1000,
             ttl_expiry: 2000,
         };
@@ -378,8 +378,8 @@ mod tests {
         // Load and verify
         let loaded = PrefillCacheManager::load(&temp_dir, prompt).unwrap();
         assert_eq!(loaded.tokens, vec![42, 1337]);
-        assert_eq!(loaded.keys, mock_keys);
-        assert_eq!(loaded.values, mock_values);
+        assert_eq!(loaded.keys, test_keys);
+        assert_eq!(loaded.values, test_values);
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);

@@ -37,6 +37,13 @@ pub const MODEL_REGISTRY: &[RegistryEntry] = &[
         config_url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/config.json",
         expected_sha256: "",
     },
+    RegistryEntry {
+        id: "qwen1.5-moe-a2.7b",
+        model_url: "https://huggingface.co/Qwen/Qwen1.5-MoE-A2.7B/resolve/main/model.safetensors.index.json",
+        tokenizer_url: "https://huggingface.co/Qwen/Qwen1.5-MoE-A2.7B/resolve/main/tokenizer.json",
+        config_url: "https://huggingface.co/Qwen/Qwen1.5-MoE-A2.7B/resolve/main/config.json",
+        expected_sha256: "",
+    },
 ];
 
 /// Pulls a model from the registry, streams down its weights and tokenizer, verifies integrity,
@@ -94,101 +101,147 @@ pub async fn pull_model(model_id: &str, tensor_db: &mut TensorDB) -> Result<(), 
     println!("✅ Tokenizer saved to {:?}", tokenizer_path);
 
     // 2. Stream model weights
-    println!("⬇️ Downloading model weights for '{}'...", model_id);
-    let response = client
-        .get(entry.model_url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to request model weights: {}", e))?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "Model download failed with HTTP {}",
-            response.status()
-        ));
+    let mut files_to_download = Vec::new();
+
+    if entry.model_url.ends_with(".index.json") {
+        println!("⬇️ Fetching multi-part index.json for '{}'...", model_id);
+        let index_resp = client
+            .get(entry.model_url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to get index: {}", e))?;
+        if !index_resp.status().is_success() {
+            return Err(format!("Index download failed: {}", index_resp.status()));
+        }
+        let index_json = index_resp.text().await.map_err(|e| e.to_string())?;
+
+        #[derive(serde::Deserialize)]
+        struct IndexMap {
+            weight_map: std::collections::HashMap<String, String>,
+        }
+
+        let parsed: IndexMap = serde_json::from_str(&index_json)
+            .map_err(|e| format!("Failed to parse index json: {}", e))?;
+        let mut unique_files: Vec<String> = parsed.weight_map.values().cloned().collect();
+        unique_files.sort();
+        unique_files.dedup();
+
+        let base_url = entry
+            .model_url
+            .trim_end_matches("model.safetensors.index.json");
+        for file_name in unique_files {
+            files_to_download.push((file_name.clone(), format!("{}{}", base_url, file_name)));
+        }
+    } else {
+        files_to_download.push(("model.safetensors".to_string(), entry.model_url.to_string()));
     }
 
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
+    tensor_db.create_model(model_id.to_string());
 
-    let temp_model_path = model_dir.join("downloading_weights.tmp");
-    let mut temp_file = File::create(&temp_model_path)
-        .map_err(|e| format!("Failed to create temporary weight file: {}", e))?;
-
-    let mut last_update = std::time::Instant::now();
-    let mut response_obj = response;
-
-    while let Some(chunk) = response_obj
-        .chunk()
-        .await
-        .map_err(|e| format!("Error downloading chunk: {}", e))?
-    {
-        temp_file
-            .write_all(&chunk)
-            .map_err(|e| format!("Error writing chunk to disk: {}", e))?;
-        downloaded += chunk.len() as u64;
-
-        if last_update.elapsed().as_millis() > 500 {
-            if total_size > 0 {
-                let percent = (downloaded as f64 / total_size as f64) * 100.0;
-                print!(
-                    "\r   Progress: {:.1}% ({:.2} MB / {:.2} MB)",
-                    percent,
-                    downloaded as f64 / 1_000_000.0,
-                    total_size as f64 / 1_000_000.0
-                );
-            } else {
-                print!(
-                    "\r   Progress: {:.2} MB downloaded",
-                    downloaded as f64 / 1_000_000.0
-                );
-            }
-            std::io::stdout().flush().unwrap_or_default();
-            last_update = std::time::Instant::now();
-        }
-    }
-    println!("\n✅ Model weights downloaded successfully!");
-
-    // 3. Verify SHA-256 checksum if configured
-    if !entry.expected_sha256.is_empty() {
-        println!("🛡️ Verifying SHA-256 integrity checksum...");
-        temp_file.sync_all().map_err(|e| e.to_string())?;
-        drop(temp_file);
-
-        let mut file = File::open(&temp_model_path).map_err(|e| e.to_string())?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0; 65536];
-        loop {
-            let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer[..count]);
-        }
-        let hash_result = hasher.finalize();
-        let sha256_hex = format!("{:x}", hash_result);
-        if sha256_hex != entry.expected_sha256 {
-            let _ = std::fs::remove_file(&temp_model_path);
+    for (idx, (file_name, url)) in files_to_download.iter().enumerate() {
+        println!(
+            "\n⬇️ Downloading model weight part {}/{} ('{}')...",
+            idx + 1,
+            files_to_download.len(),
+            file_name
+        );
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to request model weights: {}", e))?;
+        if !response.status().is_success() {
             return Err(format!(
-                "CRITICAL CHECKSUM MISMATCH: Expected {}, got {}",
-                entry.expected_sha256, sha256_hex
+                "Model download failed with HTTP {}",
+                response.status()
             ));
         }
-        println!("   Checksum validation PASSED!");
-    } else {
-        drop(temp_file);
+
+        let total_size = response.content_length().unwrap_or(0);
+        let mut downloaded: u64 = 0;
+
+        let temp_model_path = model_dir.join(file_name);
+        let mut temp_file = File::create(&temp_model_path)
+            .map_err(|e| format!("Failed to create temporary weight file: {}", e))?;
+
+        let mut last_update = std::time::Instant::now();
+        let mut response_obj = response;
+
+        while let Some(chunk) = response_obj
+            .chunk()
+            .await
+            .map_err(|e| format!("Error downloading chunk: {}", e))?
+        {
+            temp_file
+                .write_all(&chunk)
+                .map_err(|e| format!("Error writing chunk to disk: {}", e))?;
+            downloaded += chunk.len() as u64;
+
+            if last_update.elapsed().as_millis() > 500 {
+                if total_size > 0 {
+                    let percent = (downloaded as f64 / total_size as f64) * 100.0;
+                    print!(
+                        "\r   Progress: {:.1}% ({:.2} MB / {:.2} MB)",
+                        percent,
+                        downloaded as f64 / 1_000_000.0,
+                        total_size as f64 / 1_000_000.0
+                    );
+                } else {
+                    print!(
+                        "\r   Progress: {:.2} MB downloaded",
+                        downloaded as f64 / 1_000_000.0
+                    );
+                }
+                std::io::stdout().flush().unwrap_or_default();
+                last_update = std::time::Instant::now();
+            }
+        }
+        println!("\n✅ Part '{}' downloaded successfully!", file_name);
+
+        // 3. Verify SHA-256 checksum if configured
+        if !entry.expected_sha256.is_empty() && files_to_download.len() == 1 {
+            println!("🛡️ Verifying SHA-256 integrity checksum...");
+            temp_file.sync_all().map_err(|e| e.to_string())?;
+            drop(temp_file);
+
+            let mut file = File::open(&temp_model_path).map_err(|e| e.to_string())?;
+            let mut hasher = Sha256::new();
+            let mut buffer = [0; 65536];
+            loop {
+                let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+                if count == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..count]);
+            }
+            let hash_result = hasher.finalize();
+            let sha256_hex = format!("{:x}", hash_result);
+            if sha256_hex != entry.expected_sha256 {
+                let _ = std::fs::remove_file(&temp_model_path);
+                return Err(format!(
+                    "CRITICAL CHECKSUM MISMATCH: Expected {}, got {}",
+                    entry.expected_sha256, sha256_hex
+                ));
+            }
+            println!("   Checksum validation PASSED!");
+        } else {
+            drop(temp_file);
+        }
+
+        // 4. Ingest/Shard the model
+        println!(
+            "⚙️ Ingesting sharded weights from '{}' into Bramha Engine...",
+            file_name
+        );
+        let model_table = tensor_db.models.get_mut(model_id).unwrap();
+
+        model_table
+            .load_safetensors(file_name)
+            .map_err(|e| format!("Ingestion sharding failed: {}", e))?;
+
+        // Cleanup raw safetensors file after ingestion completes
+        let _ = std::fs::remove_file(&temp_model_path);
     }
-
-    // 4. Ingest/Shard the model
-    println!("⚙️ Ingesting sharded weights into Bramha Engine...");
-    tensor_db.create_model(model_id.to_string());
-    let model_table = tensor_db.models.get_mut(model_id).unwrap();
-
-    let final_model_path = model_dir.join("model.safetensors");
-    std::fs::rename(&temp_model_path, &final_model_path).map_err(|e| e.to_string())?;
-
-    model_table
-        .load_safetensors("model.safetensors")
-        .map_err(|e| format!("Ingestion sharding failed: {}", e))?;
 
     // Persist model metadata to SQLite metadata DB
     let metadata_store = MetadataSqlStore::new();
@@ -203,6 +256,8 @@ pub async fn pull_model(model_id: &str, tensor_db: &mut TensorDB) -> Result<(), 
         500_000_000
     } else if model_id.contains("1.1b") {
         1_100_000_000
+    } else if model_id.contains("2.7b") {
+        14_000_000_000
     } else if model_id.contains("7b") {
         7_000_000_000
     } else {
@@ -214,9 +269,6 @@ pub async fn pull_model(model_id: &str, tensor_db: &mut TensorDB) -> Result<(), 
         params_count,
         &model_dir.to_string_lossy(),
     );
-
-    // Cleanup raw safetensors file after ingestion completes
-    let _ = std::fs::remove_file(final_model_path);
 
     println!(
         "🎉 Model '{}' is now fully registered and query-ready!",

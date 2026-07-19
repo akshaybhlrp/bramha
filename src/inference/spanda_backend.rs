@@ -3,12 +3,16 @@ use spanda_engine::Session;
 use std::sync::{Arc, Once, OnceLock};
 
 pub trait BramhaBackend {
-    fn generate(&mut self, model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String>;
+    fn generate(
+        &mut self,
+        model_name: &str,
+        prompt: &str,
+        max_tokens: usize,
+    ) -> Result<String, String>;
     fn is_healthy(&self) -> bool;
 }
 
 pub static BRAMHA_DATABASE: OnceLock<Arc<Database>> = OnceLock::new();
-
 
 static INIT_SPANDA: Once = Once::new();
 
@@ -18,7 +22,11 @@ pub fn init_spanda_bridge() {
     });
 }
 
-fn spanda_generator_bridge(model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String> {
+fn spanda_generator_bridge(
+    model_name: &str,
+    prompt: &str,
+    max_tokens: usize,
+) -> Result<String, String> {
     let db = BRAMHA_DATABASE
         .get()
         .cloned()
@@ -41,23 +49,11 @@ fn spanda_generator_bridge(model_name: &str, prompt: &str, max_tokens: usize) ->
             let use_cpu_entirely = scheduler.should_use_cpu_entirely(&db, model_name).await;
 
             let result = if use_cpu_entirely {
-                crate::inference::cpu_engine::generate_cpu(
-                    db,
-                    model_name,
-                    prompt,
-                    max_tokens,
-                    0.7,
-                )
-                .await
+                crate::inference::cpu_engine::generate_cpu(db, model_name, prompt, max_tokens, 0.7)
+                    .await
             } else {
                 crate::inference::engine::InferenceEngine::generate_wgpu(
-                    db,
-                    model_name,
-                    prompt,
-                    max_tokens,
-                    0.7,
-                    None,
-                    None,
+                    db, model_name, prompt, max_tokens, 0.7, None, None,
                 )
                 .await
             };
@@ -68,7 +64,12 @@ fn spanda_generator_bridge(model_name: &str, prompt: &str, max_tokens: usize) ->
 }
 
 impl BramhaBackend for Session {
-    fn generate(&mut self, model_name: &str, prompt: &str, max_tokens: usize) -> Result<String, String> {
+    fn generate(
+        &mut self,
+        model_name: &str,
+        prompt: &str,
+        max_tokens: usize,
+    ) -> Result<String, String> {
         (*self).generate(model_name, prompt, max_tokens)
     }
 

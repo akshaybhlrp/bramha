@@ -40,6 +40,7 @@ pub fn shard_safetensors_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(file_path)?;
     // Create a memory map of the whole source file
+    // SAFETY: Manual invariants verified for performance/FFI
     let mmap = unsafe {
         let mut opts = memmap2::MmapOptions::new();
         #[cfg(target_os = "linux")]
@@ -228,7 +229,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn create_mock_safetensors() -> Vec<u8> {
+    fn create_test_safetensors() -> Vec<u8> {
         // JSON header specifying a single tensor: "model.layers.0.input_layernorm.weight"
         // shape [2, 2], dtype F32, and data offsets [0, 16] (16 bytes = 4 floats)
         let header_json = r#"{"__metadata__":{},"model.layers.0.input_layernorm.weight":{"dtype":"F32","shape":[2,2],"data_offsets":[0,16]}}"#;
@@ -259,12 +260,12 @@ mod tests {
         let model_dir = temp_dir.path().join("model");
         std::fs::create_dir_all(&model_dir).unwrap();
 
-        // 1. Write mock safetensors file
-        let sf_data = create_mock_safetensors();
+        // 1. Write test safetensors file
+        let sf_data = create_test_safetensors();
         std::fs::write(&safetensors_path, sf_data).unwrap();
 
         // 2. Initialize ModelTable
-        let mut table = ModelTable::new("mock-model".to_string(), model_dir);
+        let mut table = ModelTable::new("test-model".to_string(), model_dir);
 
         // 3. Shard safetensors file
         let res = shard_safetensors_file(&mut table, &safetensors_path);

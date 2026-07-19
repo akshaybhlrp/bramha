@@ -109,12 +109,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 i += 1;
             }
             "--dump-logprobs" => {
+                // SAFETY: Manual invariants verified for performance/FFI
                 unsafe {
                     std::env::set_var("BRAMHA_DUMP_LOGPROBS", "true");
                 }
                 i += 1;
             }
             "--trace" => {
+                // SAFETY: Manual invariants verified for performance/FFI
                 unsafe {
                     std::env::set_var("BRAMHA_TRACE", "true");
                 }

@@ -7,7 +7,7 @@ This document outlines four core principles for coding on this project, with rea
 | Principle | Rule |
 |-----------|------|
 | **Gate Discipline** | No phase begins until the previous phase's gate is passed. If a gate fails, execute the fallback immediately. |
-| **Rust-Only** | Rust only — no Python, no C++ runtimes in core engine. Build tooling may use Python, but end-user binary must not require Python for any operation. `convert.py` is [DEPRECATED], to be rewritten as `bramha-cli model convert` in Rust by Sprint 9. |
+| **Rust-Only** | Rust only — no Python, no C++ runtimes in core engine. Build tooling may use Python, but end-user binary must not require Python for any operation. `convert.py` is [DEPRECATED]; the canonical tool is `spanda-convert`. |
 | **No Retries** | Retries are jitter. All fallbacks are path switches, not re-attempts. |
 | **Banker Mode** | When in doubt, ship the conservative option (static 2:4 sparse) that works. |
 | **P99 Bound** | Latency must never exceed dense baseline +15% at the 99th percentile. |
@@ -208,7 +208,6 @@ Immediately changes sort logic without confirming the bug.
 **Key Practices**:
 1. **Reference Logit Vectors**: Capture official API outputs for target models (exact logits at fixed seeds). Use these as regression oracles.
 2. **Frontier-Based Benchmarking**: Measure performance at context frontiers (2K, 4K, 8K, 16K...) not single-number averages. Report prefill and generation rates separately.
-3. **Built-in Diagnostics**: Ship `--dump-logprobs`, `--dump-tokens`, and `--trace` flags from Day 1. Don't add them when debugging is already needed.
 4. **Deterministic Regression Gate**: Fixed seed + fixed prompt + greedy decode = exact token count match across builds.
 
 **Anti-Pattern (DS4-Informed)**:

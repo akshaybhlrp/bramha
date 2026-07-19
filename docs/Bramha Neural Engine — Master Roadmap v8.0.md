@@ -844,32 +844,25 @@ Compute Backend (CPU / wgpu / Remote)
 Storage Layer + Metadata DB + Cache + WAL
 ```
 
-### 18.1 Suggested Rust Workspace Layout
+### 18.1 Suggested Rust Workspace Layout (Corrected)
 
 ```text
 bramha/
 ├── Cargo.toml
-├── bramha-engine/
-│   └── src/
-│       ├── planner/
-│       ├── inference/
-│       ├── retrieval/
-│       ├── memory/
-│       ├── graph/
-│       ├── compute/
-│       ├── concurrency/
-│       ├── storage/
-│       ├── telemetry/
-│       ├── degradation/
-│       └── experimental/
-├── bramha-server/
-│   └── src/
-│       ├── http/
-│       ├── uds/
-│       └── middleware/
-├── bramha-cli/
-│   └── src/
-└── xtask/
+└── src/
+    ├── api/
+    ├── cognitive/
+    ├── compute/
+    ├── concurrency/
+    ├── core/
+    ├── index/
+    ├── inference/
+    ├── middleware/
+    ├── models/
+    ├── network/
+    ├── planner/
+    ├── storage/
+    └── bin/
 ```
 
 ---
@@ -955,22 +948,22 @@ Gate: Must complete before Sprint 6 can use cached-answer path.
 - [ ] Target (PROJECTED — pending Sprint 9 end-to-end validation): 50-80% storage reduction, 92-96% DRAM reduction
 
 **Key Modules Implemented:**
-- `src/storage/storage_manifest.rs` (350 lines) — Layer metadata & tier classification
-- `src/storage/content_addressing.rs` (380 lines) — Blake3 deduplication engine
-- `src/storage/multi_tier.rs` (450 lines) — DRAM/SSD/HDD routing system
+- `src/storage/storage_manifest.rs` (731 lines) — Layer metadata & tier classification
+- `src/storage/content_addressing.rs` (479 lines) — Blake3 deduplication engine
+- `src/storage/multi_tier.rs` (582 lines) — DRAM/SSD/HDD routing system
 - STORAGE_EFFICIENCY_ROADMAP.md — 12 novel storage optimization strategies
 - STORAGE_IMPLEMENTATION_GUIDE.md — Integration blueprint for tensor_db.rs
 - STORAGE_STRATEGY_SUMMARY.md — Executive summary and strategic value
 - STORAGE_ORCHESTRATION_EXAMPLE.rs — Runnable integration example
 
-### Sprint 9 — Storage Integration & Advanced Compression
+### Sprint 9 — Storage Integration & Advanced Compression [IN PROGRESS]
 
 **Sprint Goal:** Integrate storage foundation into inference pipeline and validate end-to-end.
 
-**Completed:**
+**In Progress:**
 - [x] Content-addressed deduplication for multi-model scenarios
-- [x] SVD factorization (35-50% additional storage saving)
-- [x] Columnar codec (15-30% additional storage saving)
+- [ ] SVD factorization (35-50% additional storage saving) [NOT IMPLEMENTED]
+- [ ] Columnar codec (15-30% additional storage saving) [NOT IMPLEMENTED]
 - [x] Differential compression for model layers (40-60% for layers 2+)
 
 #### Task BRM-S9-001: Manifest Integration into tensor_db.rs
@@ -1013,7 +1006,7 @@ Gate: Must complete before Sprint 6 can use cached-answer path.
 - **Rollback**: `planner_tier_aware = false` disables tier routing.
 - **Tests**: Unit (tier selection logic), Integration (full load with tier routing), Latency regression.
 
-#### Task BRM-S9-003: End-to-End Storage Benchmark
+#### Task BRM-S9-003: End-to-End Storage Benchmark [IN PROGRESS]
 - **Objective**: Validate Sprint 8 performance claims with reproducible fixture.
 - **Scope**: `benches/end_to_end_storage.rs`, `src/storage/`
 - **Non-Goals**: Do not optimize based on results. Measure only.
@@ -1026,9 +1019,9 @@ Gate: Must complete before Sprint 6 can use cached-answer path.
   4. Generate `sprint9_benchmark_report.md`.
 - **Outputs**: Benchmark report, raw data, comparison table.
 - **Acceptance Criteria**:
-  - [x] Benchmark runs reproducibly (±5% variance across 3 runs).
+  - [ ] Benchmark runs reproducibly (±5% variance across 3 runs).
   - [x] Report documents all metrics with hardware class.
-  - [x] Claims marked ACHIEVED or UNACHIEVED with evidence.
+  - [ ] Claims marked ACHIEVED or UNACHIEVED with evidence.
 - **Failure Modes**: If benchmark variance >10%, fix measurement methodology before claiming results.
 - **Rollback**: N/A — this is measurement, not a feature.
 - **Tests**: Statistical variance check across 3 runs.
@@ -1036,7 +1029,7 @@ Gate: Must complete before Sprint 6 can use cached-answer path.
 #### Tasks BRM-S9-OPT-001 through BRM-S9-OPT-003
 See Section 27, Optimization Sprint Assignments.
 
-### Sprint 10 — SPANDA Integration + DS4-Inspired Features
+### Sprint 10 — SPANDA Integration + DS4-Inspired Features [NOT STARTED]
 - **Objective**: Integrate released `spanda-engine` crate as Bramha's inference backend AND adopt proven DS4 techniques.
 - **Scope**: `bramha-engine/src/inference/spanda_backend.rs`, `bramha-engine/src/inference/power.rs`, `bramha-engine/src/storage/kv_persistence.rs`
 - **Non-Goals**: Do not build sparse kernels. Do not build page tables.
@@ -1051,14 +1044,14 @@ See Section 27, Optimization Sprint Assignments.
   7. *(DS4-Inspired)* Add `--dump-logprobs` and `--trace` diagnostic flags to CLI.
   8. *(DS4-Inspired)* Add frontier-based benchmarking (measure at 2K, 4K, 8K... context sizes).
 - **Acceptance Criteria**:
-  - [x] `cargo build` resolves `spanda-engine` without local path hacks.
-  - [x] Qwen2-0.5B generates through Bramha → SPANDA → wgpu path.
-  - [x] Planner can select SPANDA path or CPU fallback.
-  - [x] SPANDA's P99 +15% bound is preserved under Bramha's telemetry.
-  - [x] `--power N` throttles GPU utilization to N% (±10% tolerance).
-  - [x] KV cache files save/load with boundary-aligned trimming (trim last N tokens, round down to prefill chunk boundary before write).
-  - [x] Frontier-based benchmark produces CSV with per-frontier prefill and generation rates.
-  - [x] Golden vector logit-level regression test passes on Qwen2-0.5B (greedy decode, fixed seed).
+  - [ ] `cargo build` resolves `spanda-engine` without local path hacks.
+  - [ ] Qwen2-0.5B generates through Bramha → SPANDA → wgpu path.
+  - [ ] Planner can select SPANDA path or CPU fallback.
+  - [ ] SPANDA's P99 +15% bound is preserved under Bramha's telemetry.
+  - [ ] `--power N` throttles GPU utilization to N% (±10% tolerance).
+  - [ ] KV cache files save/load with boundary-aligned trimming (trim last N tokens, round down to prefill chunk boundary before write).
+  - [ ] Frontier-based benchmark produces CSV with per-frontier prefill and generation rates.
+  - [ ] Golden vector logit-level regression test passes on Qwen2-0.5B (greedy decode, fixed seed).
 - **Failure Modes**:
   - If SPANDA v0.1 is not released, Bramha Sprint 10 is blocked.
   - If SPANDA's P99 bound degrades under Bramha's scheduler, fallback to burn-wgpu.

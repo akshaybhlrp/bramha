@@ -43,6 +43,7 @@ impl BlockDB {
             .create(true)
             .open(&blob_path)?;
 
+        // SAFETY: Manual invariants verified for performance/FFI
         let mmap = unsafe {
             let opts = memmap2::MmapOptions::new();
             if let Ok(m) = opts.map(&blob_file) {

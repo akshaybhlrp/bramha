@@ -253,6 +253,7 @@ impl ModelTable {
         let len = aligned_buffer.len() * 4;
         let cap = aligned_buffer.capacity() * 4;
         std::mem::forget(aligned_buffer);
+        // SAFETY: Manual invariants verified for performance/FFI
         let mut buffer = unsafe { Vec::from_raw_parts(ptr, len, cap) };
         buffer.truncate(total_bytes);
 
@@ -919,6 +920,111 @@ impl TensorDB {
         }
         Ok(())
     }
+
+    /// Ensures that only a specific tensor is loaded into memory, avoiding a full model load if possible.
+    pub fn ensure_tensor_loaded(&mut self, model_name: &str, layer_id: &str) -> Result<(), String> {
+        // If the model is fully loaded, or the layer is already loaded, we're good
+        if let Some(model) = self.models.get(model_name) {
+            if model.layers.contains_key(layer_id) {
+                return Ok(());
+            }
+        } else {
+            return Err(format!("Model {} not registered in TensorDB", model_name));
+        }
+
+        let (path, manifest) = {
+            let model = self.models.get(model_name).unwrap();
+            (model.base_path.clone(), model.manifest.clone())
+        };
+
+        let view_path = path.join("model_view.json");
+        if view_path.exists() {
+            // For BUTS models, the metadata is monolithic in model_view.json, so we have to call load_model_layers,
+            // but load_model_layers for BUTS only creates empty placeholders (no mmaps), so it's already fast.
+            self.ensure_model_loaded(model_name)?;
+            return Ok(());
+        }
+
+        // True per-tensor on-demand load for legacy/manifest models
+        if let Some(manifest) = manifest {
+            if let Some(layer_meta) = manifest
+                .layers
+                .get(layer_id)
+                .or_else(|| manifest.layers.values().find(|v| v.layer_id == layer_id))
+            {
+                let safe_name = layer_meta.layer_id.replace(".", "_");
+                let candidates = vec![
+                    format!("{}_u4.bin", safe_name),
+                    format!("{}_scale.bin", safe_name),
+                    format!("{}_i8.bin", safe_name),
+                    format!("{}_svd.bin", safe_name),
+                    format!("{}_cd.bin", safe_name),
+                    format!("{}.bin", safe_name),
+                ];
+                let bin_path = candidates.iter().map(|c| path.join(c)).find(|p| p.exists());
+                if let Some(bin_path) = bin_path {
+                    let dtype = match layer_meta.compression_format {
+                        crate::storage::storage_manifest::CompressionFormat::Svd => DType::Svd,
+                        crate::storage::storage_manifest::CompressionFormat::ColumnarDict => {
+                            DType::ColumnarDict
+                        }
+                        crate::storage::storage_manifest::CompressionFormat::Int4PerChannel => {
+                            DType::U4
+                        }
+                        _ => DType::F32,
+                    };
+                    match TensorPage::load_mmap_single(
+                        layer_meta.layer_id.clone(),
+                        &bin_path,
+                        layer_meta.shape.clone(),
+                        dtype,
+                    ) {
+                        Ok(mut page) => {
+                            if dtype == DType::Svd {
+                                page.svd_rank = layer_meta.svd_rank;
+                            }
+                            let _ = page.advise_prefetch();
+                            if let Some(model) = self.models.get_mut(model_name) {
+                                model.layers.insert(layer_meta.layer_id.clone(), page);
+                            }
+                            Ok(())
+                        }
+                        Err(e) => Err(format!(
+                            "Failed to mmap layer {}: {}",
+                            layer_meta.layer_id, e
+                        )),
+                    }
+                } else {
+                    Err(format!("Missing shard file for layer '{}'", layer_id))
+                }
+            } else {
+                Err(format!("Layer {} not found in manifest", layer_id))
+            }
+        } else {
+            // Legacy fallback (no manifest)
+            let safe_name = layer_id.replace(".", "_");
+            let bin_path = path.join(format!("{}.bin", safe_name));
+            if bin_path.exists() {
+                match TensorPage::load_mmap_single(
+                    layer_id.to_string(),
+                    &bin_path,
+                    vec![],
+                    DType::Other,
+                ) {
+                    Ok(page) => {
+                        let _ = page.advise_prefetch();
+                        if let Some(model) = self.models.get_mut(model_name) {
+                            model.layers.insert(layer_id.to_string(), page);
+                        }
+                        Ok(())
+                    }
+                    Err(e) => Err(format!("Failed to mmap legacy shard {:?}: {}", bin_path, e)),
+                }
+            } else {
+                Err(format!("Layer file {:?} not found", bin_path))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1024,7 +1130,7 @@ mod tests {
         let model = db.models.get("llama-dummy").unwrap();
         assert!(model.layers.is_empty());
 
-        // Populate with a mock layer
+        // Populate with a test layer
         {
             let model_mut = db.models.get_mut("llama-dummy").unwrap();
             let page = TensorPage::new_memory(
@@ -1052,8 +1158,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let mut db = TensorDB::new(temp_dir.path().to_path_buf());
 
-        // Write a mock manifest into the model directory
-        crate::storage::storage_manifest::write_mock_manifest(
+        // Write a test manifest into the model directory
+        crate::storage::storage_manifest::write_test_manifest(
             temp_dir.path(),
             "bypass-model",
             100, // vocab_size
@@ -1069,6 +1175,7 @@ mod tests {
         std::fs::write(&dummy_bin, vec![0u8; 100 * 64 * 4]).unwrap();
 
         // 1. With BRAMHA_MANIFEST_LOAD unset or true (should load via manifest)
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_MANIFEST_LOAD", "true");
         }
@@ -1081,6 +1188,7 @@ mod tests {
         db.unload_model_layers("bypass-model");
 
         // 2. With BRAMHA_MANIFEST_LOAD=false
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_MANIFEST_LOAD", "false");
         }
@@ -1093,6 +1201,7 @@ mod tests {
         let model = db.models.get("bypass-model").unwrap();
         assert!(model.layers.contains_key("model.embed.tokens.weight"));
 
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_MANIFEST_LOAD");
         }

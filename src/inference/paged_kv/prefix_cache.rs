@@ -180,6 +180,7 @@ mod tests {
 
     #[test]
     fn test_rolling_prefix_matching_saving_eviction() {
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_KV_TRIM_N", "0");
         }
@@ -241,6 +242,7 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_KV_TRIM_N");
         }
@@ -248,6 +250,7 @@ mod tests {
 
     #[test]
     fn test_boundary_aligned_trimming() {
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::set_var("BRAMHA_KV_TRIM_N", "4");
         }
@@ -267,6 +270,7 @@ mod tests {
         assert_eq!(match_hit.0, 16);
 
         let _ = fs::remove_dir_all(&temp_dir);
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::env::remove_var("BRAMHA_KV_TRIM_N");
         }

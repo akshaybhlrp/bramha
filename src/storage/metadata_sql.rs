@@ -220,7 +220,8 @@ impl MetadataSqlStore {
         conn.execute(
             "DELETE FROM planner_traces WHERE id <= (SELECT MAX(id) - ?1 FROM planner_traces)",
             params![PLANNER_TRACE_MAX_ROWS],
-        ).ok(); // best-effort
+        )
+        .ok(); // best-effort
 
         Ok(())
     }
@@ -415,11 +416,7 @@ impl MetadataSqlStore {
     }
 
     /// Log a shadow scan result and prune old rows. Called from cpu_engine.rs shadow path.
-    pub fn log_shadow_scan(
-        &self,
-        prompt: &str,
-        cosine_similarity: f64,
-    ) -> Result<(), String> {
+    pub fn log_shadow_scan(&self, prompt: &str, cosine_similarity: f64) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

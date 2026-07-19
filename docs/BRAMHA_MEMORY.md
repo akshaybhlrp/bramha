@@ -116,7 +116,7 @@ The core belief is that compute (flops) is the bottleneck, while storage is gett
 
 ## 5. Known Execution Quirks & Bottlenecks
 - **Rayon Thread Overhead**: The `matvec_mul` loop inside `cpu_engine.rs` uses `.par_iter_mut()` for tiny slice iterations. For extreme low-batch iterations, this thread-pool spawning actually dominates the execution profile (causing standard generic prompts to drop to ~1.36 tokens/sec without the materialized view cache). *Future agents should investigate moving to `std::arch` SIMD intrinsics or layer-level parallelism rather than operation-level parallelism.*
-- **Memory Allocation**: Dynamic vectors like `scratch_q`, `scratch_k`, etc., are allocated repeatedly inside the tight token generation loop in `generate_cpu`. *Future optimizations should lift these allocations out of the loop.*
+- **Memory Allocation**: Profiling has shown that some scratch buffers were being reallocated in the decode loop. This has been addressed by moving allocations outside the loop.
 - **Profiler Identified Bottlenecks**: After running `bench_cpu`, check the profiling report for the operations with the highest `total_ms` and `avg_us`. Likely candidates: GEMV operations (`qkv_proj`, `mlp_gate_up`, `mlp_down`) and `flash_attention`.
 
 ## 6. Development Guidelines for Future AI

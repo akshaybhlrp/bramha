@@ -272,7 +272,7 @@ DS4 independently validates Bramha's core storage thesis. Key confirmations:
 DS4 implements exactly this. KV cache files are stored on disk with SHA1 rendered-prefix keys, a 48-byte binary header, four checkpoint lifecycle stages (`cold/continued/evict/shutdown`), and boundary-aligned trimming for BPE safety. Sessions survive server restarts.
 
 ### ✅ Thesis: "SSD streaming changes inference from hard-cutoff to continuous spectrum"
-DS4 streams routed MoE experts from GGUF files on SSD, with an in-memory expert cache. The "automatic cache budget" sizes the hot tier as 80% of GPU working set minus non-routed weights. Expert buffers are `mlock`'d into physical RAM.
+DS4 streams routed MoE experts from GGUF files on SSD, with an in-memory expert cache. The "automatic cache budget" sizes the hot tier as 80% of GPU working set minus non-routed weights. Expert buffers are memory-mapped to prevent OS paging.
 
 ### ✅ Thesis: "Multi-tier storage mimics database buffer pools"
 DS4's architecture has exactly two tiers: DRAM expert cache (hot) and GGUF-on-SSD (cold). This simpler version of Bramha's three-tier system is production-proven.

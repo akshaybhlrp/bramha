@@ -63,20 +63,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n3. Performing Neural Network Math (Matrix Multiplication)...");
 
     // Simulate an incoming word embedding (a vector of 2048 floats representing a token)
-    let mock_input_embedding = Tensor::<B, 2>::random(
+    let test_input_embedding = Tensor::<B, 2>::random(
         Shape::from([1, cols]),
         burn::tensor::Distribution::Normal(0.0, 1.0),
         &device,
     );
     println!(
         "   - Created incoming embedding: Shape {:?}",
-        mock_input_embedding.shape()
+        test_input_embedding.shape()
     );
 
     let math_start = Instant::now();
 
     // Execute: output = input @ weight.T
-    let output = mock_input_embedding.matmul(q_weight_tensor.transpose());
+    let output = test_input_embedding.matmul(q_weight_tensor.transpose());
 
     let math_time = math_start.elapsed();
 

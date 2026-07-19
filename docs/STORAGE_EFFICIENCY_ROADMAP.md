@@ -261,30 +261,25 @@ When to use:
 
 ---
 
-### 1.10 Strategy: Bloom Filter + Locality-Sensitive Hashing for Deduplication
-**Concept**: Efficiently identify weight chunks that might be duplicated before full comparison.
+### 1.10 Strategy: HashSet for Deduplication Candidate Filtering
+**Concept**: Efficiently identify weight chunks that might be duplicated before full comparison, using a `HashSet` as a fast negative filter.
+_Note: A Bloom filter was originally proposed, but a `HashSet` is used in the current implementation as a placeholder._
 
 **Implementation**:
 ```
 At ingest (first model):
   1. For each weight chunk (256-element blocks):
-     - Compute Bloom filter hash(chunk) 
-     - Compute LSH signature (dimension-reduced sketch)
-     - Store: chunk_id -> (bloom, lsh_sig, location)
+     - Compute a quick hash of the chunk
+     - Store hash in a HashSet
   
 At ingest (subsequent models):
   2. For each weight chunk in new model:
-     - Check Bloom filter (fast negative filter)
-     - If hit, compute full hash (blake3)
-     - Compare with existing chunks (false positive rate ~1%)
+     - Check if the quick hash is in the HashSet
+     - If hit, compute full Blake3 hash and compare with existing chunks
      - If match: dedupe (store reference), else: store new
-
-Speedup:
-  Without Bloom+LSH: 100% content hash on all chunks (slow)
-  With Bloom+LSH: 99% filtered by Bloom (very fast), 1% full hash (slow but rare)
 ```
 
-**Ingest Time Saving**: 50-80% faster model ingest (dedup detection overhead minimized)
+**Ingest Time Saving**: ~20-40% faster model ingest by reducing the number of full Blake3 hash computations.
 
 ---
 
@@ -447,18 +442,18 @@ Promote hot layers, demote cold layers in tiering system
 - [x] Implement multi-tier storage planner
 - [x] Profile current model loading performance
 
-### Phase 2: Compression (Week 3-4)
-- [ ] Columnar tensor format codec
-- [ ] Differential compression across layers
-- [ ] Adaptive quantization calibration
-- [ ] Dictionary encoding for special layers
+### Phase 2: Compression (Week 3-4) [PARTIALLY IMPLEMENTED]
+- [x] Differential compression across layers
+- [ ] Columnar tensor format codec [NOT IMPLEMENTED]
+- [ ] Adaptive quantization calibration [NOT IMPLEMENTED]
+- [ ] Dictionary encoding for special layers [NOT IMPLEMENTED]
 - [ ] Benchmark compression ratios
 
-### Phase 3: Factorization (Week 5-6)
-- [ ] SVD factorization at ingest
-- [ ] Fused inference kernel: (U @ (S @ (Vt @ x)))
-- [ ] Rank adaptation based on singular values
-- [ ] Ablation: rank vs accuracy/speed tradeoff
+### Phase 3: Factorization (Week 5-6) [PARTIALLY IMPLEMENTED]
+- [x] SVD factorization at ingest
+- [ ] Fused inference kernel: (U @ (S @ (Vt @ x))) [NOT IMPLEMENTED]
+- [ ] Rank adaptation based on singular values [NOT IMPLEMENTED]
+- [ ] Ablation: rank vs accuracy/speed tradeoff [NOT IMPLEMENTED]
 
 ### Phase 4: Runtime Optimization (Week 7-8)
 - [ ] Lazy layer loading with prefetcher
@@ -563,14 +558,11 @@ This track runs in parallel/sequence with Strategy 1.6 and 1.7 to integrate dyna
 src/storage/
 ├── storage_manifest.rs         (NEW: layer metadata, versioning)
 ├── content_addressing.rs       (NEW: hash-based deduplication)
-├── columnar_codec.rs           (NEW: column-major tensor format)
 ├── factorization.rs            (NEW: SVD/QR decomposition)
 ├── differential_compression.rs (NEW: delta storage)
-├── adaptive_quantizer.rs       (NEW: per-layer quantization)
 ├── multi_tier.rs               (NEW: DRAM/SSD/HDD routing)
 ├── attention_cache.rs          (EXISTING: expanded for prefix caching)
-├── tensor_db.rs                (MODIFY: integrate new layers)
-└── inference_prefetcher.rs     (NEW: background layer loading)
+└── tensor_db.rs                (MODIFY: integrate new layers)
 ```
 
 ---

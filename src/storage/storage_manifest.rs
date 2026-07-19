@@ -452,7 +452,7 @@ impl ModelManifest {
     }
 }
 
-pub fn write_mock_manifest(
+pub fn write_test_manifest(
     dir: &std::path::Path,
     name: &str,
     vocab_size: usize,
@@ -473,7 +473,7 @@ pub fn write_mock_manifest(
         dir.to_path_buf(),
     );
 
-    let mut add_mock_layer = |layer_id: &str, shape: Vec<usize>| {
+    let mut add_test_layer = |layer_id: &str, shape: Vec<usize>| {
         let mut meta = LayerMetadata::new(layer_id.to_string(), shape);
         meta.storage_tier = if layer_id.contains("embed")
             || layer_id.contains("lm_head")
@@ -487,39 +487,39 @@ pub fn write_mock_manifest(
         manifest.add_layer(meta);
     };
 
-    add_mock_layer("model.embed_tokens.weight", vec![vocab_size, hidden_size]);
-    add_mock_layer("lm_head.weight", vec![vocab_size, hidden_size]);
-    add_mock_layer("model.norm.weight", vec![hidden_size]);
-    add_mock_layer("model.layers.0.input_layernorm.weight", vec![hidden_size]);
-    add_mock_layer(
+    add_test_layer("model.embed_tokens.weight", vec![vocab_size, hidden_size]);
+    add_test_layer("lm_head.weight", vec![vocab_size, hidden_size]);
+    add_test_layer("model.norm.weight", vec![hidden_size]);
+    add_test_layer("model.layers.0.input_layernorm.weight", vec![hidden_size]);
+    add_test_layer(
         "model.layers.0.self_attn.q_proj.weight",
         vec![num_q_heads * head_dim, hidden_size],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.k_proj.weight",
         vec![num_kv_heads * head_dim, hidden_size],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.v_proj.weight",
         vec![num_kv_heads * head_dim, hidden_size],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.o_proj.weight",
         vec![hidden_size, num_q_heads * head_dim],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.post_attention_layernorm.weight",
         vec![hidden_size],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.mlp.gate_proj.weight",
         vec![mlp_size, hidden_size],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.mlp.up_proj.weight",
         vec![mlp_size, hidden_size],
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.mlp.down_proj.weight",
         vec![hidden_size, mlp_size],
     );
@@ -528,7 +528,7 @@ pub fn write_mock_manifest(
     std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
 }
 
-pub fn write_mock_moe_manifest(
+pub fn write_test_moe_manifest(
     dir: &std::path::Path,
     name: &str,
     vocab_size: usize,
@@ -553,7 +553,7 @@ pub fn write_mock_moe_manifest(
     manifest.num_experts = Some(num_experts);
     manifest.expert_routing_top_k = Some(expert_routing_top_k);
 
-    let mut add_mock_layer = |layer_id: &str, shape: Vec<usize>, chunks: Option<Vec<String>>| {
+    let mut add_test_layer = |layer_id: &str, shape: Vec<usize>, chunks: Option<Vec<String>>| {
         let mut meta = LayerMetadata::new(layer_id.to_string(), shape);
         meta.storage_tier = if layer_id.contains("embed")
             || layer_id.contains("lm_head")
@@ -568,46 +568,46 @@ pub fn write_mock_moe_manifest(
         manifest.add_layer(meta);
     };
 
-    add_mock_layer(
+    add_test_layer(
         "model.embed_tokens.weight",
         vec![vocab_size, hidden_size],
         None,
     );
-    add_mock_layer("lm_head.weight", vec![vocab_size, hidden_size], None);
-    add_mock_layer("model.norm.weight", vec![hidden_size], None);
-    add_mock_layer(
+    add_test_layer("lm_head.weight", vec![vocab_size, hidden_size], None);
+    add_test_layer("model.norm.weight", vec![hidden_size], None);
+    add_test_layer(
         "model.layers.0.input_layernorm.weight",
         vec![hidden_size],
         None,
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.q_proj.weight",
         vec![num_q_heads * head_dim, hidden_size],
         None,
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.k_proj.weight",
         vec![num_kv_heads * head_dim, hidden_size],
         None,
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.v_proj.weight",
         vec![num_kv_heads * head_dim, hidden_size],
         None,
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.self_attn.o_proj.weight",
         vec![hidden_size, num_q_heads * head_dim],
         None,
     );
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.post_attention_layernorm.weight",
         vec![hidden_size],
         None,
     );
 
     // Router / Gate Weight
-    add_mock_layer(
+    add_test_layer(
         "model.layers.0.mlp.router.weight",
         vec![num_experts, hidden_size],
         None,
@@ -620,9 +620,9 @@ pub fn write_mock_moe_manifest(
         let up_name = format!("model.layers.0.mlp.experts.{}.up_proj.weight", e);
         let down_name = format!("model.layers.0.mlp.experts.{}.down_proj.weight", e);
 
-        add_mock_layer(&gate_name, vec![mlp_size, hidden_size], None);
-        add_mock_layer(&up_name, vec![mlp_size, hidden_size], None);
-        add_mock_layer(&down_name, vec![hidden_size, mlp_size], None);
+        add_test_layer(&gate_name, vec![mlp_size, hidden_size], None);
+        add_test_layer(&up_name, vec![mlp_size, hidden_size], None);
+        add_test_layer(&down_name, vec![hidden_size, mlp_size], None);
 
         mlp_chunks.push(gate_name);
         mlp_chunks.push(up_name);
@@ -630,7 +630,7 @@ pub fn write_mock_moe_manifest(
     }
 
     // Add main MLP layer which owns/indexes all the expert chunks
-    add_mock_layer("model.layers.0.mlp", vec![0], Some(mlp_chunks));
+    add_test_layer("model.layers.0.mlp", vec![0], Some(mlp_chunks));
 
     let manifest_json = serde_json::to_string_pretty(&manifest).unwrap();
     std::fs::write(dir.join("manifest.json"), manifest_json).unwrap();
@@ -716,9 +716,9 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_manifest_helpers() {
+    fn test_manifest_helpers() {
         let temp_dir = tempfile::tempdir().unwrap();
-        write_mock_manifest(temp_dir.path(), "qwen", 32000, 2048, 32, 8, 64, 5632);
+        write_test_manifest(temp_dir.path(), "qwen", 32000, 2048, 32, 8, 64, 5632);
 
         let manifest_path = temp_dir.path().join("manifest.json");
         assert!(manifest_path.exists());

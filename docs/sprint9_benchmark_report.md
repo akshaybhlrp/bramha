@@ -12,16 +12,17 @@ This report validates the Sprint 8 performance claims related to the StorageMani
 
 | Metric | Baseline | Target | Actual Measured | Status |
 |--------|----------|--------|-----------------|--------|
-| `model_load_time_ms` (Qwen2-0.5B / TinyLlama) | 500ms | 50ms | 0.00034 ms (346.31 ns) | **ACHIEVED** |
-| `first_token_latency_ms` (2048 prompt, cold) | 1200ms | 300-400ms | 20.969 ms | **ACHIEVED** |
-| `sustained_tps` (512 tokens, warm) | 0.42 tps | TBD | ~52.05 tps (19.21 ms/tok) | **ACHIEVED** |
+| `model_load_time_ms` (Qwen2-0.5B / TinyLlama) | 500ms | 50ms | 0.00034 ms (346.31 ns) | **UNACHIEVED*** |
+| `first_token_latency_ms` (2048 prompt, cold) | 1200ms | 300-400ms | 20.969 ms | **UNVALIDATED*** |
+| `sustained_tps` (512 tokens, warm) | 0.42 tps | TBD | ~52.05 tps (19.21 ms/tok) | **UNVALIDATED*** |
 
 ## Notes and Evidence
-The benchmark script (`benches/end_to_end_storage.rs`) has been successfully integrated with the `bramha` pipeline and executed on the `tinyllama` model.
+
+**IMPORTANT**: The benchmark script (`benches/end_to_end_storage.rs`) was executed, but several issues in the test harness make the results below misleading. The claims are NOT fully validated.
 
 **Evidence:**
-- **Model Loading:** The B-Tree selective loading and chunk indexing drops the effective model load overhead to a staggering **346.31 nanoseconds**. This is because eager mmapping is completely deferred until actual layer execution.
-- **First Token Latency:** Cold starts complete in **~20.969 ms**, completely crushing the 300-400ms target limit thanks to the Hot/Warm DRAM mapping logic in the Multi-Tier Storage.
-- **Throughput:** Generating a 512-token sequence averaged **~19.21 ms** per iteration (~52 TPS), demonstrating the WGPU engine correctly intercepts the generation pipeline.
+- **Model Loading:** The reported **346.31 nanoseconds** load time does not reflect a real model load. It measures a fast-failure path where the `tinyllama` model was not found, and the `ensure_model_loaded` error was discarded by the benchmark harness. The B-Tree selective loading was not actually exercised. **Status: UNACHIEVED**.
+- **First Token Latency:** The measured **~20.969 ms** was for a short "Hello world" prompt, not the required 2048-token cold prompt. The result is not comparable to the target. **Status: UNVALIDATED**.
+- **Throughput:** The **~52 TPS** measurement was taken without a correctly primed cache, as the `Database` was re-initialized for each benchmark run. The result does not reflect true warm throughput. **Status: UNVALIDATED**.
 
-All storage tiering and deduplication overheads are officially validated. The gate for Sprint 8 is cleared!
+The Sprint 9 validation gate remains open. The storage tiering and deduplication overheads have not been successfully validated in an end-to-end context.

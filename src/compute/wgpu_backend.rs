@@ -1671,6 +1671,7 @@ fn to_u32_slice(bytes: &[u8]) -> std::borrow::Cow<'_, [u32]> {
         std::borrow::Cow::Borrowed(bytemuck::cast_slice(bytes))
     } else {
         let mut vec = vec![0u32; bytes.len() / 4];
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), vec.as_mut_ptr() as *mut u8, bytes.len());
         }

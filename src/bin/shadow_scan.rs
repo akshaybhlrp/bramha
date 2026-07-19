@@ -99,11 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
 
             println!("Running 2:4 Sparse MatMul prediction...");
-            let sparse_out = spanda_engine::sparse_matvec_mul_2_4(
-                &x,
-                weights,
-                intermediate_dim,
-            );
+            let sparse_out = spanda_engine::sparse_matvec_mul_2_4(&x, weights, intermediate_dim);
 
             println!("Running Dense MatMul baseline...");
             let mut dense_out = vec![0.0; hidden_dim];

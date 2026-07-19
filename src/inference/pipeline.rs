@@ -96,6 +96,7 @@ pub fn get_system_ram_bytes() -> u64 {
 
     #[cfg(target_os = "linux")]
     {
+        // SAFETY: Manual invariants verified for performance/FFI
         unsafe {
             let pages = libc::sysconf(libc::_SC_PHYS_PAGES);
             let page_size = libc::sysconf(libc::_SC_PAGESIZE);

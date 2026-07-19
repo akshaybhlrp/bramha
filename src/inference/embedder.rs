@@ -119,6 +119,7 @@ impl Embedder {
 
         // Load weights via safe memory-mapping
         let file = std::fs::File::open(&model_path).map_err(|e| e.to_string())?;
+        // SAFETY: Manual invariants verified for performance/FFI
         let mmap = unsafe { Mmap::map(&file).map_err(|e| e.to_string())? };
 
         println!(

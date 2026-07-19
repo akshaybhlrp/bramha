@@ -109,7 +109,7 @@ async fn setup_mock_model() -> (Arc<Database>, std::path::PathBuf) {
         hidden_size * mlp_size,
     );
 
-    bramha::storage::storage_manifest::write_mock_manifest(
+    bramha::storage::storage_manifest::write_test_manifest(
         &temp_dir,
         "bench-mock-model",
         vocab_size,

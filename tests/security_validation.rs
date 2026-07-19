@@ -124,7 +124,7 @@ async fn test_ingest_model_path_traversal() {
         let req = Request::builder()
             .uri("/api/tensor/models/test_model")
             .method("POST")
-            .header("Authorization", "Bearer write_key")
+            .header("Authorization", "Bearer admin_key")
             .header("content-type", "application/json")
             .body(Body::from(serde_json::to_vec(&payload).unwrap()))
             .unwrap();
@@ -154,7 +154,7 @@ async fn test_generate_text_bounds() {
     let req = Request::builder()
         .uri("/api/llm/generate")
         .method("POST")
-        .header("Authorization", "Bearer read_key")
+        .header("Authorization", "Bearer write_key")
         .header("content-type", "application/json")
         .body(Body::from(serde_json::to_vec(&payload).unwrap()))
         .unwrap();
@@ -186,7 +186,7 @@ async fn test_ingest_model_symlink_rejection() {
             let req = Request::builder()
                 .uri("/api/tensor/models/test_model")
                 .method("POST")
-                .header("Authorization", "Bearer write_key")
+                .header("Authorization", "Bearer admin_key")
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_vec(&payload).unwrap()))
                 .unwrap();

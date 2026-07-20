@@ -2591,3 +2591,114 @@ pub async fn get_cognitive_graph(
 
     Ok(Json(GraphVisualizationResponse { nodes, edges }))
 }
+
+// --- Multi-hop Graph Execution Handler ---
+
+#[derive(Deserialize)]
+pub struct MultiHopGoalPayload {
+    pub id: String,
+    pub description: String,
+    pub dependencies: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MultiHopPayload {
+    /// Collection to search for context at each hop.
+    pub collection: String,
+    /// Goals to resolve in dependency order.
+    pub goals: Vec<MultiHopGoalPayload>,
+    /// Optional metadata filters (key=value substring match on context text).
+    pub filters: Option<Vec<crate::cognitive::research::MetadataFilter>>,
+}
+
+#[derive(Serialize)]
+pub struct MultiHopHopResult {
+    pub goal_id: String,
+    pub retrieved_contexts: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct MultiHopResponse {
+    pub hops: Vec<MultiHopHopResult>,
+    pub total_goals_resolved: usize,
+}
+
+/// POST /api/cognitive/multi_hop
+///
+/// Accepts a set of goals with dependency edges and a target collection,
+/// then executes multi-hop retrieval by resolving goals in topological order.
+/// Each goal triggers a BM25/hybrid search against the named collection.
+pub async fn multi_hop_handler(
+    State(state): State<SharedState>,
+    Json(payload): Json<MultiHopPayload>,
+) -> Result<Json<MultiHopResponse>, (StatusCode, String)> {
+    use crate::cognitive::research::{ResearchGraph, SubGoal};
+
+    // Validate collection exists
+    {
+        let db = state.state.read().await;
+        if !db.collections.contains_key(&payload.collection) {
+            return Err((
+                StatusCode::NOT_FOUND,
+                format!("Collection '{}' not found", payload.collection),
+            ));
+        }
+    }
+
+    let mut graph = ResearchGraph::new();
+    for g in &payload.goals {
+        graph.add_goal(SubGoal {
+            id: g.id.clone(),
+            description: g.description.clone(),
+            dependencies: g.dependencies.clone(),
+        });
+    }
+
+    let filters = payload.filters.unwrap_or_default();
+    let collection_name = payload.collection.clone();
+    let state_clone = state.clone();
+
+    // Retrieval closure: BM25 search on the collection for each goal description.
+    let retrieve_fn = move |query: &str| -> Vec<String> {
+        let db = state_clone.state.blocking_read();
+        let col = match db.collections.get(&collection_name) {
+            Some(c) => c,
+            None => return vec![],
+        };
+        let bm25_hits = match &col.bm25_index {
+            Some(bm25) => bm25.search(query, 5),
+            None => return vec![],
+        };
+        bm25_hits
+            .into_iter()
+            .filter_map(|(doc_id, _score)| {
+                col.vectors.get(&doc_id).and_then(|v| {
+                    v.metadata
+                        .as_ref()
+                        .and_then(|m| m.get("content").or_else(|| m.get("text")))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+            })
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    let hop_results = graph
+        .execute_multi_hop(&filters, retrieve_fn)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let total = hop_results.len();
+    let hops = hop_results
+        .into_iter()
+        .map(|r| MultiHopHopResult {
+            goal_id: r.goal_id,
+            retrieved_contexts: r.retrieved_contexts,
+        })
+        .collect();
+
+    Ok(Json(MultiHopResponse {
+        hops,
+        total_goals_resolved: total,
+    }))
+}

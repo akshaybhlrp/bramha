@@ -98,6 +98,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/api/system/spanda/degraded", post(set_spanda_degraded))
         .route("/api/cognitive/retract", post(retract_memory_handler))
         .route("/api/cognitive/graph", get(get_cognitive_graph))
+        .route("/api/cognitive/multi_hop", post(multi_hop_handler))
         // Conversational Session history routes
         .route("/api/sessions", get(list_sessions).post(upsert_session))
         .route("/api/sessions/:session_id/export", get(export_session))

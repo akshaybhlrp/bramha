@@ -1416,29 +1416,36 @@ impl InferenceEngine {
                     // println!("Completed dispatching layer {}", layer_idx);
                 }
 
-                // Dynamic Activation Sparsity purely on GPU (DAS)
+                // Dynamic Activation Sparsity (DAS)
+                // On GPU: skip DAS — argwhere requires a GPU→CPU sync and Burn's wgpu
+                // backend can produce 0-element index tensors, causing a "Buffer binding
+                // size 0" panic in create_bind_group. Full matmul is faster on GPU anyway.
                 let _s_das = crate::profile!("wgpu_das");
-                let mask_sparsity = mlp_h.clone().abs().greater_elem(1e-4);
-                let active_counts = mask_sparsity.int().sum_dim(0);
-                let active_union_mask = active_counts.greater_elem(0);
-                let active_mask_1d = active_union_mask.squeeze::<1>(0);
+                let mut mlp_out = if crate::inference::is_cpu_only() {
+                    let mask_sparsity = mlp_h.clone().abs().greater_elem(1e-4);
+                    let active_counts = mask_sparsity.int().sum_dim(0);
+                    let active_union_mask = active_counts.greater_elem(0);
+                    let active_mask_1d = active_union_mask.squeeze::<1>(0);
 
-                let mlp_size = mlp_h.shape().dims[1];
-                let first_elem = Tensor::ones(Shape::from([1]), &device);
-                let rest_elems = Tensor::zeros(Shape::from([mlp_size - 1]), &device);
-                let one_at_zero = Tensor::cat(vec![first_elem, rest_elems], 0);
-                let active_mask_guaranteed = active_mask_1d
-                    .int()
-                    .float()
-                    .add(one_at_zero)
-                    .greater_elem(0);
+                    let mlp_size = mlp_h.shape().dims[1];
+                    let first_elem = Tensor::ones(Shape::from([1]), &device);
+                    let rest_elems = Tensor::zeros(Shape::from([mlp_size - 1]), &device);
+                    let one_at_zero = Tensor::cat(vec![first_elem, rest_elems], 0);
+                    let active_mask_guaranteed = active_mask_1d
+                        .int()
+                        .float()
+                        .add(one_at_zero)
+                        .greater_elem(0);
 
-                let indices2d = active_mask_guaranteed.argwhere();
-                let indices_tensor = indices2d.squeeze::<1>(1);
+                    let indices2d = active_mask_guaranteed.argwhere();
+                    let indices_tensor = indices2d.squeeze::<1>(1);
 
-                let active_mlp_h = mlp_h.select(1, indices_tensor.clone());
-                let active_down_proj = down_proj_w_t.select(0, indices_tensor);
-                let mut mlp_out = split_matmul(active_mlp_h, active_down_proj, &device);
+                    let active_mlp_h = mlp_h.select(1, indices_tensor.clone());
+                    let active_down_proj = down_proj_w_t.select(0, indices_tensor);
+                    split_matmul(active_mlp_h, active_down_proj, &device)
+                } else {
+                    split_matmul(mlp_h, down_proj_w_t, &device)
+                };
                 if let Ok(bias) = get_tensor_1d(
                     model_name,
                     &db,

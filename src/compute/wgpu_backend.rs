@@ -497,6 +497,16 @@ impl WgpuComputePlane {
             }
         }
 
+        if masks.is_empty() || values.is_empty() || row_offsets.is_empty() {
+            panic!(
+                "Sparse data has zero-length slice for {}: masks={}, values={}, row_offsets={}",
+                op_key,
+                masks.len(),
+                values.len(),
+                row_offsets.len()
+            );
+        }
+
         let in_bytes = in_features * 4;
         let out_bytes = out_features * 4;
         let masks_bytes = masks.len() * 4;
@@ -1474,6 +1484,14 @@ impl WgpuComputePlane {
         let in_features = h.len();
         if in_features == 0 || out_features == 0 {
             return Ok(vec![0.0f32; out_features]);
+        }
+        if masks.is_empty() || values.is_empty() || row_offsets.is_empty() {
+            return Err(format!(
+                "Sparse buffer size 0: masks={}, values={}, row_offsets={}",
+                masks.len(),
+                values.len(),
+                row_offsets.len()
+            ));
         }
 
         // Get persistent or temporary op buffers

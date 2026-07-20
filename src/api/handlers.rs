@@ -1439,6 +1439,7 @@ pub async fn ingest_model(
             "Ingestion path cannot be absolute".to_string(),
         ));
     }
+    // Reject parent directory traversal
     for component in path.components() {
         if let std::path::Component::ParentDir = component {
             return Err((
@@ -1448,7 +1449,7 @@ pub async fn ingest_model(
         }
     }
 
-    // Canonicalize path and reject symlinks / workspace escape (S9b #15, #27)
+    // Canonicalize path and reject symlinks
     let canonical = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {

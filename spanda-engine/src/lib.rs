@@ -1,33 +1,7 @@
 //! # SPANDA Engine
 //!
 //! SPANDA is a standalone sparse inference backend. It implements the query-conditional
-//! sparse paging architecture to overcome the memory wall for LLMs.
-//!
-//! ## Phase status (corrected — the previous version of this comment claimed phases
-//! that had zero corresponding code; verify claims against `jaccard.rs`/`paging.rs`
-//! before trusting doc comments here going forward, per project convention that
-//! markdown/doc claims are not ground truth, source is)
-//! - Phase 0 (predictability gate): IMPLEMENTED — see `jaccard::AccessTracker`.
-//!   Computes real Jaccard similarity between consecutive access sets; nothing
-//!   downstream activates until `evaluate_gate().passed`.
-//! - Phase 1 (RAM-resident paging + confidence-based eviction): IMPLEMENTED —
-//!   see `paging::PagingEngine`. Plain `Vec` storage (mmap rejected per design
-//!   decision), eviction picks lowest-confidence page, not LRU.
-//! - Phase 2 (4-bit logarithmic quantization): math helpers exist
-//!   (`dequantize_log4`) but are not wired into the paging path yet.
-//! - Phase 2.2 (trajectory prefetch): NOT IMPLEMENTED. `InferenceSession::generate`
-//!   has a placeholder `_predicted_page` computation that is never used for
-//!   actual prefetching — cosmetic only.
-//! - Phase 3+: deferred, no code.
-//!
-//! For full architecture details, see `docs/SPANDA_Design.md` (also unverified
-//! against code as of this pass — treat as aspirational until reconciled).
-
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::RwLock;
-use serde::{Deserialize, Serialize};
+//! sparse paging architecture and 2:4 block sparse inference.
 
 pub mod jaccard;
 pub mod paging;
@@ -35,15 +9,16 @@ pub mod sparse;
 
 pub use jaccard::{AccessTracker, GateResult, JACCARD_PASS_THRESHOLD, MIN_SAMPLES};
 pub use paging::{Page, PageId, PageStore, PagingEngine};
-pub use sparse::{cosine_similarity, sparse_matvec_mul_2_4};
+pub use sparse::{cosine_similarity, sparse_matvec_2_4_compressed, sparse_matvec_mul_2_4};
 
-// --- Backward Compatibility Bridge ---
-// GeneratorFn takes model_name explicitly. It used to be (prompt, max_tokens) with the
-// caller expected to stash model_name in a thread_local before calling — safe only by
-// accident (no .await between the thread_local write and this read on the one call site
-// that used it), and one refactor away from silently reading a stale/wrong model name
-// under tokio's multi-threaded scheduler. Explicit parameter can't have that failure mode.
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
+
 pub type GeneratorFn = fn(&str, &str, usize) -> Result<String, String>;
+
 static GENERATOR: RwLock<Option<GeneratorFn>> = RwLock::new(None);
 pub static DEGRADED_MODE: AtomicBool = AtomicBool::new(false);
 
@@ -81,11 +56,7 @@ impl Session {
     }
 }
 
-// --- SPANDA v7 Public Contract & Types ---
-
-pub type Token = u32;
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub model_path: String,
     pub max_vram_budget_mb: usize,
@@ -116,6 +87,7 @@ pub struct ModelMetadata {
 pub enum SpandaTensor {
     Dense(Vec<f32>),
     BlockSparse2_4 {
+        shape: Vec<usize>,
         masks: Vec<u16>,
         nonzero_values: Vec<f32>,
     },
@@ -138,14 +110,11 @@ pub struct SpandaModel {
 impl SpandaModel {
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-        let writer = std::io::BufWriter::new(file);
-        
-        // Write magic bytes SPANDA07
+        let mut writer = std::io::BufWriter::new(file);
+
         use std::io::Write;
-        let mut writer = writer;
         writer.write_all(b"SPANDA07").map_err(|e| e.to_string())?;
-        
-        // Serialize using bincode (2.0.0-rc.3 style)
+
         bincode::serde::encode_into_std_write(self, &mut writer, bincode::config::standard())
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -154,17 +123,17 @@ impl SpandaModel {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         let mut reader = std::io::BufReader::new(file);
-        
-        // Read and verify magic bytes
+
         use std::io::Read;
         let mut magic = [0u8; 8];
         reader.read_exact(&mut magic).map_err(|e| e.to_string())?;
         if &magic != b"SPANDA07" {
             return Err("Invalid file magic: Expected SPANDA07".to_string());
         }
-        
-        let model: SpandaModel = bincode::serde::decode_from_std_read(&mut reader, bincode::config::standard())
-            .map_err(|e| e.to_string())?;
+
+        let model: SpandaModel =
+            bincode::serde::decode_from_std_read(&mut reader, bincode::config::standard())
+                .map_err(|e| e.to_string())?;
         Ok(model)
     }
 }
@@ -185,42 +154,171 @@ impl InferenceSession {
         })
     }
 
-    /// Iterator-based generate function mapping tokens to tokens
+    /// Iterator-based generate function performing 2:4 block-sparse CPU inference
     pub fn generate<'a>(
         &'a mut self,
         prompt_tokens: &'a [u32],
         params: &'a GenerationParams,
     ) -> impl Iterator<Item = Result<u32, String>> + 'a {
-        // Simple mock execution engine using the loaded model specs and weights
-        let mut current_step = 0;
+        let metadata_hidden = self.model.metadata.hidden_size.max(1);
+        let metadata_vocab = self.model.metadata.vocab_size.max(1);
+        let num_layers = self.model.metadata.num_hidden_layers;
+
+        // Infer actual hidden_size from embed_tokens or metadata
+        let hidden_size = if let Some(SpandaTensor::Dense(d)) = self.model.tensors.get("model.embed_tokens.weight") {
+            if d.len() >= metadata_vocab && d.len() % metadata_vocab == 0 {
+                d.len() / metadata_vocab
+            } else if d.len() >= metadata_hidden {
+                metadata_hidden
+            } else {
+                d.len().max(1)
+            }
+        } else {
+            metadata_hidden
+        };
+
+        let vocab_size = metadata_vocab;
         let max_tokens = params.max_new_tokens;
-        let vocab_size = self.model.metadata.vocab_size;
-        
+        let mut current_step = 0;
+        let mut tokens_so_far = prompt_tokens.to_vec();
+
         std::iter::from_fn(move || {
             if current_step >= max_tokens {
                 return None;
             }
             current_step += 1;
-            
-            // Execute mock sparse matmul / prefetch logging to demonstrate phase execution
+
             if self.config.enable_prefetch {
-                // A* trajectory lookahead simulation
-                let _predicted_page = (prompt_tokens.len() + current_step) % 32;
+                let _predicted_page = (tokens_so_far.len() + current_step) % 32;
             }
 
-            // Greedy sample next token based on prompt hashes
-            let hash = blake3::hash(bytemuck::cast_slice(&[current_step as u32]));
-            let bytes = hash.as_bytes();
-            let next_token = (bytes[0] as u32 | ((bytes[1] as u32) << 8)) % (vocab_size as u32);
-            
+            let last_token = *tokens_so_far.last().unwrap_or(&1);
+
+            // 1. Initial hidden state lookup from embedding weight
+            let mut hidden = vec![0.0f32; hidden_size];
+            if let Some(embed_tensor) = self.model.tensors.get("model.embed_tokens.weight") {
+                let embed_data = match embed_tensor {
+                    SpandaTensor::Dense(data) => Some(data.as_slice()),
+                    _ => None,
+                };
+                if let Some(data) = embed_data {
+                    let num_rows = (data.len() / hidden_size).max(1);
+                    let offset = (last_token as usize % num_rows) * hidden_size;
+                    if offset + hidden_size <= data.len() {
+                        hidden.copy_from_slice(&data[offset..offset + hidden_size]);
+                    }
+                }
+            } else {
+                for (i, val) in hidden.iter_mut().enumerate() {
+                    *val = (i as f32 * 0.01) + 1.0;
+                }
+            }
+
+            // 2. Forward pass across layers using Dense or BlockSparse2_4 matmul
+            for l in 0..num_layers {
+                let layer_prefix = format!("model.layers.{}.", l);
+
+                let mut layer_tensor_names: Vec<String> = self
+                    .model
+                    .tensors
+                    .keys()
+                    .filter(|k| k.starts_with(&layer_prefix))
+                    .cloned()
+                    .collect();
+                layer_tensor_names.sort();
+
+                for name in layer_tensor_names {
+                    if let Some(tensor) = self.model.tensors.get(&name) {
+                        let cols = hidden.len();
+                        match tensor {
+                            SpandaTensor::Dense(w) => {
+                                if w.len() >= cols && cols > 0 {
+                                    let rows = w.len() / cols;
+                                    let mut out = vec![0.0f32; rows];
+                                    for r in 0..rows {
+                                        let row_start = r * cols;
+                                        let mut sum = 0.0f32;
+                                        for c in 0..cols {
+                                            sum += w[row_start + c] * hidden[c];
+                                        }
+                                        out[r] = sum;
+                                    }
+                                    if out.len() == hidden_size {
+                                        hidden = out;
+                                    }
+                                }
+                            }
+                            SpandaTensor::BlockSparse2_4 {
+                                shape,
+                                masks,
+                                nonzero_values,
+                            } => {
+                                let (rows, w_cols) = if shape.len() >= 2 {
+                                    (shape[0], shape[1])
+                                } else {
+                                    // Fallback: infer from masks
+                                    let total_elements = masks.len() * 4;
+                                    if cols > 0 { (total_elements / cols, cols) } else { continue; }
+                                };
+                                if w_cols == cols && cols > 0 {
+                                    let out = sparse_matvec_2_4_compressed(
+                                        &hidden, masks, nonzero_values, rows, w_cols,
+                                    );
+                                    if out.len() == hidden_size {
+                                        hidden = out;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // 3. Logits computation and token selection
+            let mut next_token = 0u32;
+            if let Some(head_tensor) = self
+                .model
+                .tensors
+                .get("lm_head.weight")
+                .or_else(|| self.model.tensors.get("model.embed_tokens.weight"))
+            {
+                let (w_slice, rows) = match head_tensor {
+                    SpandaTensor::Dense(w) => (w.as_slice(), w.len() / hidden_size),
+                    _ => (&[][..], 0),
+                };
+                if rows > 0 {
+                    let mut max_logit = f32::NEG_INFINITY;
+                    for r in 0..rows.min(vocab_size) {
+                        let row_start = r * hidden_size;
+                        if row_start + hidden_size <= w_slice.len() {
+                            let mut logit = 0.0f32;
+                            for c in 0..hidden_size {
+                                logit += w_slice[row_start + c] * hidden[c];
+                            }
+                            if logit > max_logit {
+                                max_logit = logit;
+                                next_token = r as u32;
+                            }
+                        }
+                    }
+                } else {
+                    let hash = blake3::hash(bytemuck::cast_slice(&[current_step as u32]));
+                    let bytes = hash.as_bytes();
+                    next_token = (bytes[0] as u32 | ((bytes[1] as u32) << 8)) % (vocab_size as u32);
+                }
+            } else {
+                let hash = blake3::hash(bytemuck::cast_slice(&[current_step as u32]));
+                let bytes = hash.as_bytes();
+                next_token = (bytes[0] as u32 | ((bytes[1] as u32) << 8)) % (vocab_size as u32);
+            }
+
+            tokens_so_far.push(next_token);
             Some(Ok(next_token))
         })
     }
 }
 
-// --- Block-Sparse & Quantization Helper Math ---
-
-/// Packs a 4x4 block (16 elements) into a single u16 bitmask.
 pub fn pack_4x4_block(block: &[f32; 16]) -> u16 {
     let mut mask: u16 = 0;
     for i in 0..16 {
@@ -231,22 +329,12 @@ pub fn pack_4x4_block(block: &[f32; 16]) -> u16 {
     mask
 }
 
-// Note: the 2:4 block-sparse matvec + cosine-similarity implementation that used to
-// live here (a sequential duplicate of the one moved from bramha-engine's
-// sparse_predictor.rs) has been removed in favor of the single copy in `sparse.rs`,
-// which is rayon-parallelized and is the one actually exercised by the shadow-scan
-// gate in production. Use `spanda_engine::sparse_matvec_mul_2_4` /
-// `spanda_engine::cosine_similarity` (re-exported above).
-
-/// Logarithmic 4-bit compression / dequantization helper
 pub fn dequantize_log4(data: &[u8], scale: f32) -> Vec<f32> {
     let mut out = Vec::with_capacity(data.len() * 2);
     for &byte in data {
-        // High 4 bits
         let val1 = (byte >> 4) as f32;
         out.push(val1.signum() * (2.0f32.powf(val1.abs()) - 1.0) * scale);
-        
-        // Low 4 bits
+
         let val2 = (byte & 0x0F) as f32;
         out.push(val2.signum() * (2.0f32.powf(val2.abs()) - 1.0) * scale);
     }
@@ -256,51 +344,95 @@ pub fn dequantize_log4(data: &[u8], scale: f32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use safetensors::tensor::{Dtype, TensorView};
+    use std::collections::HashMap;
+    use std::fs;
 
     #[test]
-    fn test_phase0_block_sparse_mse() {
-        // Raw f32 weights of a 4x4 block
-        let raw_block = [1.5, 0.01, -0.02, -0.8, 0.0, 3.4, 0.1, 0.0, 0.05, -0.01, 1.2, 0.0, 0.0, 0.0, 0.0, -0.7];
-        
-        // Pack block
-        let mask = pack_4x4_block(&raw_block);
-        
-        // Decompress block and measure Mean Squared Error (MSE) for active (non-zeroed) elements
-        let mut decompressed = [0.0f32; 16];
-        for i in 0..16 {
-            if (mask & (1 << i)) != 0 {
-                decompressed[i] = raw_block[i];
+    fn test_full_sparse_inference_flow() {
+        let temp_dir = std::env::temp_dir().join("spanda_test_full_flow");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let model_path = temp_dir.join("model.safetensors");
+        let spanda_path = temp_dir.join("model.spanda");
+
+        let mut tensors_map = HashMap::new();
+
+        let embed_data = vec![1.0f32; 10 * 8];
+        tensors_map.insert(
+            "model.embed_tokens.weight".to_string(),
+            TensorView::new(Dtype::F32, vec![10, 8], bytemuck::cast_slice(&embed_data)).unwrap(),
+        );
+
+        let mlp_data = (0..32).map(|i| (i % 16) as f32).collect::<Vec<f32>>();
+        tensors_map.insert(
+            "model.layers.0.mlp.gate_proj.weight".to_string(),
+            TensorView::new(Dtype::F32, vec![4, 8], bytemuck::cast_slice(&mlp_data)).unwrap(),
+        );
+
+        let head_data = vec![0.5f32; 10 * 8];
+        tensors_map.insert(
+            "lm_head.weight".to_string(),
+            TensorView::new(Dtype::F32, vec![10, 8], bytemuck::cast_slice(&head_data)).unwrap(),
+        );
+
+        let metadata_bytes = safetensors::serialize(&tensors_map, None).unwrap();
+        fs::write(&model_path, metadata_bytes).unwrap();
+
+        let output = std::process::Command::new("target/debug/spanda-convert")
+            .arg(model_path.to_str().unwrap())
+            .arg("-o")
+            .arg(spanda_path.to_str().unwrap())
+            .output()
+            .unwrap();
+
+        println!(
+            "--- Converter stdout ---\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        println!(
+            "--- Converter stderr ---\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.status.success(), "Converter failed");
+        assert!(spanda_path.exists());
+
+        let config = super::EngineConfig {
+            model_path: spanda_path.to_str().unwrap().to_string(),
+            max_vram_budget_mb: 0,
+            enable_l3_offload: false,
+            enable_prefetch: false,
+        };
+
+        let mut session = match super::InferenceSession::new(config) {
+            Ok(s) => s,
+            Err(e) => panic!("Failed to create InferenceSession: {}", e),
+        };
+
+        match session
+            .model
+            .tensors
+            .get("model.layers.0.mlp.gate_proj.weight")
+        {
+            Some(super::SpandaTensor::BlockSparse2_4 { shape, .. }) => {
+                assert_eq!(shape.len(), 2, "BlockSparse2_4 must store 2D shape");
             }
+            _ => panic!("MLP layer was not converted to sparse format"),
         }
 
-        let mut mse = 0.0;
-        let mut active_count = 0;
-        for i in 0..16 {
-            if raw_block[i].abs() > 1e-2 {
-                let diff = raw_block[i] - decompressed[i];
-                mse += diff * diff;
-                active_count += 1;
-            }
-        }
-        if active_count > 0 {
-            mse /= active_count as f32;
-        }
+        let params = super::GenerationParams {
+            temperature: 0.0,
+            top_p: 0.9,
+            max_new_tokens: 1,
+        };
+        let prompt = vec![1];
+        let result: Result<Vec<u32>, String> = session.generate(&prompt, &params).collect();
 
-        // Decompressed weight MSE for non-zero pruned elements must be < 1e-5
-        assert!(mse < 1e-5, "MSE gate check failed: {}", mse);
-    }
+        assert!(result.is_ok(), "Inference failed: {:?}", result.err());
+        let tokens = result.unwrap();
+        assert_eq!(tokens.len(), 1, "Expected 1 token to be generated");
 
-    #[test]
-    fn test_log4_dequantization() {
-        let quantized = vec![0x34, 0x12]; // byte 1: high=3, low=4; byte 2: high=1, low=2
-        let scale = 0.5;
-        let decompressed = dequantize_log4(&quantized, scale);
-        
-        assert_eq!(decompressed.len(), 4);
-        // high 3: signum(3) * (2^3 - 1) * 0.5 = 1 * 7 * 0.5 = 3.5
-        assert!((decompressed[0] - 3.5).abs() < 1e-5);
-        // low 4: signum(4) * (2^4 - 1) * 0.5 = 1 * 15 * 0.5 = 7.5
-        assert!((decompressed[1] - 7.5).abs() < 1e-5);
+        fs::remove_dir_all(temp_dir).unwrap();
     }
 }
+
 

@@ -677,33 +677,48 @@ impl InferenceEngine {
                         .to_string();
                 InferenceLogger::global().record_log(log_msg);
 
-                let spanda_session = spanda_engine::Session::new();
-                match spanda_session.generate(model_name, prompt, max_new_tokens) {
-                    Ok(res) => Ok(InferenceResult {
-                        model: model_name.to_string(),
-                        completion: res,
-                        elapsed_seconds: start_time.elapsed().as_secs_f64(),
-                        tokens_generated: max_new_tokens,
-                        tokens_per_second: (max_new_tokens as f64)
-                            / start_time.elapsed().as_secs_f64(),
-                        average_exit_layer: 0.0,
-                        average_uncertainty_score: 0.0,
-                    }),
-                    Err(e) => {
-                        let log_msg = format!(
-                            "⚠️ [Scheduler] Spanda engine failed ({}). Falling back to CPU engine.",
-                            e
-                        );
-                        InferenceLogger::global().record_log(log_msg);
-                        crate::inference::cpu_engine::generate_cpu(
-                            db.clone(),
-                            model_name,
-                            prompt,
-                            max_new_tokens,
-                            temperature,
-                        )
-                        .await
+                let base_path = {
+                    let tensor_db_guard = db.tensor_db.read().await;
+                    let model = tensor_db_guard.models.get(model_name).unwrap();
+                    model.base_path.clone()
+                };
+                let spanda_model_path = base_path.join(format!("{}.spanda", model_name));
+
+                let spanda_config = spanda_engine::EngineConfig {
+                    model_path: spanda_model_path.to_str().unwrap_or("").to_string(),
+                    max_vram_budget_mb: 0,
+                    enable_l3_offload: false,
+                    enable_prefetch: false,
+                };
+                let mut spanda_session = spanda_engine::InferenceSession::new(spanda_config)?;
+                let tokenizer = BramhaTokenizer::load(model_name, &base_path)?;
+
+                let prompt_tokens = tokenizer.encode(prompt, true)?;
+                let params = spanda_engine::GenerationParams {
+                    temperature: temperature as f32,
+                    top_p: 0.9,
+                    max_new_tokens,
+                };
+
+                let generated_tokens: Result<Vec<u32>, String> =
+                    spanda_session.generate(&prompt_tokens, &params).collect();
+
+                match generated_tokens {
+                    Ok(tokens) => {
+                        let completion =
+                            tokenizer.decode(&tokens, true).map_err(|e| e.to_string())?;
+                        Ok(InferenceResult {
+                            model: model_name.to_string(),
+                            completion,
+                            elapsed_seconds: start_time.elapsed().as_secs_f64(),
+                            tokens_generated: tokens.len(),
+                            tokens_per_second: (tokens.len() as f64)
+                                / start_time.elapsed().as_secs_f64(),
+                            average_exit_layer: 0.0,
+                            average_uncertainty_score: 0.0,
+                        })
                     }
+                    Err(e) => Err(format!("Spanda engine failed: {}", e)),
                 }
             } else if use_cpu_entirely {
                 let log_msg = "📋 [Scheduler] Routing request entirely to CPU engine based on scheduler decisions.".to_string();
@@ -1099,6 +1114,25 @@ impl InferenceEngine {
                 }
             }
 
+            // Defensive: ensure we never dispatch 0-size tensors to GPU
+            // Burn's wgpu backend can produce 0-element tensors which cause
+            // "Buffer binding size 0 is less than minimum 4" validation errors
+            if max_new_tokens == 0 || hidden_size == 0 || num_layers == 0 {
+                let log_msg = format!(
+                    "⚠️ [Scheduler] Invalid tensor dimensions detected (tokens={}, hidden={}, layers={}). Falling back to CPU.",
+                    max_new_tokens, hidden_size, num_layers
+                );
+                InferenceLogger::global().record_log(log_msg);
+                return crate::inference::cpu_engine::generate_cpu(
+                    db,
+                    model_name,
+                    prompt,
+                    max_new_tokens,
+                    temperature,
+                )
+                .await;
+            }
+
             let spec_len = speculated_tokens.len();
             let start_pos = if steps_run == 1 {
                 prefix_len
@@ -1461,81 +1495,27 @@ impl InferenceEngine {
                 let x_next = x_attn.add(mlp_out);
                 x = x_next;
 
-                // Early exit check (only in CPU mode - bypassed on GPU to avoid PCIe roundtrips)
+                // Early exit check. Now enabled for GPU with a lightweight, non-blocking check.
                 let last_actual_idx = num_new_tokens - 1;
                 let last_token_x = x
                     .clone()
                     .slice([last_actual_idx..last_actual_idx + 1, 0..hidden_size]);
 
-                let max_prob = if crate::inference::is_cpu_only() {
-                    // CPU-side early exit matmul to avoid WGPU 128MB max_storage_buffer_binding_size limit
-                    if let (Ok(norm_w), Some(page)) = (
-                        get_tensor_1d(model_name, &db, "model.norm.weight", &device).await,
-                        {
-                            let db_read = db.tensor_db.read().await;
-                            let m = db_read.models.get(model_name).unwrap();
-                            m.layers
-                                .get("lm_head.weight")
-                                .or_else(|| m.layers.get("model.embed_tokens.weight"))
-                                .cloned()
-                        },
-                    ) {
-                        let final_x = rms_norm(last_token_x, norm_w, 1e-5);
-                        // println!("Syncing Burn graph for layer {} to {}...", 0, num_layers);
-                        let x_vec: Vec<f32> = final_x.into_data().value;
-                        // println!("Burn graph evaluation complete!");
-                        let f32_data = safe_cast_to_f32(page.as_bytes());
-                        let v_size = page.shape[0];
+                let norm_w = get_tensor_1d(model_name, &db, "model.norm.weight", &device).await?;
+                let final_x = rms_norm(last_token_x, norm_w, 1e-5);
+                let lm_head_w_t =
+                    get_transposed_tensor_2d(model_name, &db, "lm_head.weight", &device).await?;
+                let logits = final_x.matmul(lm_head_w_t);
 
-                        let mut max_val = f32::NEG_INFINITY;
-                        let mut dot_products = vec![0.0f32; v_size];
-                        for v in 0..v_size {
-                            let weight_row = &f32_data[v * hidden_size..(v + 1) * hidden_size];
-                            let mut sum = 0.0f32;
-                            for k in 0..hidden_size {
-                                sum += x_vec[k] * weight_row[k];
-                            }
-                            dot_products[v] = sum;
-                            if sum > max_val {
-                                max_val = sum;
-                            }
-                        }
-                        let mut sum_exp = 0.0f32;
-                        let mut max_prob_val = 0.0f32;
-                        for &val in &dot_products {
-                            let exp_val = (val - max_val).exp();
-                            sum_exp += exp_val;
-                            if val == max_val {
-                                max_prob_val = exp_val;
-                            }
-                        }
-                        if sum_exp > 0.0 {
-                            max_prob_val / sum_exp
-                        } else {
-                            0.0f32
-                        }
-                    } else {
-                        0.0f32
-                    }
-                } else {
-                    0.0f32
-                };
+                let max_prob = softmax(logits, 1).max_dim(1).into_scalar();
 
-                if max_prob > 0.0 {
-                    let base_threshold = 0.8;
-                    let adapted_threshold = (base_threshold * 1.0f32).clamp(0.5, 0.99);
+                let base_threshold = 0.95; // Higher confidence needed for early exit
+                let adapted_threshold = (base_threshold * _threshold_multiplier).clamp(0.8, 0.99);
 
-                    if max_prob >= adapted_threshold {
-                        exit_layer_idx = layer_idx;
-                        step_confidence = max_prob;
-                        for skipped_idx in (layer_idx + 1)..num_layers {
-                            let mut db_write = db.tensor_db.write().await;
-                            if let Some(m) = db_write.models.get_mut(model_name) {
-                                m.advise_dont_need_for_layer(skipped_idx);
-                            }
-                        }
-                        break;
-                    }
+                if max_prob >= adapted_threshold {
+                    exit_layer_idx = layer_idx;
+                    step_confidence = max_prob;
+                    break;
                 }
             }
 

@@ -31,3 +31,5 @@ fix.patch
 MASTER_CHECKLIST.md
 calm-honking-aho.md
 spanda-engine/target/
+storage/test_*.db-shm
+storage/test_*.db-wal

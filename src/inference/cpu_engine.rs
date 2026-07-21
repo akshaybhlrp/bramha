@@ -2654,28 +2654,36 @@ async fn generate_cpu_inner_logits(
                 }
 
                 // Q, K, V block projections via GEMM
-                let mut q_block = if block_size == 1 {
-                    let (m_n, l_n) = if crate::inference::is_cpu_only() { (None, None) } else { (Some(model_name), Some(format!("model.layers.{}.self_attn.q_proj.weight", layer_idx))) };
-                    matvec_mul(&h_block, &lw.q_proj_weight, num_q_heads * head_dim, m_n, l_n.as_deref())
+                let (mut q_block, mut k_block, mut v_block) = if block_size == 1 {
+                    let (m_n, l_n_q, l_n_k, l_n_v) = if crate::inference::is_cpu_only() {
+                        (None, None, None, None)
+                    } else {
+                        (
+                            Some(model_name),
+                            Some(format!("model.layers.{}.self_attn.q_proj.weight", layer_idx)),
+                            Some(format!("model.layers.{}.self_attn.k_proj.weight", layer_idx)),
+                            Some(format!("model.layers.{}.self_attn.v_proj.weight", layer_idx)),
+                        )
+                    };
+                    let q = matvec_mul(&h_block, &lw.q_proj_weight, num_q_heads * head_dim, m_n, l_n_q.as_deref());
+                    let k = matvec_mul(&h_block, &lw.k_proj_weight, num_kv_heads * head_dim, m_n, l_n_k.as_deref());
+                    let v = matvec_mul(&h_block, &lw.v_proj_weight, num_kv_heads * head_dim, m_n, l_n_v.as_deref());
+                    (q, k, v)
                 } else {
-                    gemm_cpu(&h_block, &lw.q_proj_weight, block_size, hidden_size, num_q_heads * head_dim)
+                    fused_qkv_gemm(
+                        &h_block,
+                        &lw.q_proj_weight,
+                        &lw.k_proj_weight,
+                        &lw.v_proj_weight,
+                        block_size,
+                        hidden_size,
+                        num_q_heads * head_dim,
+                        num_kv_heads * head_dim,
+                    )
                 };
+
                 if let Some(b) = lw.q_proj_bias { for i in 0..block_size { for j in 0..(num_q_heads * head_dim) { q_block[i * (num_q_heads * head_dim) + j] += b[j]; } } }
-
-                let mut k_block = if block_size == 1 {
-                    let (m_n, l_n) = if crate::inference::is_cpu_only() { (None, None) } else { (Some(model_name), Some(format!("model.layers.{}.self_attn.k_proj.weight", layer_idx))) };
-                    matvec_mul(&h_block, &lw.k_proj_weight, num_kv_heads * head_dim, m_n, l_n.as_deref())
-                } else {
-                    gemm_cpu(&h_block, &lw.k_proj_weight, block_size, hidden_size, num_kv_heads * head_dim)
-                };
                 if let Some(b) = lw.k_proj_bias { for i in 0..block_size { for j in 0..(num_kv_heads * head_dim) { k_block[i * (num_kv_heads * head_dim) + j] += b[j]; } } }
-
-                let mut v_block = if block_size == 1 {
-                    let (m_n, l_n) = if crate::inference::is_cpu_only() { (None, None) } else { (Some(model_name), Some(format!("model.layers.{}.self_attn.v_proj.weight", layer_idx))) };
-                    matvec_mul(&h_block, &lw.v_proj_weight, num_kv_heads * head_dim, m_n, l_n.as_deref())
-                } else {
-                    gemm_cpu(&h_block, &lw.v_proj_weight, block_size, hidden_size, num_kv_heads * head_dim)
-                };
                 if let Some(b) = lw.v_proj_bias { for i in 0..block_size { for j in 0..(num_kv_heads * head_dim) { v_block[i * (num_kv_heads * head_dim) + j] += b[j]; } } }
 
 
@@ -2862,9 +2870,15 @@ async fn generate_cpu_inner_logits(
                 if is_cpu {
                     {
                         let _scope = crate::inference::profiler::Profiler::scope("qkv_proj");
-                        matvec_mul_into(&scratch_h, &lw.q_proj_weight, &mut scratch_q);
-                        matvec_mul_into(&scratch_h, &lw.k_proj_weight, &mut scratch_k);
-                        matvec_mul_into(&scratch_h, &lw.v_proj_weight, &mut scratch_v);
+                        fused_qkv_mul_into(
+    &scratch_h,
+    &lw.q_proj_weight,
+    &lw.k_proj_weight,
+    &lw.v_proj_weight,
+    &mut scratch_q,
+    &mut scratch_k,
+    &mut scratch_v,
+);
                     }
                 } else {
                     let q = matvec_mul(&scratch_h, &lw.q_proj_weight, q_dim,
@@ -3088,13 +3102,18 @@ async fn generate_cpu_inner_logits(
                 h_block[i * hidden_size .. (i + 1) * hidden_size].copy_from_slice(&row);
             }
 
-            let mut q_block = gemm_cpu(&h_block, &lw.q_proj_weight, block_size, hidden_size, num_q_heads * head_dim);
+            let (mut q_block, mut k_block, mut v_block) = fused_qkv_gemm(
+                &h_block,
+                &lw.q_proj_weight,
+                &lw.k_proj_weight,
+                &lw.v_proj_weight,
+                block_size,
+                hidden_size,
+                num_q_heads * head_dim,
+                num_kv_heads * head_dim,
+            );
             if let Some(b) = lw.q_proj_bias { for i in 0..block_size { for j in 0..(num_q_heads * head_dim) { q_block[i * (num_q_heads * head_dim) + j] += b[j]; } } }
-
-            let mut k_block = gemm_cpu(&h_block, &lw.k_proj_weight, block_size, hidden_size, num_kv_heads * head_dim);
             if let Some(b) = lw.k_proj_bias { for i in 0..block_size { for j in 0..(num_kv_heads * head_dim) { k_block[i * (num_kv_heads * head_dim) + j] += b[j]; } } }
-
-            let mut v_block = gemm_cpu(&h_block, &lw.v_proj_weight, block_size, hidden_size, num_kv_heads * head_dim);
             if let Some(b) = lw.v_proj_bias { for i in 0..block_size { for j in 0..(num_kv_heads * head_dim) { v_block[i * (num_kv_heads * head_dim) + j] += b[j]; } } }
 
 
@@ -3301,6 +3320,37 @@ async fn generate_cpu_inner_logits(
             average_uncertainty_score: avg_uncertainty,
         }, scratch_logits))
     }).await
+}
+
+fn fused_qkv_gemm(
+    h_block: &[f32],
+    q_weight: &WeightTensor,
+    k_weight: &WeightTensor,
+    v_weight: &WeightTensor,
+    block_size: usize,
+    in_features: usize,
+    q_out_features: usize,
+    kv_out_features: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let q = gemm_cpu(h_block, q_weight, block_size, in_features, q_out_features);
+    let k = gemm_cpu(h_block, k_weight, block_size, in_features, kv_out_features);
+    let v = gemm_cpu(h_block, v_weight, block_size, in_features, kv_out_features);
+    (q, k, v)
+}
+
+#[inline]
+fn fused_qkv_mul_into(
+    h: &[f32],
+    q_weight: &WeightTensor,
+    k_weight: &WeightTensor,
+    v_weight: &WeightTensor,
+    q_out: &mut [f32],
+    k_out: &mut [f32],
+    v_out: &mut [f32],
+) {
+    matvec_mul_into(h, q_weight, q_out);
+    matvec_mul_into(h, k_weight, k_out);
+    matvec_mul_into(h, v_weight, v_out);
 }
 
 #[cfg(test)]

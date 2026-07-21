@@ -4,118 +4,119 @@ This document serves as the master source of truth for tracking the completion o
 
 ---
 
-## ✅ Sprint 1
-- [x] **BRM-S1-001**: Rust-only single binary setup
-- [x] **BRM-S1-002**: SQLite WAL metadata core
-- [x] **BRM-S1-003**: Model registry functionality
-- [x] **BRM-S1-004**: In-process tokenizer
-- [x] **BRM-S1-005**: Atomic write helper for shard and manifest persistence
-- [x] **BRM-S1-006**: WAL replay and transaction recovery
-- [x] **BRM-S1-007**: Basic CRUD over collections, documents, chunks, sessions, models
+### **I. Bramha v0.1 Ship Criteria**
 
-## ✅ Sprint 2
-- [x] **BRM-S2-001**: CPU backend baseline
-- [x] **BRM-S2-002**: SIMD Optimization
-- [x] **BRM-S2-003**: Speculative Decode Pipeline
-- [x] **BRM-S2-004**: wgpu Compute Plane Setup
-- [x] **BRM-S2-005**: Prefix KV Cache
-- [x] **BRM-S2-006**: Flash Attention
-- [x] **BRM-S2-007**: INT4/INT8 Support
-- [x] **BRM-S2-008**: Persistent GPU Buffers
-- [x] **BRM-S2-009**: Criterion Benchmarks
-- [x] **BRM-S2-010**: Heterogeneous Scheduler v1
+These items define the minimum viable product for the Bramha engine.
 
-## ✅ Sprint 3
-- [x] **BRM-S3-001**: IVF/HNSW/BM25 Vector and Text Search Indexes
-- [x] **BRM-S3-002**: Hybrid Retrieval Integration
-- [x] **BRM-S3-003**: Evidence Sentence Overlap Mapping
-- [x] **BRM-S3-004**: Citation Grounding Evaluation
-- [x] **BRM-S3-005**: Multi-Hop Retrieval and Goal Graph Pre-Filtering
+- [x] **Qwen2-0.5B runs end-to-end on CPU and wgpu**
+    - **Verification:**
+        - `src/inference/cpu_engine.rs`: Complete, optimized CPU inference path.
+        - `src/compute/wgpu_backend.rs`: Complete GPU path with persistent buffers and async execution.
+        - `src/inference/engine.rs`: Logic to switch between backends.
 
-## ✅ Sprint 4
-- [x] **BRM-S4-001**: Memory DB Tiering with Decay and Reinforcement
-- [x] **BRM-S4-002**: Semantic Memory Promotion and Consolidation
-- [x] **BRM-S4-003**: Answer Trace Persistence and Route History
-- [x] **BRM-S4-004**: Feedback Events and Reusable Workflow Objects
+- [x] **CRUD for collections, documents, sessions, and models**
+    - **Verification:**
+        - `src/core/collection.rs`: `insert` and `delete` methods.
+        - `src/storage/mod.rs`: `save` and `load` logic for collections/models.
+        - `src/cognitive/memory.rs`: `MemoryManager` for memory CRUD.
+        - `src/storage/wal.rs`: `WalOp` with `Upsert`/`Delete` for transaction logging.
 
-## ✅ Sprint 5
-- [x] **BRM-S5-001**: Model Capability Registry and Backend Profiles
-- [x] **BRM-S5-002**: Dynamic SLA-Based Router with Benchmark Integration
-- [x] **BRM-S5-003**: Multi-Model RAG Pipeline Execution
-- [x] **BRM-S5-004**: Self-Correction Grounding Verifier Mode
+- [x] **WAL replay and atomic writes proven**
+    - **Verification:**
+        - `src/storage/wal.rs`: `WalManager` with `replay` function integrated into DB loading.
+        - `src/cognitive/memory.rs`: Atomic write pattern (write-then-rename) used for safe persistence.
 
-## ✅ Sprint 6
-- [x] **BRM-S6-001**: Planner Policy and Warm-State Persistence
-- [x] **BRM-S6-002**: Analytical Latency Cost Modeling
-- [x] **BRM-S6-003**: Execution Path Optimizer and Fallback Chain
-- [x] **BRM-S6-004**: Deterministic Context-Hashing Cache
-- [x] **BRM-S6-005**: SQLite Persistent Trace Telemetry
+- [x] **Tokenizer fully in-process, model registry working**
+    - **Verification:**
+        - `src/inference/tokenizer.rs`: Pure Rust `BramhaTokenizer` wrapper.
+        - `src/storage/mod.rs`: Model registry populated from `tensor_db` during save.
 
-## ✅ Sprint 7
-- [x] **BRM-S7-001**: Activation Materialized Views & Telemetry
-- [x] **BRM-S7-002**: Branch Checkpoint Replay
-- [x] **BRM-S7-003**: Planner Cost Integration
+- [x] **Retrieval (IVF/HNSW/BM25) with evidence grounding**
+    - **Verification:**
+        - `src/index/ivf_flat.rs`, `src/index/hnsw.rs`, `src/index/bm25.rs`: Full index implementations.
+        - `src/core/collection.rs`: `hybrid_search` with RRF for combining results.
+        - `src/cognitive/evidence.rs`: Sentence-to-source mapping logic.
 
-## ✅ Sprint 8
-- [x] **S8-001**: Storage Manifest Layer
-- [x] **S8-002**: Content-Addressed Storage with Deduplication
-- [x] **S8-003**: Multi-Tier Storage Management
-- [x] **S8-004**: Module Integration & Export
-- [x] **S8-005**: Documentation & Examples
+- [ ] **Memory DB + graph DB functional**
+    - **Status:** Partially Done
+    - **Verification:**
+        - `src/cognitive/memory.rs`: Sophisticated multi-tier `MemoryManager` is functional (Memory DB).
+        - `src/cognitive/research.rs`: `ResearchGraph` is a stub; multi-hop execution is not implemented (Graph DB).
 
-## ✅ Sprint 9
-- [x] **BRM-S9-001**: Manifest Integration into tensor_db.rs
-- [x] **BRM-S9-002**: Multi-Tier Routing in Inference Planner
-- [x] **BRM-S9-003**: End-to-End Storage Benchmark
+- [x] **Planner with exact-decode-only path**
+    - **Verification:** `src/planner/optimizer.rs`: `ExecutionPathOptimizer` correctly returns `PlannerDecision::ExactDecode` based on policy.
 
-## ✅ Sprint 10
-- [x] **S10-001**: Phase 0 — SPANDA-Bare Entropy Scan
-- [x] **S10-002**: Phase 1 — RAM Offload Fallback
-- [x] **S10-003**: Phase 2 — Bidirectional Page Table Prefetcher
-- [x] **S10-004**: Phase 3 — L3 RAM Offload & Double-Buffered Swap
+- [ ] **Storage manifest + dedup integrated**
+    - **Status:** Done but unverified
+    - **Verification:**
+        - Code is fully implemented in `src/storage/storage_manifest.rs`, `content_addressing.rs`, `multi_tier.rs`, and integrated into `tensor_db.rs`.
+        - Performance claims (e.g., 92-96% DRAM reduction) are explicitly marked as "UNVALIDATED" in `docs/sprint9_benchmark_report.md`.
 
-## ✅ Sprint 11
-- [x] **BRM-S11-001**: Adapter Learning Pipeline
-- [x] **BRM-S11-002**: Memory Confidence Updates
-- [x] **BRM-S11-003**: Contradiction Resolution
-- [x] **BRM-S11-004**: Engine & Tokenizer Stabilization
+---
+
+### **II. SPANDA Sparse Inference Backend**
+
+- [x] **Phase 0: Bare Sparse Paging / Static Sparse Validation**
+    - **Verification:** `matvec_mul_sparse` in `wgpu_backend.rs` confirms sparse capabilities.
+
+- [x] **Phase 1: RAM Offload Fallback**
+    - **Verification:** `wgpu_backend.rs` includes degradation state handling and fallback to dense computation, aligning with the offload strategy.
+
+- [x] **Phase 2: 4-Bit Logarithmic Quantization & Trajectory Prefetch**
+    - **Verification:** `cpu_engine.rs` contains kernels for `QuantizedU4` data types and references a `Prefetcher`.
+
+- [x] **SPANDA Integration**
+    - **Verification:** `src/planner/optimizer.rs` includes `PlannerDecision::SpandaSparse`, confirming it is a selectable execution path.
+
+---
+
+### **III. Other Notable Features**
+
+- [ ] **Adaptive Learning**
+    - **Status:** Partially Done
+    - **Verification:** Memory confidence updates and contradiction resolution are implemented in `src/cognitive/memory.rs`. Adapter learning is foundational but not fully mature.
+
+- [ ] **Activation Materialized Views (Sprint 7)**
+    - **Status:** Done but deferred
+    - **Verification:** `src/planner/optimizer.rs` integrates logic for `has_activation_view`, but the feature is deferred to v0.5 in the roadmap.
 
 ---
 
 ## 🚀 What's Next? (AI Suggestions & Optimizations)
 
-With Sprints 1 through 11 and SPANDA completely architected, compiled, and integrated, the engine's skeleton is 100% complete. Here are the immediate actionable next steps and optimizations for upcoming work:
+With the core engine largely complete, focus should shift to validation, performance tuning, and maturing partially implemented features.
 
-### 1. 🗜️ Advanced Model Quantization & Format Polish
-- [x] **Run `spanda-convert` on a real model:** Convert `models/all-MiniLM-L6-v2/model.safetensors` to `models/all-MiniLM-L6-v2/model.spanda` using the new toolchain.
-- [x] **SVD Factorization Module:** The storage strategy documentation mentions SVD factorization for 35-50% savings. We can implement a randomized SVD breakdown algorithm during model ingestion to shrink huge FFN projection matrices.
-- [x] **Differential / Delta Compression:** Store multiple model finetunes as a single base model plus highly compressed delta tensors.
-  - [x] **BRM-DELTA-001: Delta Calculation & Encoding Engine:** Core differential tensor module (`src/storage/differential_compression.rs`) with residual diff calculation, thresholding/sparse delta encoding, and reconstruction logic.
-  - [x] **BRM-DELTA-002: Inter-Layer & Inter-Model Delta Storage Manager:** Multi-layer delta chains and finetune delta manifest tracking integrated with `StorageManifest` and `ContentAddressedStorage`.
-  - [x] **BRM-DELTA-003: TensorDB & Safetensors Loading Integration:** Decompression integration into `TensorDB` / `safetensors_loader` streaming path with unit tests and benchmarks.
+### 1. 🎯 Complete and Validate Partially Implemented Features
+- [ ] **Graph DB Implementation:**
+    - Flesh out the `ResearchGraph` in `src/cognitive/research.rs`.
+    - Implement multi-hop graph traversal for complex queries.
+- [ ] **Benchmark Storage Layer:**
+    - Create a new, reliable benchmark test to validate the performance claims of the storage manifest and deduplication features, as the original benchmarks in `sprint9_benchmark_report.md` were inconclusive.
+- [ ] **Mature Adaptive Learning:**
+    - Move beyond memory-level adaptations and implement full adapter learning pipelines for model tuning.
 
-### 2. ⚡ VRAM Management & Engine Stress Testing
-- [x] **End-to-End OOM Stress Test:** Spin up a simulated high-throughput concurrent load test (10+ parallel requests) routing to SPANDA and the WGPU dense backend. Monitor memory bounds to ensure the engine gracefully degrades to RAM offload instead of crashing.
-  - [x] **BRM-OOM-001: High-Concurrency Load Simulator:** Multi-threaded parallel load generator submitting 15+ concurrent requests to SPANDA and WGPU backends.
-  - [x] **BRM-OOM-002: Memory Bound & Graceful Degradation Verification:** Verify queue throttling, backpressure handling, and graceful RAM offload under peak VRAM saturation without process crashes.
-  - [x] **BRM-OOM-003: Comprehensive Stress Validation Suite:** Complete integration in `tests/oom_stability_validation.rs` testing sustained high-throughput burst traffic.
-- [x] **WGPU Pipeline Caching Optimization:** Ensure `wgpu` pipelines generated during sparse kernel execution are strictly cached to disk using `bincode`. This prevents shader recompilation latency on every cold start.
-  - [x] **BRM-CACHE-001: Pipeline Cache Persistence:** Implement serialization and deserialization of the WGPU Pipeline Cache blob using `bincode` on disk (`gemm_sparse_cache.bin`).
-  - [x] **BRM-CACHE-002: Cache Injection:** Update `device.create_compute_pipeline` to utilize the loaded `wgpu::PipelineCache` during sparse kernel initialization.
-  - [x] **BRM-CACHE-003: Cache Extraction:** Extract the newly compiled binary data from the pipeline cache and persist it back to disk.
+### 2. 🌐 Distributed & Serverless Features (Bramha Hyperscale)
+- [ ] **Distributed Layer Splitting (Sprint 12+):**
+    - **BRM-NET-001:** Define `proto/bramha.proto` for remote tensor execution.
+    - **BRM-NET-002:** Implement gRPC server in `src/network/server.rs`.
+    - **BRM-NET-003:** Implement `RemoteBackend` client.
+- [ ] **WebRTC P2P Intelligence:**
+    - **BRM-NET-004:** Create `GossipWorker` in `src/network/gossip.rs`.
+    - **BRM-NET-005:** Implement KV cache synchronization protocol.
 
-### 3. 🧠 Cognitive Loop Maturation
-- [x] **Self-Reflection & Rollback Pipelines:** We have memory confidence updating and contradiction detection. Next step: allow the AI agent to explicitly *retract* answers and notify the RAG UI when an episodic memory is proven false.
-- [x] **Graph Visualization Endpoint:** Add an Axum API route to export the `ResearchGraph` and `Memory` connections to a JSON format compatible with a visualization library (e.g., D3.js or React Flow) in the dashboard.
+### 3. 🗜️ Advanced Model Quantization & Format Polish
+- [ ] **Run `spanda-convert` on a real model:** Convert `models/all-MiniLM-L6-v2/model.safetensors`.
+- [ ] **Implement SVD Factorization Module:** Implement randomized SVD for FFN matrix decomposition.
+- [ ] **Implement Differential / Delta Compression:**
+    - **BRM-DELTA-001:** Core differential tensor module in `src/storage/differential_compression.rs`.
+    - **BRM-DELTA-002:** Delta storage manager integrated with `StorageManifest`.
+    - **BRM-DELTA-003:** Decompression integration into `TensorDB` loader.
 
-### 4. 🌐 Distributed & Serverless Features (Bramha Hyperscale)
-- [x] **Distributed Layer Splitting (Sprint 12+):** Implement TCP/gRPC layer execution handoffs, allowing two machines with 4GB GPUs to act as a single 8GB GPU.
-  - [x] **BRM-NET-001: gRPC Protobuf Definitions:** Define `proto/bramha.proto` for remote tensor execution and layer handoff requests.
-  - [x] **BRM-NET-002: Tonic Server Implementation:** Implement the gRPC receiver in `src/network/server.rs` to accept remote layer computation tasks.
-  - [x] **BRM-NET-003: Remote Backend Client:** Implement a `RemoteBackend` that conforms to the computation trait and routes requests to the gRPC server.
-- [x] **WebRTC P2P Intelligence:** Enable multiple instances of Bramha on a local network to securely gossip KV caches and semantic memories.
-  - [x] **BRM-NET-004: UDP/WebRTC Gossip Node:** Create a background `GossipWorker` in `src/network/gossip.rs` for peer discovery.
-  - [x] **BRM-NET-005: KV Cache Sharing Protocol:** Implement the synchronization protocol to broadcast semantic memory vectors across peers.
+### 4. ⚡ VRAM Management & Engine Stress Testing
+- [ ] **BRM-OOM-001:** High-concurrency load simulator (15+ requests).
+- [ ] **BRM-OOM-002:** Verify graceful RAM offload under VRAM saturation.
+- [ ] **BRM-OOM-003:** Complete `oom_stability_validation.rs` test suite.
+- [ ] **BRM-CACHE-001/002/003:** Verify WGPU pipeline cache persistence and integration.
 
 ---
 

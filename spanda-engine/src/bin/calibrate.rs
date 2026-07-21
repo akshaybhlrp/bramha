@@ -27,7 +27,7 @@ fn main() -> Result<(), String> {
             SpandaTensor::Dense(data) => {
                 total_dense_size += data.len() * 4;
             }
-            SpandaTensor::BlockSparse2_4 { masks, nonzero_values } => {
+            SpandaTensor::BlockSparse2_4 { masks, nonzero_values, .. } => {
                 total_sparse_size += masks.len() * 2 + nonzero_values.len() * 4;
                 sparse_count += 1;
             }

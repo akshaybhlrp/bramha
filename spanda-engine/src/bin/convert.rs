@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use safetensors::SafeTensors;
-use spanda_engine::{ModelMetadata, SpandaModel, SpandaTensor, pack_4x4_block};
+use spanda_engine::{ModelMetadata, SpandaModel, SpandaTensor};
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
@@ -55,38 +54,41 @@ fn main() -> Result<(), String> {
 
         // Apply 2:4 block sparsity optimization on MLP/Projection layers
         let spanda_tensor = if name.contains("mlp") || name.contains("proj") {
-            if f32_data.len() % 16 == 0 {
-                let num_blocks = f32_data.len() / 16;
-                let mut masks = Vec::with_capacity(num_blocks);
+            if f32_data.len() % 4 == 0 {
+                let num_chunks = f32_data.len() / 4;
+                let mut masks = Vec::with_capacity(num_chunks);
                 let mut values = Vec::new();
 
-                for b in 0..num_blocks {
-                    let start = b * 16;
-                    let mut block = [0.0f32; 16];
-                    block.copy_from_slice(&f32_data[start..start + 16]);
+                for i in 0..num_chunks {
+                    let start = i * 4;
+                    let mut chunk = [
+                        (0, f32_data[start].abs()),
+                        (1, f32_data[start + 1].abs()),
+                        (2, f32_data[start + 2].abs()),
+                        (3, f32_data[start + 3].abs()),
+                    ];
 
-                    // Apply 2:4 sparsity: set 2 smallest absolute elements to 0
-                    let mut indexed_block: Vec<(usize, f32)> = block.iter().copied().enumerate().collect();
-                    indexed_block.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
-                    
-                    // Zero out indices beyond the top 2
-                    for k in 2..16 {
-                        block[indexed_block[k].0] = 0.0;
+                    chunk.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                    let mut mask: u16 = 0;
+
+                    // Keep top 2 indices with largest absolute magnitude
+                    for k in 0..2 {
+                        let original_index = chunk[k].0;
+                        mask |= 1 << original_index;
                     }
-
-                    // Pack into mask
-                    let mask = pack_4x4_block(&block);
                     masks.push(mask);
 
-                    // Push non-zeros
-                    for j in 0..16 {
-                        if (mask & (1 << j)) != 0 {
-                            values.push(block[j]);
+                    // Push non-zero values in index order (0..4) matching mask bits
+                    for bit in 0..4 {
+                        if (mask & (1 << bit)) != 0 {
+                            values.push(f32_data[start + bit]);
                         }
                     }
                 }
-                
+
                 SpandaTensor::BlockSparse2_4 {
+                    shape: shape.clone(),
                     masks,
                     nonzero_values: values,
                 }

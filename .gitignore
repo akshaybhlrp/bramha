@@ -25,3 +25,8 @@
 /tmp_s10.md
 *.db-shm
 *.db-wal
+*.vsix
+fix.patch
+/can you work on remaining tasks and finish them/*
+MASTER_CHECKLIST.md
+calm-honking-aho.md
